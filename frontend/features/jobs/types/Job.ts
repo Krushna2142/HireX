@@ -5,5 +5,4 @@ export interface Job {
   location?: string;
   postedAt?: string;
   skills?: string[];
-  description?: string;
 }

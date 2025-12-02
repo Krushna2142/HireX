@@ -1,7 +1,16 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  reactStrictMode: true,
+  async redirects() {
+    return [
+      {
+        source: '/dasboard',
+        destination: '/dashboard',
+        permanent: false
+      }
+    ];
+  }
 };
 
 export default nextConfig;
