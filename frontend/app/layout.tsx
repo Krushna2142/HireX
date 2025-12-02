@@ -1,6 +1,8 @@
 import './globals.css';
 import AppShell from './_components/AppShell';
 import { ReactQueryProvider } from './_providers/ReactQueryProvider';
+import { ThemeProvider } from './_providers/ThemeProvider';
+import { PreloadThemeScript } from './_providers/PreloadThemeScript';
 
 export const metadata = {
   title: 'Job Intelligence Platform',
@@ -10,10 +12,15 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <PreloadThemeScript />
+      </head>
       <body className="bg-bg text-text">
-        <ReactQueryProvider>
-          <AppShell>{children}</AppShell>
-        </ReactQueryProvider>
+        <ThemeProvider>
+          <ReactQueryProvider>
+            <AppShell>{children}</AppShell>
+          </ReactQueryProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
