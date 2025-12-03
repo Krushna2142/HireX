@@ -1,10 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-type Recognition = typeof window extends any
-  ? (window as any).webkitSpeechRecognition | SpeechRecognition | undefined
-  : undefined;
+type Recognition = any;
 
 declare global {
   interface Window {

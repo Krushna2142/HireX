@@ -4,7 +4,7 @@ import { useAuth } from "@/components/user-auth-provider";
 import { Loader2, LogIn } from "lucide-react";
 
 export default function SignInButton() {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const { user, loading, signIn, logout } = useAuth();
 
   if (loading) {
     return (
@@ -21,11 +21,11 @@ export default function SignInButton() {
   if (user) {
     return (
       <button
-        onClick={signOut}
+        onClick={logout}
         className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
       >
         <img
-          src={user.photoURL ?? ""}
+          src={user.photo ?? ""}
           alt="avatar"
           className="h-5 w-5 rounded-full"
         />
@@ -36,7 +36,7 @@ export default function SignInButton() {
 
   return (
     <button
-      onClick={signInWithGoogle}
+      onClick={signIn}
       className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
     >
       <LogIn className="h-4 w-4" />
