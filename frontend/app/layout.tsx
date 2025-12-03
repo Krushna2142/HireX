@@ -1,7 +1,7 @@
 import './globals.css';
 import { ThemeProvider } from 'next-themes';
 import { ReactQueryProvider } from './_providers/ReactQueryProvider';
-import AdvancedShell from './_components/AdvancedShell';
+import Navbar from '@/components/navigation/Navbar';
 import { AuthProvider } from '@/components/user-auth-provider';
 
 export const metadata = {
@@ -15,9 +15,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans antialiased bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="ji-theme">
           <AuthProvider>
-          <ReactQueryProvider>
-            <AdvancedShell>{children}</AdvancedShell>
-          </ReactQueryProvider>
+            <ReactQueryProvider>
+              <Navbar />
+              {children}
+            </ReactQueryProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

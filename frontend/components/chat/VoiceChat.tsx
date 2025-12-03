@@ -39,7 +39,7 @@ function useSpeechRecognition(lang = 'en-US') {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const recognitionRef = useRef<AnySpeechRecognition>();
+  const recognitionRef = useRef<AnySpeechRecognition | undefined>(undefined);
 
   useEffect(() => {
     // Detect either vendor or standard constructor safely

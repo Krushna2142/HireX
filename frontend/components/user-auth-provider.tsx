@@ -30,27 +30,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const signIn = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: unknown) {
+      // Phase 1: Show stub message for auth errors
+      console.log("Sign in stub - real Firebase auth not configured");
+      const err = error as { code?: string };
+      if (err?.code === "auth/invalid-api-key" || err?.code === "auth/popup-closed-by-user") {
+        alert("Firebase authentication is not fully configured yet. This is a Phase 1 stub.");
+      } else {
+        throw error;
+      }
+    }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Sign out error:", error);
+    }
   };
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        setUser({
-          uid: firebaseUser.uid,
-          name: firebaseUser.displayName,
-          email: firebaseUser.email,
-          photo: firebaseUser.photoURL,
-        });
-      } else setUser(null);
+    try {
+      return onAuthStateChanged(auth, (firebaseUser) => {
+        if (firebaseUser) {
+          setUser({
+            uid: firebaseUser.uid,
+            name: firebaseUser.displayName,
+            email: firebaseUser.email,
+            photo: firebaseUser.photoURL,
+          });
+        } else setUser(null);
 
+        setLoading(false);
+      });
+    } catch (error) {
+      console.error("Auth state change error:", error);
       setLoading(false);
-    });
+      return () => {};
+    }
   }, []);
 
   return (
