@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/user-auth-provider";
 import { ModeToggle } from "@/components/ModeToggle";
+import MegaMenu from "./MegaMenu";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 
@@ -17,9 +18,16 @@ export default function Navbar() {
     { href: "/recommendations", label: "Recommendations" },
     { href: "/resume", label: "Resume" },
     { href: "/mock-interview", label: "Mock Interview" },
-    { href: "/mock-interview/chat", label: "Interview Chat" },
-    { href: "/settings", label: "Settings" },
+    { href: "/dashboard", label: "Dashboard" }, // Now visible to all
   ];
+
+  const handleDashboardClick = (e: React.MouseEvent) => {
+    if (!user) {
+      e.preventDefault();
+      // Show toast or console message for Phase 1
+      alert("Please sign in to access the Dashboard");
+    }
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-sm border-b border-border">
@@ -30,33 +38,43 @@ export default function Navbar() {
         </Link>
 
         <nav className="hidden md:flex items-center gap-6">
-          {links.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`${
-                pathname === item.href
-                  ? "text-primary underline"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
-
-          {/* SHOW DASHBOARD ONLY IF LOGGED IN */}
-          {user && (
-            <Link
-              href="/dashboard"
-              className={`${
-                pathname === "/dashboard"
-                  ? "text-primary underline"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Dashboard
-            </Link>
-          )}
+          <MegaMenu />
+          
+          {links.map((item) => {
+            const isActive = pathname === item.href;
+            const isDashboard = item.href === "/dashboard";
+            
+            if (isDashboard) {
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={handleDashboardClick}
+                  className={`${
+                    isActive
+                      ? "text-primary underline"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            }
+            
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`${
+                  isActive
+                    ? "text-primary underline"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="flex items-center gap-3">
@@ -65,17 +83,26 @@ export default function Navbar() {
           {!user ? (
             <button
               onClick={signIn}
-              className="px-4 py-2 bg-primary text-white rounded-md"
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground shadow-sm hover:bg-primary/90 transition"
             >
-              Sign In
+              Sign in with Google
             </button>
           ) : (
-            <button
-              onClick={logout}
-              className="px-4 py-2 bg-red-500 text-white rounded-md"
-            >
-              Logout
-            </button>
+            <div className="flex items-center gap-2">
+              {user.photo && (
+                <img
+                  src={user.photo}
+                  alt={user.name || "User"}
+                  className="h-8 w-8 rounded-full"
+                />
+              )}
+              <button
+                onClick={logout}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted transition"
+              >
+                Sign out
+              </button>
+            </div>
           )}
 
           <button
@@ -86,6 +113,34 @@ export default function Navbar() {
           </button>
         </div>
       </div>
+      
+      {/* Mobile menu */}
+      {open && (
+        <div className="md:hidden border-t border-border bg-background/95 backdrop-blur">
+          <nav className="flex flex-col gap-2 p-4">
+            {links.map((item) => {
+              const isDashboard = item.href === "/dashboard";
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={(e) => {
+                    if (isDashboard) handleDashboardClick(e);
+                    setOpen(false);
+                  }}
+                  className={`${
+                    pathname === item.href
+                      ? "text-primary font-medium"
+                      : "text-muted-foreground hover:text-foreground"
+                  } px-2 py-2 rounded-md hover:bg-muted transition`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      )}
     </header>
   );
 }
