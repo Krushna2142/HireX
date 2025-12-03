@@ -16,11 +16,12 @@
     "baseUrl": ".",
     "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": ["./*"],
-      "@hooks/*": ["hooks/*"],
-      "@components/*": ["components/*"],
-      "@features/*": ["features/*"],
-      "@lib/*": ["lib/*"]
+        "@/*": ["./*"],
+  "@/app/*": ["app/*"],
+  "@/components/*": ["components/*"],
+  "@/features/*": ["features/*"],
+  "@/lib/*": ["lib/*"],
+  "@/hooks/*": ["hooks/*"]
     }
   },
   "include": [

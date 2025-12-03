@@ -1,20 +1,24 @@
 import './globals.css';
-import { ThemeProvider } from './_providers/ThemeProvider';
+import { ThemeProvider } from 'next-themes';
 import { ReactQueryProvider } from './_providers/ReactQueryProvider';
-import AppShell from './_components/AppShell';
-import PreloadThemeScript from './_providers/PreloadThemeScript';
+import AdvancedShell from './_components/AdvancedShell';
+import { AuthProvider } from '@/components/user-auth-provider';
+
+export const metadata = {
+  title: 'JobCrawler',
+  description: 'JobCrawler — Discover, filter, and track jobs with an AI-first experience.',
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <PreloadThemeScript />
-      </head>
-      <body className="font-sans antialiased">
-        <ThemeProvider>
+      <body className="font-sans antialiased bg-background text-foreground">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="ji-theme">
+          <AuthProvider>
           <ReactQueryProvider>
-            <AppShell>{children}</AppShell>
+            <AdvancedShell>{children}</AdvancedShell>
           </ReactQueryProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

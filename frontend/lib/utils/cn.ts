@@ -1,4 +1,3 @@
-// Simple className combiner (could use clsx)
-export function cn(...classes: (string | undefined | null | false)[]) {
-  return classes.filter(Boolean).join(' ');
+export function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }

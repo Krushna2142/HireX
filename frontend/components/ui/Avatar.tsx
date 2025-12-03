@@ -8,7 +8,7 @@ export function Avatar({ name }: { name: string }) {
     .slice(0, 2)
     .toUpperCase();
   return (
-    <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 text-sm font-semibold text-white shadow-md">
+    <div className="grid h-10 w-10 place-items-center rounded-full bg-linear-to-br from-indigo-500 to-purple-500 text-sm font-semibold text-white shadow-md">
       {initials}
     </div>
   );

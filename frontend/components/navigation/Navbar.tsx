@@ -1,78 +1,91 @@
-'use client';
-import Link from 'next/link';
-import { useState } from 'react';
-import { Menu, X } from 'lucide-react';
-import ThemeToggle from './ThemeToggle';
-import { usePathname } from 'next/navigation';
+"use client";
 
-const links = [
-  { href: '/jobs', label: 'Jobs' },
-  { href: '/recommendations', label: 'Recommendations' },
-  { href: '/resume', label: 'Resume' },
-  { href: '/interview', label: 'Mock Interview' },
-  { href: '/settings', label: 'Settings' },
-  { href: '/dashboard', label: 'Dashboard' }
-];
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useAuth } from "@/components/user-auth-provider";
+import { ModeToggle } from "@/components/ModeToggle";
+import { Menu, X } from "lucide-react";
+import { useState } from "react";
 
 export default function Navbar() {
-  const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const { user, signIn, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+
+  const links = [
+    { href: "/jobs", label: "Jobs" },
+    { href: "/recommendations", label: "Recommendations" },
+    { href: "/resume", label: "Resume" },
+    { href: "/mock-interview", label: "Mock Interview" },
+    { href: "/mock-interview/chat", label: "Interview Chat" },
+    { href: "/settings", label: "Settings" },
+  ];
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur dark:bg-neutral-950/80">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-8">
-        <div className="flex items-center gap-6">
-          <Link href="/" className="text-lg font-semibold tracking-tight">
-            JobIntelligence
-          </Link>
-          <nav className="hidden items-center gap-5 text-sm md:flex">
-            {links.map(l => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={`relative transition ${
-                  pathname === l.href ? 'text-indigo-600 dark:text-indigo-400' : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                {l.label}
-                {pathname === l.href && (
-                  <span className="absolute -bottom-1 left-0 h-[2px] w-full rounded bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
-                )}
-              </Link>
-            ))}
-          </nav>
-        </div>
+    <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-sm border-b border-border">
+      <div className="mx-auto max-w-7xl flex items-center justify-between px-4 py-3">
+        
+        <Link href="/" className="font-bold text-lg tracking-tight">
+          JobCrawler
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-6">
+          {links.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`${
+                pathname === item.href
+                  ? "text-primary underline"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+
+          {/* SHOW DASHBOARD ONLY IF LOGGED IN */}
+          {user && (
+            <Link
+              href="/dashboard"
+              className={`${
+                pathname === "/dashboard"
+                  ? "text-primary underline"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Dashboard
+            </Link>
+          )}
+        </nav>
+
         <div className="flex items-center gap-3">
-          <ThemeToggle />
+          <ModeToggle />
+
+          {!user ? (
+            <button
+              onClick={signIn}
+              className="px-4 py-2 bg-primary text-white rounded-md"
+            >
+              Sign In
+            </button>
+          ) : (
+            <button
+              onClick={logout}
+              className="px-4 py-2 bg-red-500 text-white rounded-md"
+            >
+              Logout
+            </button>
+          )}
+
           <button
-            className="md:hidden inline-flex items-center rounded-md border px-2 py-2 hover:bg-black/5 dark:hover:bg-white/10"
-            onClick={() => setOpen(o => !o)}
-            aria-label="Toggle menu"
+            className="md:hidden"
+            onClick={() => setOpen(!open)}
           >
-            {open ? <X size={18} /> : <Menu size={18} />}
+            {open ? <X /> : <Menu />}
           </button>
         </div>
       </div>
-      {open && (
-        <div className="md:hidden border-t bg-white/95 px-4 py-4 dark:bg-neutral-950/95">
-          <div className="grid gap-3 text-sm">
-            {links.map(l => (
-              <Link
-                key={l.href}
-                href={l.href}
-                onClick={() => setOpen(false)}
-                className={`rounded px-3 py-2 ${
-                  pathname === l.href
-                    ? 'bg-indigo-600/10 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200'
-                    : 'hover:bg-black/5 dark:hover:bg-white/10'
-                }`}
-              >
-                {l.label}
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
     </header>
   );
 }

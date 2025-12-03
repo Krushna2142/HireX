@@ -1,56 +1,87 @@
 'use client';
-import { Sparkles, Flame, TrendingUp } from 'lucide-react';
+
+import { useMemo, useState } from 'react';
+import { RecommendationCard } from '../../components/recommendations/RecommendationCard';
+
+type Recommendation = {
+  id: string;
+  title: string;
+  score: number;
+  subtitle?: string;
+};
+
+const mockData: Recommendation[] = [
+  { id: '1', title: 'Senior Data Engineer', score: 87, subtitle: 'High overlap: Python, ETL' },
+  { id: '2', title: 'ML Platform Engineer', score: 81, subtitle: 'Skills: Kubernetes, Model Ops' },
+  { id: '3', title: 'Recommendation Systems Engineer', score: 77, subtitle: 'Semantic: vector search' }
+];
 
 export default function RecommendationsPage() {
-  const mock = [
-    { id: 'r1', title: 'Senior Data Engineer', match: 87, rationale: 'High overlap: Python, ETL' },
-    { id: 'r2', title: 'ML Platform Engineer', match: 81, rationale: 'Skills: Kubernetes, Model Ops' },
-    { id: 'r3', title: 'Recommendation Systems Engineer', match: 77, rationale: 'Semantic: vector search' }
-  ];
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return mockData;
+    return mockData.filter((r) => r.title.toLowerCase().includes(q));
+  }, [query]);
+
   return (
-    <div className="space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-          <Sparkles className="text-indigo-600 dark:text-indigo-400" /> Recommendations
-        </h1>
-        <p className="text-sm opacity-70">Personalized roles ranked by skill + semantic fit.</p>
-      </header>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {mock.map(r => (
-          <div
+    <main className="mx-auto max-w-6xl px-4 py-10">
+      <h1 className="text-3xl font-bold">Recommendations</h1>
+      <p className="mt-2 max-w-2xl text-muted-foreground">
+        Personalized roles ranked by skill + semantic fit.
+      </p>
+
+      <div className="mt-5">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search recommendations…"
+          className="w-full max-w-md rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </div>
+
+      <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {filtered.map((r) => (
+          <RecommendationCard
             key={r.id}
-            className="group relative rounded-xl border bg-white/70 p-5 shadow-sm ring-1 ring-black/5 backdrop-blur hover:shadow-md dark:bg-neutral-900/70 dark:ring-white/10"
-          >
-            <div className="flex items-start justify-between">
-              <h3 className="font-semibold">{r.title}</h3>
-              <span className="rounded-full bg-indigo-600/15 px-2 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">
-                {r.match}%
-              </span>
-            </div>
-            <p className="mt-2 text-xs opacity-70">{r.rationale}</p>
-            <div className="absolute inset-x-0 bottom-0 h-[2px] scale-x-0 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 transition group-hover:scale-x-100" />
-          </div>
+            title={r.title}
+            score={`${r.score}%`}
+            subtitle={r.subtitle}
+          />
         ))}
       </div>
-      <section className="rounded-xl border p-6 space-y-2 text-sm">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <TrendingUp size={18} /> How scoring works (placeholder)
-        </h2>
-        <ul className="list-disc pl-5 space-y-1 opacity-80">
+
+      <section className="mt-10 rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-card-foreground">How scoring works (placeholder)</h2>
+        <ul className="mt-3 list-disc space-y-2 pl-6 text-sm text-muted-foreground">
           <li>Skill vector overlap (hard + soft)</li>
           <li>Semantic transformer similarity</li>
           <li>Recent activity weighting</li>
           <li>Resume gap penalty</li>
         </ul>
       </section>
-      <section className="rounded-xl border p-6 space-y-2">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Flame size={18} /> Improve Your Match
-        </h2>
-        <p className="text-sm opacity-70">
+
+      <section className="mt-8 rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-card-foreground">Improve Your Match</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
           Upload your resume and fill missing skill tags to boost recommendation accuracy.
         </p>
+        <div className="mt-4 flex gap-3">
+          <a
+            href="/resume"
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground shadow-sm hover:bg-primary/90"
+          >
+            Upload Resume
+          </a>
+          <a
+            href="/dashboard"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm hover:bg-muted"
+          >
+            Go to Dashboard
+          </a>
+        </div>
       </section>
-    </div>
+    </main>
   );
 }

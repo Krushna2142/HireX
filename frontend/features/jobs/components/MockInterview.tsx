@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { TextArea } from '@/components/ui/TextArea';
+import { Textarea } from '@/components/ui/TextArea';
 import { ArrowUpCircle, MessageSquare } from 'lucide-react';
 
 interface ChatTurn {
@@ -62,7 +62,7 @@ export default function MockInterview() {
           )}
         </div>
         <div className="mt-5 space-y-3">
-          <TextArea
+          <Textarea
             rows={3}
             value={input}
             onChange={e => setInput(e.target.value)}
