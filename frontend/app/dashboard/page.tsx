@@ -1,49 +1,47 @@
-// app/dashboard/page.tsx
-import AdvancedShell from "../_components/AdvancedShell";
-import JobCard3D from "@/components/dashboard/JobCard3D";
-import NeonBlob from "@/components/visuals/NeonBlob";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+'use client';
+import { useHistory } from '@/features/resume/hooks/useHistory';
 
-export default function DashboardLanding() {
+export default function DashboardPage() {
+  const { data, isLoading, error, refetch } = useHistory('guest', 50);
+
   return (
-    <AdvancedShell>
-      <div className="relative overflow-hidden">
-        <NeonBlob className="left-6 top-6 h-96 w-96 from-indigo-300 to-pink-300 bg-gradient-to-tr" />
-        <section className="grid gap-6 md:grid-cols-3">
-          <div className="col-span-2 space-y-6">
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-sm glass">
-              <h2 className="text-2xl font-semibold">Hi, Krushna — your AI action plan</h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Smart recommendations and an adaptive job tracker — configure alerts and upload your resume to boost matches.
-              </p>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <JobCard3D title="Senior Backend Engineer" company="ExampleCorp" location="Remote" tags={["python","docker","postgres"]} />
-              <JobCard3D title="ML Engineer" company="AIlabs" location="Berlin" tags={["transformers","k8s"]} />
-            </div>
-          </div>
-
-          <aside className="space-y-6">
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-              <div className="text-sm font-medium">Resume & Profile</div>
-              <div className="mt-3 text-sm text-muted-foreground">Create a new resume to get started</div>
-              <div className="mt-4">
-                <button className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">Create New Base Resume</button>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-              <div className="text-sm font-medium">Progress</div>
-              <div className="mt-3">
-                <div className="h-3 w-full rounded bg-muted">
-                  <div className="h-3 w-1/3 rounded bg-primary" />
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">1 of 3 completed</div>
-              </div>
-            </div>
-          </aside>
-        </section>
+    <main className="max-w-5xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Analysis History</h1>
+        <button className="bg-blue-600 text-white px-3 py-1 rounded" onClick={() => refetch()}>Refresh</button>
       </div>
-    </AdvancedShell>
+
+      {isLoading && <p>Loading...</p>}
+      {error && <p className="text-red-600">{(error as any).message}</p>}
+
+      {data && data.length === 0 && <p>No analyses found.</p>}
+
+      {data && data.length > 0 && (
+        <ul className="space-y-4">
+          {data.map((item) => (
+            <li key={item.id} className="border rounded p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p><b>File:</b> {item.fileName}</p>
+                  <p className="text-sm text-gray-600"><b>Date:</b> {new Date(item.createdAt).toLocaleString()}</p>
+                </div>
+                <a
+                  href={`/recommendations?pageId=${item.id}`}
+                  className="bg-green-600 text-white px-3 py-1 rounded"
+                >
+                  View Recommendations
+                </a>
+              </div>
+
+              <details className="mt-3">
+                <summary className="cursor-pointer">Details</summary>
+                <pre className="bg-gray-100 p-3 rounded overflow-auto text-xs">{JSON.stringify(item.result, null, 2)}</pre>
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
+    </main>
   );
 }

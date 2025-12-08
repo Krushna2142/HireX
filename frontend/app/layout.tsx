@@ -1,12 +1,12 @@
 import './globals.css';
 import { ThemeProvider } from 'next-themes';
-import { ReactQueryProvider } from './_providers/ReactQueryProvider';
-import AdvancedShell from './_components/AdvancedShell';
-import { AuthProvider } from '@/components/user-auth-provider';
+import Navbar from '../components/navigation/Navbar';
+import { AuthProvider } from '../components/providers/AuthProvider';
+import ReactQueryProvider from './_providers/ReactQueryProvider';
 
 export const metadata = {
   title: 'JobCrawler',
-  description: 'JobCrawler — Discover, filter, and track jobs with an AI-first experience.',
+  description: 'AI Job Assistant • Jobs • Recommendations • Resume • Mock Interview • Chatbot • Dashboard',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -14,11 +14,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="ji-theme">
-          <AuthProvider>
           <ReactQueryProvider>
-            <AdvancedShell>{children}</AdvancedShell>
-          </ReactQueryProvider>
+          <AuthProvider>
+            <Navbar />
+            {children}
           </AuthProvider>
+          </ReactQueryProvider>
         </ThemeProvider>
       </body>
     </html>

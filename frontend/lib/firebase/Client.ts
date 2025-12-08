@@ -1,0 +1,76 @@
+// Client-only Firebase initializer for Next.js
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAnalytics, isSupported } from 'firebase/analytics';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
+
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? '',
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? '',
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? '',
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? '',
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? '',
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? '',
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID ?? '',
+};
+
+function maskKey(key = '') {
+  if (!key) return '(missing)';
+  if (key.length <= 8) return key.replace(/.(?=.{2})/g, '*');
+  return key.slice(0, 4) + key.slice(4, -4).replace(/./g, '*') + key.slice(-4);
+}
+
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+   
+  console.info('[firebase] apiKey:', maskKey(firebaseConfig.apiKey));
+  if (!firebaseConfig.apiKey) {
+     
+    console.error('[firebase] NEXT_PUBLIC_FIREBASE_API_KEY is not set. Add it to .env.local and restart the dev server.');
+  }
+}
+
+function ensureClientApp() {
+  if (typeof window === 'undefined') {
+    throw new Error('Firebase client should only be imported on the client side.');
+  }
+  if (!getApps().length) {
+    initializeApp(firebaseConfig);
+  }
+  return getApps()[0]!;
+}
+
+export function getFirebaseApp() {
+  return ensureClientApp();
+}
+
+export function getFirebaseAuth() {
+  const app = ensureClientApp();
+  return getAuth(app);
+}
+
+export function getFirebaseFirestore() {
+  const app = ensureClientApp();
+  return getFirestore(app);
+}
+
+export function getFirebaseStorage() {
+  const app = ensureClientApp();
+  return getStorage(app);
+}
+
+export async function initAnalyticsIfAvailable() {
+  if (typeof window === 'undefined') return null;
+  if (!firebaseConfig.measurementId) return null;
+  try {
+    if (await isSupported()) {
+      const app = ensureClientApp();
+      return getAnalytics(app);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export const googleProvider = new GoogleAuthProvider();

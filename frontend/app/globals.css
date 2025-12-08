@@ -1,84 +1,55 @@
 @import "tailwindcss";
 
-/* Light/Dark palettes tuned for readability and aesthetics */
+/* Keep variables light; these are examples. Adjust to taste. */
 :root {
   --background: 0 0% 100%;
   --foreground: 222 47% 11%;
-
   --card: 0 0% 100%;
   --card-foreground: 222 47% 11%;
-
   --popover: 0 0% 100%;
   --popover-foreground: 222 47% 11%;
-
-  /* Brand: indigo-violet */
   --primary: 248 70% 58%;
   --primary-foreground: 0 0% 100%;
-
   --secondary: 220 14% 96%;
   --secondary-foreground: 222 47% 11%;
-
   --muted: 220 14% 96%;
   --muted-foreground: 220 10% 46%;
-
   --accent: 258 90% 66%;
   --accent-foreground: 222 47% 11%;
-
   --destructive: 0 80% 56%;
   --destructive-foreground: 0 0% 98%;
-
   --border: 220 13% 88%;
   --input: 220 13% 90%;
   --ring: 248 70% 58%;
-
-  /* Elevation */
-  --surface-1: 0 0% 100%;
-  --surface-2: 220 14% 97%;
-  --surface-3: 220 14% 95%;
-
   --radius: 0.75rem;
 }
-
-/* Dark theme tuned for rich contrast with soft surfaces */
 .dark {
   --background: 222 15% 7%;
   --foreground: 210 20% 98%;
-
   --card: 222 16% 10%;
   --card-foreground: 210 20% 98%;
-
   --popover: 222 16% 10%;
   --popover-foreground: 210 20% 98%;
-
   --primary: 248 85% 68%;
   --primary-foreground: 222 16% 10%;
-
   --secondary: 222 16% 14%;
   --secondary-foreground: 210 20% 98%;
-
   --muted: 222 16% 14%;
   --muted-foreground: 220 10% 70%;
-
   --accent: 258 95% 72%;
   --accent-foreground: 222 16% 10%;
-
   --destructive: 0 72% 54%;
   --destructive-foreground: 210 20% 98%;
-
   --border: 222 14% 24%;
   --input: 222 14% 24%;
   --ring: 248 85% 68%;
-
-  --surface-1: 222 16% 10%;
-  --surface-2: 222 15% 12%;
-  --surface-3: 222 14% 16%;
 }
 
-/* Base element theming */
+/* Base */
 *, ::before, ::after { border-color: hsl(var(--border)); }
 body { background-color: hsl(var(--background)); color: hsl(var(--foreground)); }
 
-/* Page background subtle gradient wash for hero/landing */
+/* Optional hero wash */
 .page-gradient {
   background:
     radial-gradient(600px 300px at 15% 0%, rgba(99,102,241,0.12), transparent),
@@ -88,48 +59,4 @@ body { background-color: hsl(var(--background)); color: hsl(var(--foreground)); 
   background:
     radial-gradient(600px 300px at 15% 0%, rgba(99,102,241,0.18), transparent),
     radial-gradient(600px 300px at 85% 0%, rgba(236,72,153,0.18), transparent);
-}
-/* 3D perspective container helper */
-.perspective-3d {
-  perspective: 1400px;
-  -webkit-perspective: 1400px;
-}
-
-/* glass layer helper */
-.glass {
-  background: linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0.40));
-  backdrop-filter: blur(8px) saturate(120%);
-  -webkit-backdrop-filter: blur(8px) saturate(120%);
-  border: 1px solid rgba(255,255,255,0.06);
-}
-
-/* dark-mode glass */
-.dark .glass {
-  background: linear-gradient(180deg, rgba(20,20,30,0.48), rgba(10,10,16,0.36));
-  border: 1px solid rgba(255,255,255,0.04);
-}
-
-/* neon accent underline utility */
-.neon-underline {
-  position: relative;
-}
-.neon-underline::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 40%;
-  bottom: -6px;
-  height: 3px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, rgba(124,58,237,0.9), rgba(99,102,241,0.7));
-  filter: blur(6px);
-  transition: right 220ms ease;
-}
-.neon-underline:hover::after { right: 0; }
-
-/* subtle 3d transform for card layers */
-.card-layer {
-  transform-style: preserve-3d;
-  transform-origin: center;
-  transition: transform 300ms cubic-bezier(.2,.9,.25,1);
 }

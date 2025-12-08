@@ -4,7 +4,7 @@ import React from "react";
 import { Bell, ChevronDown, UserCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ModeToggle } from "@/components/ModeToggle";
-import { useAuth } from "@/components/user-auth-provider"; // if you have
+import { useAuth } from "@/components/AuthProvider"; // if you have
 
 export default function Topbar() {
   const { user } = (typeof window !== "undefined" ? (require('@/components/user-auth-provider').useAuth?.() ?? {}) : {}) as any;

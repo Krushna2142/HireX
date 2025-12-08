@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@/components/user-auth-provider";
+import { useAuth } from "@/components/AuthProvider";
 import { Loader2, LogIn } from "lucide-react";
 
 export default function SignInButton() {

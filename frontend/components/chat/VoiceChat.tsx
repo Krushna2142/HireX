@@ -1,22 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-/* Fully typed, error-free VoiceChat component with voice in/out.
-   - Works without extra deps using Web Speech APIs (best on Chromium).
-   - Gracefully falls back to typing when recognition is unsupported.
-   - Uses token-based Tailwind classes (border-border, bg-card, etc.).
-*/
-
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Mic, MicOff, Send } from 'lucide-react';
-import { Button } from '../ui/Button';
 
-/* ============================================================================
-   Types and safe globals for SpeechRecognition / SpeechSynthesis (TS-friendly)
-   ========================================================================== */
-
-// A safe union type that avoids referencing bare SpeechRecognition,
-// which may not be in your TS lib setup.
 type AnySpeechRecognition =
   | (Window & typeof globalThis)['webkitSpeechRecognition']
   | (Window & typeof globalThis)['SpeechRecognition']
@@ -24,16 +11,10 @@ type AnySpeechRecognition =
 
 declare global {
   interface Window {
-    // Chromium typically exposes this
     webkitSpeechRecognition?: any;
-    // Some browsers expose the standard name
     SpeechRecognition?: any;
   }
 }
-
-/* ============================================================================
-   Hooks: Speech Recognition and Speech Synthesis
-   ========================================================================== */
 
 function useSpeechRecognition(lang = 'en-US') {
   const [supported, setSupported] = useState(false);
@@ -42,7 +23,6 @@ function useSpeechRecognition(lang = 'en-US') {
   const recognitionRef = useRef<AnySpeechRecognition>();
 
   useEffect(() => {
-    // Detect either vendor or standard constructor safely
     const ctor =
       (typeof window !== 'undefined' && (window as any).webkitSpeechRecognition) ||
       (typeof window !== 'undefined' && (window as any).SpeechRecognition);
@@ -93,85 +73,19 @@ function useSpeechRecognition(lang = 'en-US') {
   return { supported, listening, transcript, start, stop, setTranscript };
 }
 
-function useSpeechSynthesis(
-  voiceMatcher: (v: SpeechSynthesisVoice) => boolean = (v) => v.lang.startsWith('en')
-) {
-  const [supported, setSupported] = useState(false);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    setSupported(true);
-
-    const load = () => setVoices(window.speechSynthesis.getVoices());
-    load();
-    // Some browsers populate voices asynchronously
-    window.speechSynthesis.onvoiceschanged = load;
-
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-    };
-  }, []);
-
-  const speak = useCallback(
-    (text: string) => {
-      if (!supported) return;
-      try {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        const voice = voices.find(voiceMatcher) || voices[0];
-        if (voice) u.voice = voice;
-        u.rate = 1.0;
-        u.pitch = 1.0;
-        window.speechSynthesis.speak(u);
-      } catch {
-        // swallow synthesis errors
-      }
-    },
-    [supported, voices, voiceMatcher]
-  );
-
-  const cancel = useCallback(() => {
-    try {
-      window.speechSynthesis.cancel();
-    } catch {}
-  }, []);
-
-  return { supported, voices, speak, cancel };
-}
-
-/* ============================================================================
-   Types for messages
-   ========================================================================== */
-type Msg = { role: 'user' | 'assistant'; content: string };
-
-/* ============================================================================
-   Component
-   ========================================================================== */
 export default function VoiceChat() {
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: 'assistant',
-      content:
-        'Welcome to JobCrawler mock interview. Press the mic, answer questions, and I will follow up like a real interviewer. Ready?',
-    },
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([
+    { role: 'assistant', content: 'Welcome to the mock interview. Press the mic or type and hit send.' },
   ]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-
-  // Speech hooks
   const asr = useSpeechRecognition('en-US');
-  const tts = useSpeechSynthesis((v) => v.lang.startsWith('en') && /Female|Google UK English Female/i.test(v.name));
 
-  // Put recognized speech into the input when listening ends
   useEffect(() => {
-    if (!asr.listening && asr.transcript) {
-      setInput(asr.transcript);
-    }
+    if (!asr.listening && asr.transcript) setInput(asr.transcript);
   }, [asr.listening, asr.transcript]);
 
-  // Auto-scroll the message list
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, pending]);
@@ -179,11 +93,9 @@ export default function VoiceChat() {
   async function sendUser(text: string) {
     const value = text.trim();
     if (!value) return;
-
     setMessages((prev) => [...prev, { role: 'user', content: value }]);
     setInput('');
     setPending(true);
-
     try {
       const res = await fetch('/api/mock-interview', {
         method: 'POST',
@@ -192,12 +104,9 @@ export default function VoiceChat() {
       });
       const data = await res.json();
       const reply = (data?.reply as string) || 'Thanks, could you elaborate on that?';
-
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
-      tts.speak(reply);
     } catch {
-      const fallback = 'Network issue. Please try again.';
-      setMessages((prev) => [...prev, { role: 'assistant', content: fallback }]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Network issue. Please try again.' }]);
     } finally {
       setPending(false);
     }
@@ -206,16 +115,14 @@ export default function VoiceChat() {
   const disabled = pending || asr.listening;
 
   return (
-    <div className="mx-auto grid h-[calc(100vh-8rem)] max-w-5xl grid-rows-[1fr_auto] rounded-xl border border-border bg-card/70 backdrop-blur">
-      {/* Messages */}
-      <div ref={listRef} className="scrollable grid gap-4 overflow-auto p-4">
+    <div className="mx-auto grid h-[calc(100vh-12rem)] max-w-5xl grid-rows-[1fr_auto] rounded-xl border border-border bg-card/70 backdrop-blur">
+      <div ref={listRef} className="grid gap-4 overflow-auto p-4">
         {messages.map((m, i) => (
           <Bubble key={i} role={m.role} text={m.content} />
         ))}
         {pending && <Bubble role="assistant" text="Typing…" subtle />}
       </div>
 
-      {/* Composer */}
       <div className="flex items-center gap-2 border-t border-border p-3">
         <button
           className={[
@@ -242,32 +149,20 @@ export default function VoiceChat() {
           className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-0 placeholder:text-muted-foreground focus:border-border focus:ring-0"
         />
 
-        <Button
-          variant="outline"
-          className="h-10 px-3"
+        <button
+          className="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-3 text-sm hover:bg-muted disabled:opacity-50"
           onClick={() => sendUser(input)}
           disabled={disabled && !input}
           aria-label="Send message"
         >
           <Send size={16} />
-        </Button>
+        </button>
       </div>
     </div>
   );
 }
 
-/* ============================================================================
-   Bubble
-   ========================================================================== */
-function Bubble({
-  role,
-  text,
-  subtle = false,
-}: {
-  role: 'user' | 'assistant';
-  text: string;
-  subtle?: boolean;
-}) {
+function Bubble({ role, text, subtle = false }: { role: 'user' | 'assistant'; text: string; subtle?: boolean }) {
   const user = role === 'user';
   return (
     <div className={['flex', user ? 'justify-end' : 'justify-start'].join(' ')}>

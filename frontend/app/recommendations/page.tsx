@@ -1,87 +1,73 @@
+/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useMemo, useState } from 'react';
-import { RecommendationCard } from '../../components/recommendations/RecommendationCard';
-
-type Recommendation = {
-  id: string;
-  title: string;
-  score: number;
-  subtitle?: string;
-};
-
-const mockData: Recommendation[] = [
-  { id: '1', title: 'Senior Data Engineer', score: 87, subtitle: 'High overlap: Python, ETL' },
-  { id: '2', title: 'ML Platform Engineer', score: 81, subtitle: 'Skills: Kubernetes, Model Ops' },
-  { id: '3', title: 'Recommendation Systems Engineer', score: 77, subtitle: 'Semantic: vector search' }
-];
+import { useEffect, useMemo, useState } from 'react';
+import { useHistory } from '@/features/resume/hooks/useHistory';
+import { getRecommendations } from '@/features/resume/hooks/useRecommendations';
 
 export default function RecommendationsPage() {
-  const [query, setQuery] = useState('');
+  const [pageId, setPageId] = useState<number | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return mockData;
-    return mockData.filter((r) => r.title.toLowerCase().includes(q));
-  }, [query]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('pageId');
+    setPageId(id ? Number(id) : null);
+  }, []);
+
+  const { data: items, isLoading, error } = useHistory('guest', 100);
+  const selected = useMemo(() => {
+    if (!items || pageId == null) return null;
+    return items.find((i) => i.id === pageId) || null;
+  }, [items, pageId]);
+
+  const recommendations = useMemo(() => {
+    return selected ? getRecommendations(selected.result) : [];
+  }, [selected]);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-10">
-      <h1 className="text-3xl font-bold">Recommendations</h1>
-      <p className="mt-2 max-w-2xl text-muted-foreground">
-        Personalized roles ranked by skill + semantic fit.
-      </p>
+    <main className="max-w-4xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold">Recommendations</h1>
 
-      <div className="mt-5">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search recommendations…"
-          className="w-full max-w-md rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </div>
+      {isLoading && <p>Loading...</p>}
+      {error && <p className="text-red-600">{(error as any).message}</p>}
 
-      <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((r) => (
-          <RecommendationCard
-            key={r.id}
-            title={r.title}
-            score={`${r.score}%`}
-            subtitle={r.subtitle}
-          />
-        ))}
-      </div>
+      {!selected && !isLoading && <p>Select an item from the Dashboard.</p>}
 
-      <section className="mt-10 rounded-2xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-card-foreground">How scoring works (placeholder)</h2>
-        <ul className="mt-3 list-disc space-y-2 pl-6 text-sm text-muted-foreground">
-          <li>Skill vector overlap (hard + soft)</li>
-          <li>Semantic transformer similarity</li>
-          <li>Recent activity weighting</li>
-          <li>Resume gap penalty</li>
-        </ul>
-      </section>
+      {selected && (
+        <>
+          <div className="border rounded p-4">
+            <p><b>File:</b> {selected.fileName}</p>
+            <p className="text-sm text-gray-600"><b>Date:</b> {new Date(selected.createdAt).toLocaleString()}</p>
+          </div>
 
-      <section className="mt-8 rounded-2xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-card-foreground">Improve Your Match</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Upload your resume and fill missing skill tags to boost recommendation accuracy.
-        </p>
-        <div className="mt-4 flex gap-3">
-          <a
-            href="/resume"
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground shadow-sm hover:bg-primary/90"
-          >
-            Upload Resume
-          </a>
-          <a
-            href="/dashboard"
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm hover:bg-muted"
-          >
-            Go to Dashboard
-          </a>
-        </div>
-      </section>
+          {recommendations.length === 0 ? (
+            <p>No recommendations found.</p>
+          ) : (
+            <ul className="space-y-4">
+              {recommendations.map((rec, idx) => (
+                <li key={idx} className="border rounded p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">{rec.role}</h3>
+                    <span className="text-sm">Match: {rec.match}%</span>
+                  </div>
+                  <p className="text-sm text-gray-700">{rec.rationale}</p>
+                  <div>
+                    <h4 className="font-semibold">Resources</h4>
+                    <ul className="list-disc pl-5">
+                      {rec.resources.map((r, j) => (
+                        <li key={j}>
+                          <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a> <span className="text-xs text-gray-600">({r.type})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
     </main>
   );
 }
