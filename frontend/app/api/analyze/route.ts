@@ -1,26 +1,56 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { PDFParse } from 'pdf-parse';
+
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-// Proxies multipart uploads to the Node backend /api/analyze/resume.
-// Ensure NEXT_PUBLIC_API_BASE points to your Node service (http://localhost:4000).
+type NlpResponse = {
+  summary: string;
+  titles: string[];
+  skills: string[];
+  location?: string | null;
+  missing_skills?: string[];
+};
+
 export async function POST(req: NextRequest) {
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
-  const contentType = req.headers.get('content-type') || '';
+  try {
+    const form = await req.formData();
+    const file = form.get('file') as unknown as File | null;
+    if (!file) {
+      return NextResponse.json({ error: 'file is required (PDF)' }, { status: 400 });
+    }
 
-  if (!contentType.includes('multipart/form-data')) {
-    return new Response(JSON.stringify({ error: 'Expected multipart form-data' }), { status: 400 });
+    // Convert to Buffer for pdf-parse
+    const buf = Buffer.from(await file.arrayBuffer());
+    const parsed = await new PDFParse(buf);
+    const text = parsed.text?.slice(0, 150_000) ?? '';
+
+    // Call Python NLP service
+    const NLP_URL = process.env.NLP_SERVICE_URL || 'http://localhost:8000/analyze';
+    const nlpRes = await fetch(NLP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      // keepalive prevents dev abort warnings
+    });
+
+    if (!nlpRes.ok) {
+      const t = await nlpRes.text();
+      return NextResponse.json({ error: `NLP service failed: ${t}` }, { status: 502 });
+    }
+
+    const nlp: NlpResponse = await nlpRes.json();
+
+    return NextResponse.json({
+      preview: nlp.summary,
+      titles: nlp.titles,
+      skills: nlp.skills,
+      location: nlp.location ?? null,
+      missingSkills: nlp.missing_skills ?? [],
+      textLength: text.length,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? 'Analyze failed' }, { status: 500 });
   }
-
-  const formData = await req.formData();
-
-  // Forward multipart to Node proxy which will forward to Python.
-  const resp = await fetch(`${API_BASE}/api/analyze/resume`, { method: 'POST', body: formData as any });
-
-  // Pass through response from backend
-  const dataText = await resp.text();
-  return new Response(dataText, {
-    status: resp.status,
-    headers: { 'content-type': resp.headers.get('content-type') || 'application/json' },
-  });
 }

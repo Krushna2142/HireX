@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ModeToggle } from './../ModeToggle';
+import ThemeToggle from './../ThemeToggle';
 import { useAuth } from '../providers/AuthProvider';
 import Avatar from '../ui/Avatar';
 
 const links = [
   { href: '/jobs', label: 'Jobs' },
   { href: '/recommendations', label: 'Recommendations' },
-  { href: '/resumeuploadpage', label: 'Resume' },
+  { href: '/resume', label: 'Resume' },
   { href: '/mock-interview', label: 'Mock Interview' },
   { href: '/mock-interview/chat', label: 'Chatbot' },
   { href: '/dashboard', label: 'Dashboard' },
@@ -50,7 +50,7 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
-          <ModeToggle />
+          <ThemeToggle />
 
           {loading ? (
             <span className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">Loading…</span>
