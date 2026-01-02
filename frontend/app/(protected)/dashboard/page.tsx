@@ -83,7 +83,7 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <section>
+    <section className="px-4 sm:px-6 lg:px-8">
       <div className="section-header">
         <h1 className="text-3xl font-bold">Dashboard</h1>
       </div>

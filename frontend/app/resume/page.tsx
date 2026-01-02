@@ -132,7 +132,7 @@ export default function ResumePage() {
   const onDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }, []);
 
   return (
-    <section>
+   <section className="px-4 sm:px-6 lg:px-8">
       <div className="section-header">
         <h1 className="text-4xl font-extrabold tracking-tight">Resume Intelligence</h1>
       </div>

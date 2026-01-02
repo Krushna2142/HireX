@@ -6,14 +6,18 @@ import ThemeToggle from './../ThemeToggle';
 import { useAuth } from '../providers/AuthProvider';
 import Avatar from '../ui/Avatar';
 
-const links = [
+const publicLinks = [
+  { href: '/', label: 'Home' },
+  { href: '/resume', label: 'Resume' },
+];
+
+const privateLinks = [
+  { href: '/dashboard', label: 'Dashboard' },
   { href: '/jobs', label: 'Jobs' },
   { href: '/recommendations', label: 'Recommendations' },
-  { href: '/resume', label: 'Resume' },
   { href: '/mock-interview', label: 'Mock Interview' },
-  { href: '/mock-interview/chat', label: 'Chatbot' },
-  { href: '/dashboard', label: 'Dashboard' },
 ];
+
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -27,26 +31,21 @@ export default function Navbar() {
           <Link href="/" className="text-lg font-semibold tracking-tight">
             JobCrawler
           </Link>
-          <nav className="hidden items-center gap-5 text-sm md:flex">
-            {links.map((l) => {
-              const active = pathname === l.href;
-              return (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={[
-                    'relative transition-colors',
-                    active ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-                  ].join(' ')}
-                >
-                  {l.label}
-                  {active && (
-                    <span className="pointer-events-none absolute -bottom-2 left-0 h-[2px] w-full rounded bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
+         <nav className="hidden md:flex items-center gap-5 text-sm">
+  {publicLinks.map((l) => (
+    <Link key={l.href} href={l.href} className="hover:text-foreground">
+      {l.label}
+    </Link>
+  ))}
+
+  {user &&
+    privateLinks.map((l) => (
+      <Link key={l.href} href={l.href} className="hover:text-foreground">
+        {l.label}
+      </Link>
+    ))}
+</nav>
+
         </div>
 
         <div className="flex items-center gap-3">

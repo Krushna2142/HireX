@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { PDFParse } from 'pdf-parse';
+import pdfParse from 'pdf-parse'; // default import for Node.js
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,14 +16,17 @@ type NlpResponse = {
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
-    const file = form.get('file') as unknown as File | null;
+    const file = form.get('file') as File | null;
+
     if (!file) {
       return NextResponse.json({ error: 'file is required (PDF)' }, { status: 400 });
     }
 
-    // Convert to Buffer for pdf-parse
+    // Convert file to buffer
     const buf = Buffer.from(await file.arrayBuffer());
-    const parsed = await new PDFParse(buf);
+
+    // Parse PDF
+    const parsed = await pdfParse(buf);
     const text = parsed.text?.slice(0, 150_000) ?? '';
 
     // Call Python NLP service
@@ -32,7 +35,6 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
-      // keepalive prevents dev abort warnings
     });
 
     if (!nlpRes.ok) {

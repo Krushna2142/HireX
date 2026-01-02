@@ -5,7 +5,7 @@ export default function RecommendationsPage() {
     { role: 'Data Engineer', match: 74, reason: 'ETL + SQL projects, add Spark' },
   ];
   return (
-    <section>
+  <section className="px-4 sm:px-6 lg:px-8">
       <div className="section-header">
         <h1 className="text-3xl font-bold">Recommendations</h1>
       </div>
