@@ -1,5 +1,4 @@
 'use client';
-import { User } from 'firebase/auth';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirebaseAuth, googleProvider } from '../lib/firebase/Client';
@@ -11,12 +10,11 @@ export type AuthUser = {
   photoURL: string | null;
 };
 
-
 export type AuthContextType = {
-  user: User | null;
+  user: AuthUser | null;          // use the same shape we store in state
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
-  signOutUser: () => Promise<void>; // ✅ ADD THIS
+  signOut: () => Promise<void>;   // align name with value below
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
