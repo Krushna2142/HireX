@@ -1,7 +1,7 @@
 'use client';
 
-import { Input } from '../../components/ui/Input';
-import { Textarea } from '../../components/ui/TextArea';
+import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/TextArea';
 
 export default function SettingsPage() {
   return (
