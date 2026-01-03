@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
+import { db } from '@/lib/firebase/firebase-admin';
 import { getAuth } from 'firebase-admin/auth';
 
 export const runtime = 'nodejs';
