@@ -1,32 +1,9 @@
 {
   "version": 2,
-  "framework": "nextjs",
-
-  "functions": {
-    "app/api/**/route.ts": {
-      "runtime": "nodejs18.x",
-      "maxDuration": 60
-    }
-  },
-
-  "regions": ["iad1"],
-
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    }
+  "builds": [
+    { "src": "package.json", "use": "@vercel/static-build" }
   ],
-
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        }
-      ]
-    }
+  "routes": [
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
