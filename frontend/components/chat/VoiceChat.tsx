@@ -5,15 +5,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Mic, MicOff, Send } from 'lucide-react';
 
-type AnySpeechRecognition =
-  | (Window & typeof globalThis)['webkitSpeechRecognition']
-  | (Window & typeof globalThis)['SpeechRecognition']
-  | undefined;
+type SpeechCtor = SpeechRecognitionConstructor;
+type AnyRecognition = SpeechRecognition | undefined;
 
 declare global {
   interface Window {
-    webkitSpeechRecognition?: any;
-    SpeechRecognition?: any;
+    webkitSpeechRecognition?: SpeechCtor;
+    SpeechRecognition?: SpeechCtor;
   }
 }
 
@@ -21,12 +19,12 @@ function useSpeechRecognition(lang = 'en-US') {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const recognitionRef = useRef<AnySpeechRecognition>();
+  const recognitionRef = useRef<AnyRecognition>();
 
   useEffect(() => {
     const ctor =
-      (typeof window !== 'undefined' && (window as any).webkitSpeechRecognition) ||
-      (typeof window !== 'undefined' && (window as any).SpeechRecognition);
+      (typeof window !== 'undefined' && window.webkitSpeechRecognition) ||
+      (typeof window !== 'undefined' && window.SpeechRecognition);
 
     if (ctor) {
       setSupported(true);
@@ -42,11 +40,11 @@ function useSpeechRecognition(lang = 'en-US') {
   }, [lang]);
 
   const start = useCallback(() => {
-    const rec: any = recognitionRef.current;
+    const rec = recognitionRef.current;
     if (!rec || listening) return;
     setTranscript('');
     try {
-      rec.onresult = (e: any) => {
+      rec.onresult = (e: SpeechRecognitionEvent) => {
         let txt = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
           txt += e.results[i][0].transcript;
@@ -63,7 +61,7 @@ function useSpeechRecognition(lang = 'en-US') {
   }, [listening]);
 
   const stop = useCallback(() => {
-    const rec: any = recognitionRef.current;
+    const rec = recognitionRef.current;
     if (!rec) return;
     try {
       rec.stop();
