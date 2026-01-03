@@ -5,12 +5,12 @@ function parseServiceAccount(): ServiceAccount | undefined {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (!raw) return undefined;
 
-  // If provided as base64, decode first
-  const jsonString = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
+  const jsonString = raw.trim().startsWith('{')
+    ? raw
+    : Buffer.from(raw, 'base64').toString('utf8');
 
   const parsed = JSON.parse(jsonString) as ServiceAccount;
 
-  // Normalize private_key newlines
   if (parsed.privateKey) {
     parsed.privateKey = parsed.privateKey.replace(/\\n/g, '\n').replace(/\r/g, '');
   }
@@ -21,9 +21,7 @@ function parseServiceAccount(): ServiceAccount | undefined {
 const saJson = parseServiceAccount();
 
 if (!getApps().length) {
-  if (!saJson) {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY not set');
-  }
+  if (!saJson) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY not set');
   initializeApp({ credential: cert(saJson) });
 }
 
