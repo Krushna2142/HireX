@@ -1,6 +1,7 @@
-import { apiFetch } from "@/lib/api/client";
+import { apiJson, apiGet, apiForm } from "@/lib/api/client";
 import { Job } from "../types/Job";
+const jobs = await apiGet('/jobs', { location: 'NYC', title: 'Backend' });
 
 export function getJobs(): Promise<Job[]> {
-  return apiFetch<Job[]>("/api/jobs");
+  return apiGet<Job[]>("/api/jobs");
 }

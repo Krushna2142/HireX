@@ -16,8 +16,12 @@ export default function NavbarActions() {
       <ThemeToggle />
       {user ? (
         <>
-          <span className="text-sm text-muted-foreground hidden sm:inline">{user.email}</span>
-          <Button variant="outline" onClick={signOutUser}>Sign out</Button>
+          <span className="hidden sm:inline text-sm text-muted-foreground">
+            {user.email}
+          </span>
+          <Button variant="outline" onClick={signOutUser}>
+            Sign out
+          </Button>
         </>
       ) : (
         <Button onClick={signInWithGoogle}>Sign in</Button>

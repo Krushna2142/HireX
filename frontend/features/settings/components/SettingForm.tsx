@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Input } from '@/components/ui/Input';
-import { TextArea } from '@/components/ui/TextArea';
+import { Textarea } from '@/components/ui/TextArea';
 import { Button } from '@/components/ui/Button';
 
 const schema = z.object({
@@ -68,7 +69,7 @@ export default function SettingsForm() {
 
       <div className="space-y-1">
         <label className="text-xs font-medium uppercase tracking-wide opacity-70">Bio</label>
-        <TextArea {...register('bio')} rows={5} placeholder="Short professional summary..." />
+        <Textarea {...register('bio')} rows={5} placeholder="Short professional summary..." />
         {errors.bio && <p className="text-xs text-red-600">{errors.bio.message}</p>}
       </div>
 

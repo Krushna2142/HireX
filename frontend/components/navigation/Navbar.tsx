@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
 import Link from 'next/link';
@@ -18,11 +19,12 @@ const privateLinks = [
   { href: '/mock-interview', label: 'Mock Interview' },
 ];
 
-
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+
+  // ✅ FIX: use signOutUser (NOT signOut)
+  const { user, loading, signInWithGoogle, signOutUser } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
@@ -31,28 +33,30 @@ export default function Navbar() {
           <Link href="/" className="text-lg font-semibold tracking-tight">
             JobCrawler
           </Link>
-         <nav className="hidden md:flex items-center gap-5 text-sm">
-  {publicLinks.map((l) => (
-    <Link key={l.href} href={l.href} className="hover:text-foreground">
-      {l.label}
-    </Link>
-  ))}
 
-  {user &&
-    privateLinks.map((l) => (
-      <Link key={l.href} href={l.href} className="hover:text-foreground">
-        {l.label}
-      </Link>
-    ))}
-</nav>
+          <nav className="hidden md:flex items-center gap-5 text-sm">
+            {publicLinks.map((l) => (
+              <Link key={l.href} href={l.href} className="hover:text-foreground">
+                {l.label}
+              </Link>
+            ))}
 
+            {user &&
+              privateLinks.map((l) => (
+                <Link key={l.href} href={l.href} className="hover:text-foreground">
+                  {l.label}
+                </Link>
+              ))}
+          </nav>
         </div>
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
 
           {loading ? (
-            <span className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">Loading…</span>
+            <span className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
+              Loading…
+            </span>
           ) : user ? (
             <div className="flex items-center gap-3">
               <button
@@ -67,7 +71,6 @@ export default function Navbar() {
                   size={36}
                   className="border border-border"
                 />
-                {/* Optionally show short name on larger screens */}
                 <span className="hidden md:inline-block text-sm text-card-foreground">
                   {user.displayName ?? user.email ?? 'User'}
                 </span>
@@ -75,7 +78,10 @@ export default function Navbar() {
 
               <button
                 className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-                onClick={() => signOut().then(() => router.push('/'))}
+                onClick={async () => {
+                  await signOutUser();
+                  router.push('/');
+                }}
               >
                 Sign out
               </button>
@@ -83,7 +89,10 @@ export default function Navbar() {
           ) : (
             <button
               className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm hover:bg-muted"
-              onClick={() => signInWithGoogle().then(() => router.push('/dashboard'))}
+              onClick={async () => {
+                await signInWithGoogle();
+                router.push('/dashboard');
+              }}
             >
               Sign in with Google
             </button>

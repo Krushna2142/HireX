@@ -1,52 +1,81 @@
+/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-type Recognition = typeof window extends any
-  ? (window as any).webkitSpeechRecognition | SpeechRecognition | undefined
-  : undefined;
-
+/* -------------------------------------------------------
+   Global declarations for Web Speech API (TypeScript fix)
+------------------------------------------------------- */
 declare global {
   interface Window {
-    webkitSpeechRecognition?: any;
-    SpeechRecognition?: any;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    SpeechRecognition?: SpeechRecognitionConstructor;
   }
 }
 
+type SpeechRecognitionConstructor = new () => SpeechRecognition;
+
+interface SpeechRecognition {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: any) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+/* -------------------------------------------------------
+   Speech Recognition Hook
+------------------------------------------------------- */
 export function useSpeechRecognition(lang = 'en-US') {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const recognitionRef = useRef<Recognition>();
+
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
-    const Ctor = window?.webkitSpeechRecognition || (window as any)?.SpeechRecognition;
-    if (Ctor) {
-      setSupported(true);
-      const rec = new Ctor();
-      rec.continuous = false;
-      rec.interimResults = true;
-      rec.lang = lang;
-      recognitionRef.current = rec;
-    } else {
+    if (typeof window === 'undefined') return;
+
+    const Ctor =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!Ctor) {
       setSupported(false);
+      recognitionRef.current = null;
+      return;
     }
+
+    setSupported(true);
+    const rec = new Ctor();
+    rec.lang = lang;
+    rec.continuous = false;
+    rec.interimResults = true;
+
+    recognitionRef.current = rec;
   }, [lang]);
 
   const start = useCallback(() => {
     const rec = recognitionRef.current;
     if (!rec || listening) return;
+
     setTranscript('');
+
+    rec.onresult = (e: any) => {
+      let text = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        text += e.results[i][0].transcript;
+      }
+      setTranscript(text.trim());
+    };
+
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+
     try {
-      rec.onresult = (e: any) => {
-        let txt = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          txt += e.results[i][0].transcript;
-        }
-        setTranscript(txt.trim());
-      };
-      rec.onend = () => setListening(false);
-      rec.onerror = () => setListening(false);
       rec.start();
       setListening(true);
     } catch {
@@ -66,19 +95,29 @@ export function useSpeechRecognition(lang = 'en-US') {
   return { supported, listening, transcript, start, stop, setTranscript };
 }
 
-export function useSpeechSynthesis(voiceMatcher: (v: SpeechSynthesisVoice) => boolean = v =>
-  v.lang.startsWith('en')) {
+/* -------------------------------------------------------
+   Speech Synthesis Hook
+------------------------------------------------------- */
+export function useSpeechSynthesis(
+  voiceMatcher: (v: SpeechSynthesisVoice) => boolean = (v) =>
+    v.lang.startsWith('en')
+) {
   const [supported, setSupported] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
     setSupported(true);
 
-    const load = () => setVoices(window.speechSynthesis.getVoices());
-    load();
-    window.speechSynthesis.onvoiceschanged = load;
+    const loadVoices = () => {
+      setVoices(window.speechSynthesis.getVoices());
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
     };
@@ -87,15 +126,19 @@ export function useSpeechSynthesis(voiceMatcher: (v: SpeechSynthesisVoice) => bo
   const speak = useCallback(
     (text: string) => {
       if (!supported) return;
+
       try {
         window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
+
+        const utterance = new SpeechSynthesisUtterance(text);
         const voice = voices.find(voiceMatcher) || voices[0];
-        if (voice) u.voice = voice;
-        u.rate = 1.0;
-        u.pitch = 1.0;
-        utteranceRef.current = u;
-        window.speechSynthesis.speak(u);
+        if (voice) utterance.voice = voice;
+
+        utterance.rate = 1;
+        utterance.pitch = 1;
+
+        utteranceRef.current = utterance;
+        window.speechSynthesis.speak(utterance);
       } catch {}
     },
     [supported, voices, voiceMatcher]

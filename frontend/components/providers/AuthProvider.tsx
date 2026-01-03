@@ -1,7 +1,19 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { User as FirebaseUser, Auth as FirebaseAuth } from 'firebase/auth';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+  User,
+} from 'firebase/auth';
+import { getFirebaseAuth, googleProvider } from '@/lib/firebase/Client';
 
 export type AuthUser = {
   uid: string;
@@ -10,104 +22,61 @@ export type AuthUser = {
   photoURL: string | null;
 };
 
-type AuthContextType = {
+export type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
-  signOut: () => Promise<void>;
+  signOutUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-/**
- * Client-only AuthProvider that lazily loads the firebase client module
- * so no firebase client code runs on the server.
- */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const auth = useMemo(() => getFirebaseAuth(), []);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  // keep a ref to the firebase Auth instance once loaded (optional)
-  const [authInstance, setAuthInstance] = useState<FirebaseAuth | null>(null);
 
   useEffect(() => {
-    let unsub: (() => void) | undefined;
-    let mounted = true;
-
-    async function initAuth() {
-      try {
-        // Dynamically import the firebase client initializer (client-only)
-        const firebaseClient = await import('@/lib/firebase/Client');
-        const { onAuthStateChanged } = await import('firebase/auth');
-
-        // getFirebaseAuth will now run in the browser
-        const auth = firebaseClient.getFirebaseAuth();
-        if (!mounted) return;
-        setAuthInstance(auth);
-
-        unsub = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
-          if (!mounted) return;
-          if (fbUser) {
-            setUser({
-              uid: fbUser.uid,
-              displayName: fbUser.displayName ?? null,
-              email: fbUser.email ?? null,
-              photoURL: fbUser.photoURL ?? null,
-            });
-          } else {
-            setUser(null);
-          }
-          setLoading(false);
+    const unsub = onAuthStateChanged(auth, (fbUser: User | null) => {
+      if (fbUser) {
+        setUser({
+          uid: fbUser.uid,
+          displayName: fbUser.displayName,
+          email: fbUser.email,
+          photoURL: fbUser.photoURL,
         });
-      } catch (err) {
-        // If anything goes wrong, ensure we stop the loading spinner and log.
-        // eslint-disable-next-line no-console
-        console.error('Auth initialization error:', err);
-        if (mounted) setLoading(false);
+      } else {
+        setUser(null);
       }
-    }
+      setLoading(false);
+    });
 
-    initAuth();
+    return () => unsub();
+  }, [auth]);
 
-    return () => {
-      mounted = false;
-      if (unsub) unsub();
-    };
-  }, []);
-
-  // Sign in with Google (dynamic import so it never runs on the server)
-  async function signInWithGoogle() {
+  const signInWithGoogle = async () => {
     try {
-      const [{ signInWithPopup }, { googleProvider }] = await Promise.all([
-        import('firebase/auth'),
-        import('@/lib/firebase/Client'),
-      ]);
-      const auth = authInstance ?? (await import('@/lib/firebase/Client')).getFirebaseAuth();
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Google sign-in error:', err);
       throw err;
     }
-  }
+  };
 
-  // Sign out (dynamic import)
-  async function handleSignOut() {
+  const signOutUser = async () => {
     try {
-      const { signOut: fbSignOut } = await import('firebase/auth');
-      const auth = authInstance ?? (await import('@/lib/firebase/Client')).getFirebaseAuth();
-      await fbSignOut(auth);
+      await signOut(auth);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Sign-out error:', err);
       throw err;
     }
-  }
+  };
 
   const value: AuthContextType = {
     user,
     loading,
     signInWithGoogle,
-    signOut: handleSignOut,
+    signOutUser, // ✅ CORRECT NAME
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -115,6 +84,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  if (!ctx) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
   return ctx;
 }
