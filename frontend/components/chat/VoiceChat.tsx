@@ -5,26 +5,30 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Mic, MicOff, Send } from 'lucide-react';
 
-type SpeechCtor = SpeechRecognitionConstructor;
-type AnyRecognition = SpeechRecognition | undefined;
+// Minimal speech recognition shape we actually use at runtime.
+// No global augmentations to avoid conflicts.
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult?: ((event: any) => void) | null;
+  onend?: (() => void) | null;
+  onerror?: (() => void) | null;
+};
 
-declare global {
-  interface Window {
-    webkitSpeechRecognition?: SpeechCtor;
-    SpeechRecognition?: SpeechCtor;
-  }
-}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
 function useSpeechRecognition(lang = 'en-US') {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const recognitionRef = useRef<AnyRecognition>();
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   useEffect(() => {
-    const ctor =
-      (typeof window !== 'undefined' && window.webkitSpeechRecognition) ||
-      (typeof window !== 'undefined' && window.SpeechRecognition);
+    const win: any = typeof window !== 'undefined' ? window : undefined;
+    const ctor: SpeechRecognitionCtor | undefined = win?.webkitSpeechRecognition ?? win?.SpeechRecognition;
 
     if (ctor) {
       setSupported(true);
@@ -35,7 +39,7 @@ function useSpeechRecognition(lang = 'en-US') {
       recognitionRef.current = rec;
     } else {
       setSupported(false);
-      recognitionRef.current = undefined;
+      recognitionRef.current = null;
     }
   }, [lang]);
 
@@ -44,7 +48,7 @@ function useSpeechRecognition(lang = 'en-US') {
     if (!rec || listening) return;
     setTranscript('');
     try {
-      rec.onresult = (e: SpeechRecognitionEvent) => {
+      rec.onresult = (e: any) => {
         let txt = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
           txt += e.results[i][0].transcript;
