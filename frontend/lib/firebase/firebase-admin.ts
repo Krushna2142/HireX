@@ -1,28 +1,18 @@
-import { getApps, initializeApp, cert, ServiceAccount } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+// lib/firebase-admin.ts
+import admin from 'firebase-admin';
 
-function parseServiceAccount(): ServiceAccount | undefined {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  if (!raw) return undefined;
+const serviceAccount = JSON.parse(
+  process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '{}'
+);
 
-  const jsonString = raw.trim().startsWith('{')
-    ? raw
-    : Buffer.from(raw, 'base64').toString('utf8');
+// Fix newline characters
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
-  const parsed = JSON.parse(jsonString) as ServiceAccount;
-
-  if (parsed.privateKey) {
-    parsed.privateKey = parsed.privateKey.replace(/\\n/g, '\n').replace(/\r/g, '');
-  }
-
-  return parsed;
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
 }
 
-const saJson = parseServiceAccount();
-
-if (!getApps().length) {
-  if (!saJson) throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY not set');
-  initializeApp({ credential: cert(saJson) });
-}
-
-export const db = getFirestore();
+export const db = admin.firestore();
+export const auth = admin.auth();
