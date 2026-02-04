@@ -1,28 +1,23 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase/firebase-admin';
-import { getAuth } from 'firebase-admin/auth';
+import { adminDb } from '@/lib/firebase/firebase-admin';
 
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-    if (!token) return NextResponse.json({ error: 'Missing auth token' }, { status: 401 });
+    // Example: Fetch data from the Firestore collection
+    const collection = await adminDb.collection('applications').get();
+    const applications = collection.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-    const decoded = await getAuth().verifyIdToken(token);
-    const uid = decoded.uid;
+    return NextResponse.json({ success: true, data: applications });
+  } catch (error) {
+    // Check if the error is an instance of Error, if not provide a fallback message
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
 
-    const { action, job } = await req.json();
-    if (!action || !job) return NextResponse.json({ error: 'action and job required' }, { status: 400 });
-
-    const ref = db.collection('users').doc(uid).collection('applications').doc(job.id || job.url);
-    await ref.set({ action, job, ts: Date.now() }, { merge: true });
-
-    return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? 'Save failed' }, { status: 500 });
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
