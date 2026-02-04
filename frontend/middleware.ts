@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server';
 export function middleware(req: NextRequest) {
   const token = req.cookies.get('__session')?.value;
 
-  if (!token && req.nextUrl.pathname.startsWith('/dashboard')) {
+  if (!token && req.nextUrl.pathname.startsWith('/(protected)/dashboard')) {
     return NextResponse.redirect(new URL('/', req.url));
   }
 }

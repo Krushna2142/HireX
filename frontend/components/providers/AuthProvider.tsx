@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useMemo,
   useState,
+  ReactNode,
 } from 'react';
 import {
   onAuthStateChanged,
@@ -23,52 +24,67 @@ export type AuthUser = {
 };
 
 export type AuthContextType = {
-  user: AuthUser | null;
-  loading: boolean;
+  user: AuthUser | null;          // The logged-in user's data
+  loading: boolean;               // Indicates if the authentication state is loading
   signInWithGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const auth = useMemo(() => getFirebaseAuth(), []);
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser: User | null) => {
-      if (fbUser) {
-        setUser({
-          uid: fbUser.uid,
-          displayName: fbUser.displayName,
-          email: fbUser.email,
-          photoURL: fbUser.photoURL,
-        });
-      } else {
-        setUser(null);
-      }
-      setLoading(false);
-    });
+    let authUnsub: ReturnType<typeof onAuthStateChanged> | null = null;
 
-    return () => unsub();
-  }, [auth]);
+    if (typeof window !== 'undefined') {
+      const auth = getFirebaseAuth();
+
+      // Attach listener for Firebase authentication state changes
+      authUnsub = onAuthStateChanged(auth, (fbUser: User | null) => {
+        if (fbUser) {
+          setUser({
+            uid: fbUser.uid,
+            displayName: fbUser.displayName,
+            email: fbUser.email,
+            photoURL: fbUser.photoURL,
+          });
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
+      });
+    }
+
+    // Cleanup subscription on component unmount
+    return () => {
+      if (authUnsub) authUnsub();
+    };
+  }, []);
 
   const signInWithGoogle = async () => {
+    if (typeof window === 'undefined') {
+      console.error('Attempting to use sign-in on the server. This is not allowed.');
+      return;
+    }
     try {
+      const auth = getFirebaseAuth();
       await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.error('Google sign-in error:', err);
-      throw err;
+    } catch (error) {
+      console.error('Google sign-in failed:', error);
+      throw error;
     }
   };
 
   const signOutUser = async () => {
+    const auth = getFirebaseAuth();
     try {
       await signOut(auth);
-    } catch (err) {
-      console.error('Sign-out error:', err);
-      throw err;
+    } catch (error) {
+      console.error('Sign-out failed:', error);
+      throw error;
     }
   };
 
@@ -76,16 +92,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     loading,
     signInWithGoogle,
-    signOutUser, // ✅ CORRECT NAME
+    signOutUser,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
+  const context = useContext(AuthContext);
+  if (!context) {
     throw new Error('useAuth must be used within AuthProvider');
   }
-  return ctx;
+  return context;
 }
