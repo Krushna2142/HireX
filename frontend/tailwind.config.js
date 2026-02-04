@@ -1,13 +1,21 @@
-/** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: ['class'], // required for shadcn
-  content: [
-    './app/**/*.{ts,tsx,js,jsx}',
-    './components/**/*.{ts,tsx,js,jsx}',
-    './features/**/*.{ts,tsx,js,jsx}',
-  ],
+ content: [
+  './app/**/*.{ts,tsx,js,jsx,html}',
+  './components/**/*.{ts,tsx,js,jsx,html}',
+  './features/**/*.{ts,tsx,js,jsx,html}',
+  './utils/**/*.{ts,tsx,js,jsx,html}',
+],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        foreground: '#000000',
+        background: '#ffffff',
+        border: '#e5e7eb',
+        card: '#f8fafc',
+        'card-foreground': '#1f2937',
+        'muted-foreground': '#6b7280',
+      },
+    },
   },
   plugins: [],
 };

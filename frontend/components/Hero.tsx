@@ -20,7 +20,7 @@ export default function Hero() {
           </span>
           <h1 className="text-4xl font-semibold leading-tight sm:text-5xl md:text-6xl">
             Find your next role with
-            <span className="ml-2 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 bg-clip-text text-transparent">
+            <span className="ml-2 bg-linear-to-r from-indigo-500 via-violet-500 to-fuchsia-500 bg-clip-text text-transparent">
               JobCrawler
             </span>
           </h1>
