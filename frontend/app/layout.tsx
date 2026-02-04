@@ -12,13 +12,18 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Adding favicon */}
+        <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
       <body className="font-sans antialiased bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="ji-theme">
           <ReactQueryProvider>
-          <AuthProvider>
-            <Navbar />
-            {children}
-          </AuthProvider>
+            <AuthProvider>
+              <Navbar />
+              {children}
+            </AuthProvider>
           </ReactQueryProvider>
         </ThemeProvider>
       </body>
