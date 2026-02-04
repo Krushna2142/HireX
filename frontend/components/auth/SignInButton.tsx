@@ -1,18 +1,15 @@
 "use client";
 
-import { useAuth } from "@/components/providers/AuthProvider";
+import { useAuth } from "@/components/providers/AuthProvider"; // Import useAuth from the correct path
 import { Loader2, LogIn } from "lucide-react";
 
 export default function SignInButton() {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const { user, loading, signInWithGoogle, signOutUser } = useAuth(); // Corrected to use signOutUser
 
   if (loading) {
     return (
-      <button
-        className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm opacity-70"
-        disabled
-      >
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-gray-100 rounded-md">
+        <Loader2 className="w-4 h-4 animate-spin mr-2" />
         Loading...
       </button>
     );
@@ -21,26 +18,26 @@ export default function SignInButton() {
   if (user) {
     return (
       <button
-        onClick={signOut}
-        className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+        className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-gray-100 rounded-md hover:bg-gray-200"
+        onClick={async () => {
+          await signOutUser(); // Corrected to use signOutUser
+        }}
       >
-        <img
-          src={user.photoURL ?? ""}
-          alt="avatar"
-          className="h-5 w-5 rounded-full"
-        />
-        Sign out
+        <LogIn className="w-4 h-4" />
+        Sign Out
       </button>
     );
   }
 
   return (
     <button
-      onClick={signInWithGoogle}
-      className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+      className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-100 bg-blue-500 rounded-md hover:bg-blue-600"
+      onClick={async () => {
+        await signInWithGoogle(); // Sign user in with Google
+      }}
     >
-      <LogIn className="h-4 w-4" />
-      Sign in
+      <LogIn className="w-4 h-4" />
+      Sign In with Google
     </button>
   );
 }
