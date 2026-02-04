@@ -1,10 +1,11 @@
 'use client';
 
+import Hero from '../components/Hero';
+
 export default function HomePage() {
   return (
     <main>
-      <h1>Welcome to JobCrawler!</h1>
-      <p>This is the root page.</p>
+      <Hero />
     </main>
   );
 }
