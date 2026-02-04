@@ -1,18 +1,23 @@
-// lib/firebase-admin.ts
-import admin from 'firebase-admin';
+import { getApps, initializeApp, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 
-const serviceAccount = JSON.parse(
-  process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '{}'
-);
-
-// Fix newline characters
-serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
+if (!process.env.FIREBASE_PRIVATE_KEY) {
+  throw new Error('FIREBASE_PRIVATE_KEY is missing');
 }
 
-export const db = admin.firestore();
-export const auth = admin.auth();
+const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+
+const app =
+  getApps().length === 0
+    ? initializeApp({
+        credential: cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey,
+        }),
+      })
+    : getApps()[0];
+
+export const adminAuth = getAuth(app);
+export const adminDb = getFirestore(app);
