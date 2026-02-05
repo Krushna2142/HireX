@@ -41,10 +41,9 @@ export async function POST(req: NextRequest) {
       process.env.NLP_SERVICE_URL || 'http://localhost:8000/analyze'
 
     const nlpRes = await fetch(NLP_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    })
+  method: 'POST',
+  body: form,  // Send FormData directly
+});
 
     if (!nlpRes.ok) {
       const t = await nlpRes.text()

@@ -2,7 +2,10 @@
 /* eslint-disable react-hooks/purity */
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import useWebSocket from 'react-use-websocket';
+import { getAuth } from 'firebase/auth';
+import axios from 'axios';
 
 type Application = {
   id: string;
@@ -11,7 +14,7 @@ type Application = {
   location: string;
   salary?: string;
   stage: 'Applied' | 'Screen' | 'Interview' | 'Offer' | 'Rejected';
-  appliedAt: string; // ISO date
+  appliedAt: string;
   source: 'LinkedIn' | 'Company' | 'Referral' | 'Other';
 };
 
@@ -23,33 +26,71 @@ type Alert = {
   createdAt: string;
 };
 
-const mockApplications: Application[] = [
-  { id: 'a1', company: 'Acme', role: 'Senior Backend Engineer', location: 'Remote', salary: '$160k', stage: 'Interview', appliedAt: '2025-12-02', source: 'LinkedIn' },
-  { id: 'a2', company: 'Globex', role: 'Fullstack Developer', location: 'NYC', salary: '$140k', stage: 'Screen', appliedAt: '2025-11-28', source: 'Company' },
-  { id: 'a3', company: 'Initech', role: 'Data Engineer', location: 'SF', salary: '$150k', stage: 'Applied', appliedAt: '2025-12-05', source: 'Referral' },
-  { id: 'a4', company: 'Umbrella', role: 'Platform Engineer', location: 'Remote', salary: '$175k', stage: 'Offer', appliedAt: '2025-11-18', source: 'LinkedIn' },
-  { id: 'a5', company: 'Stark Industries', role: 'Systems Engineer', location: 'Remote', salary: '$165k', stage: 'Rejected', appliedAt: '2025-11-10', source: 'Other' },
-];
-
-const mockAlerts: Alert[] = [
-  { id: 'al1', title: 'New Match', message: '2 roles match your profile in NYC', severity: 'info', createdAt: '2025-12-07' },
-  { id: 'al2', title: 'Interview Reminder', message: 'Interview scheduled with Acme tomorrow at 11:00', severity: 'warning', createdAt: '2025-12-07' },
-  { id: 'al3', title: 'Offer Update', message: 'Umbrella sent a revised offer', severity: 'success', createdAt: '2025-12-06' },
-];
-
-function stageIndex(stage: Application['stage']) {
-  return ['Applied', 'Screen', 'Interview', 'Offer', 'Rejected'].indexOf(stage);
-}
-
 export default function DashboardPage() {
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [query, setQuery] = useState('');
   const [stageFilter, setStageFilter] = useState<'All' | Application['stage']>('All');
   const [sourceFilter, setSourceFilter] = useState<'All' | Application['source']>('All');
   const [sortBy, setSortBy] = useState<'appliedAt' | 'stage'>('appliedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [loading, setLoading] = useState(true);
 
+  const auth = getAuth();
+  const user = auth.currentUser;
+  const backendUrl = 'http://localhost:8000';  // Change to deployed URL (e.g., https://your-backend.railway.app)
+
+  // WebSocket for real-time updates
+  const { lastMessage } = useWebSocket(`${backendUrl.replace('http', 'ws')}/ws?token=${user?.getIdToken()}`, {
+    shouldReconnect: () => true,
+  });
+
+  // Fetch initial data
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!user) return;
+      try {
+        const token = await user.getIdToken();
+        const config = { headers: { Authorization: `Bearer ${token}` } };
+        const [appsRes, alertsRes] = await Promise.all([
+          axios.get(`${backendUrl}/jobs`, config),
+          axios.get(`${backendUrl}/alerts`, config)
+        ]);
+        // Map backend response to frontend format
+        setApplications(appsRes.data.jobs.map((j: any) => ({
+          id: j.id.toString(),
+          company: j.company,
+          role: j.title,
+          location: 'Remote',
+          stage: 'Applied',
+          appliedAt: new Date().toISOString(),
+          source: 'LinkedIn'
+        })));
+        setAlerts(alertsRes.data.alerts);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [user, backendUrl]);
+
+  // Handle WebSocket messages
+  useEffect(() => {
+    if (lastMessage) {
+      const data = JSON.parse(lastMessage.data);
+      if (data.type === 'new_job') {
+        setApplications(prev => [...prev, data.job]);
+      } else if (data.type === 'update_alert') {
+        setAlerts(prev => [data.alert, ...prev]);
+      }
+    }
+  }, [lastMessage]);
+
+  // Filtered and sorted
   const filtered = useMemo(() => {
-    let items = [...mockApplications];
+    let items = [...applications];
     if (query.trim()) {
       const q = query.toLowerCase();
       items = items.filter(
@@ -71,16 +112,18 @@ export default function DashboardPage() {
     });
 
     return items;
-  }, [query, stageFilter, sourceFilter, sortBy, sortDir]);
+  }, [applications, query, stageFilter, sourceFilter, sortBy, sortDir]);
 
   const stats = useMemo(() => {
-    const total = mockApplications.length;
-    const interviewing = mockApplications.filter((a) => a.stage === 'Interview').length;
-    const offers = mockApplications.filter((a) => a.stage === 'Offer').length;
-    const rejected = mockApplications.filter((a) => a.stage === 'Rejected').length;
-    const weekNew = mockApplications.filter((a) => Date.now() - new Date(a.appliedAt).getTime() < 7 * 86400000).length;
+    const total = applications.length;
+    const interviewing = applications.filter((a) => a.stage === 'Interview').length;
+    const offers = applications.filter((a) => a.stage === 'Offer').length;
+    const rejected = applications.filter((a) => a.stage === 'Rejected').length;
+    const weekNew = applications.filter((a) => Date.now() - new Date(a.appliedAt).getTime() < 7 * 86400000).length;
     return { total, interviewing, offers, rejected, weekNew };
-  }, []);
+  }, [applications]);
+
+  if (loading) return <div>Loading...</div>;
 
   return (
     <section className="px-4 sm:px-6 lg:px-8">
@@ -205,7 +248,7 @@ export default function DashboardPage() {
             <div className="section-header">
               <h2 className="text-xl font-bold">Pipeline</h2>
             </div>
-            <Pipeline visualizationFrom={mockApplications} />
+            <Pipeline visualizationFrom={applications} />
           </div>
 
           <div className="panel p-6">
@@ -213,7 +256,7 @@ export default function DashboardPage() {
               <h2 className="text-xl font-bold">Alerts</h2>
             </div>
             <ul className="space-y-3">
-              {mockAlerts.map((al) => (
+              {alerts.map((al) => (
                 <li key={al.id} className="rounded-md border p-3 hover:shadow-neon transition">
                   <div className="flex items-center justify-between">
                     <div className="font-semibold">{al.title}</div>
@@ -233,7 +276,7 @@ export default function DashboardPage() {
   );
 }
 
-/* Components */
+/* Components remain the same */
 
 function StatCard({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (
@@ -318,4 +361,8 @@ function Pipeline({ visualizationFrom }: { visualizationFrom: Application[] }) {
       })}
     </div>
   );
+}
+
+function stageIndex(stage: Application['stage']) {
+  return ['Applied', 'Screen', 'Interview', 'Offer', 'Rejected'].indexOf(stage);
 }
