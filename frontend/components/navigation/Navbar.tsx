@@ -6,7 +6,7 @@ import ThemeToggle from './../ThemeToggle';
 import { useAuth } from '../providers/AuthProvider';
 import Avatar from '../ui/Avatar';
 import { useState } from 'react';
-import LoginModal from '@/components/auth/LoginModal';
+import LoginModal from '@/components/auth/CredentialsModal';
 
 const publicLinks = [
   { href: '/', label: 'Home' },
