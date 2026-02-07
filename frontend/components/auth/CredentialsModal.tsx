@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { getFirebaseAuth } from '@/lib/firebase/Client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 
@@ -33,8 +35,15 @@ export default function CredentialsModal({ open, onClose }: Props) {
     setLoading(true);
 
     try {
-      // TODO: call backend API as per the PR (e.g., /api/auth/credentials/create or /verify)
-      const idToken = await user?.getIdToken();
+      const auth = getFirebaseAuth();
+      const fbUser = auth.currentUser;
+      const idToken = await fbUser?.getIdToken();
+      
+      if (!idToken) {
+        console.error('No Firebase ID token available');
+        return;
+      }
+
       const endpoint = mode === 'create' ? '/api/auth/credentials/create' : '/api/auth/credentials/verify';
       const response = await fetch(endpoint, {
         method: 'POST',
