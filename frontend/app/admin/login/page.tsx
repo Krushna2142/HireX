@@ -67,6 +67,8 @@ export default function AdminLoginPage() {
           onChange={(e) => setUsername(e.target.value)}
           required
           disabled={loading}
+          aria-label="Admin username"
+          aria-describedby={loading ? "admin-loading-message" : undefined}
         />
         <Input
           placeholder="Admin password"
@@ -75,8 +77,13 @@ export default function AdminLoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
           disabled={loading}
+          aria-label="Admin password"
+          aria-describedby={loading ? "admin-loading-message" : undefined}
         />
         <Button type="submit" className="w-full" disabled={loading}>
+          <span id="admin-loading-message" className="sr-only">
+            {loading && 'Form is processing, please wait'}
+          </span>
           {loading ? 'Signing in...' : 'Sign in'}
         </Button>
       </form>

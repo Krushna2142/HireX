@@ -139,6 +139,8 @@ export default function CredentialsPage() {
           onChange={(e) => setUsername(e.target.value)}
           required
           disabled={loading}
+          aria-label="Username"
+          aria-describedby={loading ? "loading-message" : undefined}
         />
         <Input
           placeholder="Password"
@@ -147,9 +149,14 @@ export default function CredentialsPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
           disabled={loading}
+          aria-label="Password"
+          aria-describedby={loading ? "loading-message" : undefined}
         />
 
         <Button type="submit" className="w-full" disabled={loading}>
+          <span id="loading-message" className="sr-only">
+            {loading && 'Form is processing, please wait'}
+          </span>
           {loading ? 'Processing...' : mode === 'create' ? 'Create account' : 'Verify and continue'}
         </Button>
       </form>

@@ -92,8 +92,8 @@ def verify_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    """Hash a password using bcrypt with increased cost factor for production"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
 
 def verify_password(password: str, hashed: str) -> bool:
     """Verify a password against a hash"""
@@ -154,7 +154,14 @@ async def create_credentials(
         return {"message": "Credentials created successfully", "role": credentials_data.role}
     except psycopg2.IntegrityError as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+        # Log the detailed error server-side
+        print(f"Database integrity error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Unable to create credentials. Username may already be taken.")
+    except Exception as e:
+        conn.rollback()
+        # Log the detailed error server-side
+        print(f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="An error occurred while creating credentials")
     finally:
         cur.close()
 
