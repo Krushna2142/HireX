@@ -27,15 +27,15 @@ app.add_middleware(
 )
 
 # Firebase
-cred = credentials.Certificate("path/to/serviceAccount.json")
+cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
 # PostgreSQL (Docker service)
 conn = psycopg2.connect(
-    dbname="jobcrawler",
+    dbname="JobCrawlerDB",
     user="postgres",
-    password="postgres",
-    host="postgres",  # Docker service name
+    password="Krushna@123",
+    host="postgres",
     port="5432"
 )
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
