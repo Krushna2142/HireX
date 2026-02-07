@@ -1,2 +1,16 @@
 .vercel
 .env*.local
+.env
+.env.local
+!.env.example
+backend/.env
+backend/python-api/.env
+!backend/python-api/.env.example
+frontend/.env.local
+!frontend/.env.example
+node_modules
+__pycache__
+*.pyc
+.next
+dist
+build

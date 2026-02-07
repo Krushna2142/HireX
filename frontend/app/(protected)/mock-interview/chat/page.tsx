@@ -1,18 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useRef, useState } from 'react';
-import { getFirebaseFirestore } from '@/lib/firebase/Client';
-import {
-  collection,
-  addDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { useRef, useState } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 
 type Message = {
@@ -28,56 +18,18 @@ export default function ChatRoomPage() {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    let unsub: () => void;
-
-    async function init() {
-      try {
-        const db = getFirebaseFirestore();
-        const q = query(
-          collection(db, 'rooms', 'mock-interview', 'messages'),
-          orderBy('createdAt', 'asc')
-        );
-
-        unsub = onSnapshot(q, (snap) => {
-          const list: Message[] = snap.docs.map((d) => {
-            const data = d.data() as Omit<Message, 'id'>;
-            return { id: d.id, ...data };
-          });
-
-          setMessages(list);
-          scrollRef.current?.scrollTo({
-            top: scrollRef.current.scrollHeight,
-            behavior: 'smooth',
-          });
-        });
-      } catch (err) {
-        console.error('Chat init error:', err);
-      }
-    }
-
-    init();
-    return () => unsub?.();
-  }, []);
-
   async function sendMessage() {
     if (!input.trim()) return;
 
-    try {
-      const db = getFirebaseFirestore();
-      await addDoc(collection(db, 'rooms', 'mock-interview', 'messages'), {
-        role: 'user',
-        content: input.trim(),
-        createdAt: serverTimestamp(),
-        sender: {
-          uid: user?.uid ?? null,
-          name: user?.displayName ?? user?.email ?? 'Guest',
-        },
-      });
-      setInput('');
-    } catch (err) {
-      console.error('Send message error:', err);
-    }
+    // Auth-only placeholder: local echo
+    const newMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: input.trim(),
+      createdAt: new Date(),
+    };
+    setMessages((prev) => [...prev, newMessage]);
+    setInput('');
   }
 
   return (
@@ -99,8 +51,8 @@ export default function ChatRoomPage() {
             >
               <div className="whitespace-pre-wrap">{m.content}</div>
               <div className="mt-1 text-xs text-muted-foreground">
-                {m.createdAt?.toDate
-                  ? m.createdAt.toDate().toLocaleTimeString()
+                {m.createdAt
+                  ? new Date(m.createdAt).toLocaleTimeString()
                   : ''}
               </div>
             </div>
@@ -112,12 +64,14 @@ export default function ChatRoomPage() {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
-          placeholder="Type your answer..."
+          className="flex-1 rounded border px-3 py-2"
+          placeholder={user ? 'Type a message...' : 'Login to chat'}
+          disabled={!user}
         />
         <button
           onClick={sendMessage}
-          className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+          className="rounded bg-primary px-4 py-2 text-white"
+          disabled={!user}
         >
           Send
         </button>
