@@ -4,6 +4,145 @@
 
 This implementation adds a complete backend API for user credentials and admin login to the Job-Crawler application, providing a secure authentication flow that works with Google Sign-In and PostgreSQL for credential storage.
 
+## Flow Diagrams
+
+### Regular User Authentication Flow
+
+```
+┌─────────────┐
+│   User      │
+│ (Browser)   │
+└──────┬──────┘
+       │
+       │ 1. Click "Sign in with Google"
+       ▼
+┌─────────────────┐
+│   Firebase      │
+│ Authentication  │
+└──────┬──────────┘
+       │
+       │ 2. Google OAuth
+       │    & ID Token
+       ▼
+┌─────────────────┐
+│   Redirect to   │
+│ /auth/credentials│
+└──────┬──────────┘
+       │
+       │ 3a. New User: Create Credentials
+       │ 3b. Existing User: Verify Credentials
+       ▼
+┌──────────────────────┐
+│  Next.js API Route   │
+│ /api/auth/credentials│
+└──────┬───────────────┘
+       │
+       │ 4. Forward with Firebase Token
+       ▼
+┌──────────────────────┐
+│  Python Backend      │
+│  FastAPI Endpoint    │
+│  • Validate Token    │
+│  • Hash/Check Pass   │
+│  • Store/Verify DB   │
+└──────┬───────────────┘
+       │
+       │ 5. Return Success
+       ▼
+┌──────────────────────┐
+│  Store in LocalStorage│
+│  • credentialsComplete│
+│  • userRole          │
+│  • username          │
+└──────┬───────────────┘
+       │
+       │ 6. Redirect to /dashboard
+       ▼
+┌──────────────────────┐
+│  Protected Routes    │
+│  • Check credentials │
+│  • Enforce gate      │
+└──────────────────────┘
+```
+
+### Admin Login Flow
+
+```
+┌─────────────┐
+│   Admin     │
+│   User      │
+└──────┬──────┘
+       │
+       │ 1. Navigate to /admin/login
+       ▼
+┌─────────────────┐
+│  Admin Login    │
+│     Page        │
+│  Enter username │
+│  Enter password │
+└──────┬──────────┘
+       │
+       │ 2. Submit credentials
+       ▼
+┌──────────────────────┐
+│  Next.js API Route   │
+│  /api/admin/login    │
+└──────┬───────────────┘
+       │
+       │ 3. Forward to backend
+       ▼
+┌──────────────────────┐
+│  Python Backend      │
+│  • Query DB          │
+│  • Check role=admin  │
+│  • Verify password   │
+└──────┬───────────────┘
+       │
+       │ 4. Return admin token
+       ▼
+┌──────────────────────┐
+│  Store admin session │
+│  Redirect to dashboard│
+└──────────────────────┘
+```
+
+### Protected Route Check
+
+```
+┌─────────────────┐
+│   User Access   │
+│ Protected Route │
+└──────┬──────────┘
+       │
+       │ 1. Check localStorage
+       ▼
+┌─────────────────────┐
+│  credentialsComplete? │
+└──────┬────────┬─────┘
+       │        │
+   Yes │        │ No/Expired
+       │        ▼
+       │   ┌───────────────┐
+       │   │  Call Backend │
+       │   │ GET /auth/    │
+       │   │ credentials/  │
+       │   │    check      │
+       │   └──────┬────────┘
+       │          │
+       │          ▼
+       │   ┌───────────────┐
+       │   │  Complete?    │
+       │   └──┬────────┬───┘
+       │      │        │
+       │   Yes│        │No
+       ▼      ▼        ▼
+┌──────────┐  │   ┌─────────────┐
+│  Allow   │◄─┘   │  Redirect   │
+│  Access  │      │ /auth/      │
+└──────────┘      │ credentials │
+                  └─────────────┘
+```
+
 ## Architecture
 
 ### Backend (Python/FastAPI)
