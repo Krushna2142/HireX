@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { getFirebaseAuth } from '@/lib/firebase/Client';
 
 export default function CredentialsPage() {
   const { user } = useAuth();
@@ -14,6 +15,8 @@ export default function CredentialsPage() {
   const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) router.replace('/');
@@ -21,14 +24,53 @@ export default function CredentialsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+    setLoading(true);
 
-    // TODO: call backend to create/verify credentials in PostgreSQL
+    try {
+      // Get Firebase ID token
+      const auth = getFirebaseAuth();
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('Not authenticated');
+      }
+      const idToken = await currentUser.getIdToken();
 
-    localStorage.setItem('credentialsComplete', 'true');
-    localStorage.setItem('userRole', role);
-    localStorage.setItem('username', username);
+      const endpoint = mode === 'create' 
+        ? '/api/auth/credentials/create' 
+        : '/api/auth/credentials/verify';
 
-    router.push('/dashboard');
+      const body = mode === 'create'
+        ? { username, password, role }
+        : { username, password };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to process credentials');
+      }
+
+      // Store credentials completion status and user info
+      localStorage.setItem('credentialsComplete', 'true');
+      localStorage.setItem('userRole', data.role);
+      localStorage.setItem('username', username);
+
+      router.push('/dashboard');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -39,6 +81,12 @@ export default function CredentialsPage() {
           ? 'Create your username and password to finish setup.'
           : 'Enter your username and password to continue.'}
       </p>
+
+      {error && (
+        <div className="mt-4 rounded-md bg-red-50 p-4 text-sm text-red-800">
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div className="flex items-center gap-4 text-sm">
@@ -62,32 +110,35 @@ export default function CredentialsPage() {
           </label>
         </div>
 
-        <div className="flex items-center gap-4 text-sm">
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="role"
-              checked={role === 'candidate'}
-              onChange={() => setRole('candidate')}
-            />
-            Candidate
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="role"
-              checked={role === 'recruiter'}
-              onChange={() => setRole('recruiter')}
-            />
-            Recruiter
-          </label>
-        </div>
+        {mode === 'create' && (
+          <div className="flex items-center gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="role"
+                checked={role === 'candidate'}
+                onChange={() => setRole('candidate')}
+              />
+              Candidate
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="role"
+                checked={role === 'recruiter'}
+                onChange={() => setRole('recruiter')}
+              />
+              Recruiter
+            </label>
+          </div>
+        )}
 
         <Input
           placeholder="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           required
+          disabled={loading}
         />
         <Input
           placeholder="Password"
@@ -95,10 +146,11 @@ export default function CredentialsPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          disabled={loading}
         />
 
-        <Button type="submit" className="w-full">
-          {mode === 'create' ? 'Create account' : 'Verify and continue'}
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading ? 'Processing...' : mode === 'create' ? 'Create account' : 'Verify and continue'}
         </Button>
       </form>
     </div>

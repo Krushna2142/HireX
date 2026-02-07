@@ -2,7 +2,13 @@
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     firebase_uid VARCHAR(255) UNIQUE NOT NULL,
-    email VARCHAR(255)
+    email VARCHAR(255),
+    username VARCHAR(255) UNIQUE,
+    password_hash VARCHAR(255),
+    role VARCHAR(50) CHECK (role IN ('candidate', 'recruiter', 'admin')),
+    credentials_complete BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE resumes (
