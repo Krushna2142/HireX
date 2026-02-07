@@ -1,10 +1,9 @@
 'use client';
-
+//frontend/components/providers/AuthProvider.tsx
 import React, {
   createContext,
   useContext,
   useEffect,
-  useMemo,
   useState,
   ReactNode,
 } from 'react';
@@ -24,8 +23,8 @@ export type AuthUser = {
 };
 
 export type AuthContextType = {
-  user: AuthUser | null;          // The logged-in user's data
-  loading: boolean;               // Indicates if the authentication state is loading
+  user: AuthUser | null;
+  loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
 };
@@ -41,8 +40,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (typeof window !== 'undefined') {
       const auth = getFirebaseAuth();
-
-      // Attach listener for Firebase authentication state changes
       authUnsub = onAuthStateChanged(auth, (fbUser: User | null) => {
         if (fbUser) {
           setUser({
@@ -58,7 +55,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // Cleanup subscription on component unmount
     return () => {
       if (authUnsub) authUnsub();
     };
@@ -82,6 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const auth = getFirebaseAuth();
     try {
       await signOut(auth);
+      localStorage.clear();
+      sessionStorage.clear();
     } catch (error) {
       console.error('Sign-out failed:', error);
       throw error;

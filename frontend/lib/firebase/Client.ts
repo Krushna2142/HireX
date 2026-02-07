@@ -1,9 +1,7 @@
 // Client-only Firebase initializer for Next.js
+//frontend/lib/firebase/Client.ts
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getAnalytics, isSupported } from 'firebase/analytics';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? '',
@@ -22,10 +20,8 @@ function maskKey(key = '') {
 }
 
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-   
   console.info('[firebase] apiKey:', maskKey(firebaseConfig.apiKey));
   if (!firebaseConfig.apiKey) {
-     
     console.error('[firebase] NEXT_PUBLIC_FIREBASE_API_KEY is not set. Add it to .env.local and restart the dev server.');
   }
 }
@@ -49,28 +45,5 @@ export function getFirebaseAuth() {
   return getAuth(app);
 }
 
-export function getFirebaseFirestore() {
-  const app = ensureClientApp();
-  return getFirestore(app);
-}
-
-export function getFirebaseStorage() {
-  const app = ensureClientApp();
-  return getStorage(app);
-}
-
-export async function initAnalyticsIfAvailable() {
-  if (typeof window === 'undefined') return null;
-  if (!firebaseConfig.measurementId) return null;
-  try {
-    if (await isSupported()) {
-      const app = ensureClientApp();
-      return getAnalytics(app);
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
