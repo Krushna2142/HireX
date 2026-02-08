@@ -11,51 +11,21 @@ import asyncio
 import openai
 from minio import Minio  # Add for file storage
 import redis  # Add for caching
-
-
-# ... (existing imports and setup)
-
 from passlib.hash import bcrypt  # Add for password hashing
 import smtplib  # For email reset (optional, or use a service)
 
-
+# Create FastAPI app
 app = FastAPI()
 
-@app.post("/auth/credentials/create") # type: ignore
-def create_credentials(user: dict, token: str = Depends(verify_token)): # pyright: ignore[reportUndefinedVariable]
-    firebase_uid = user['firebase_uid'] or token  # Use token UID
-    username = user['username']
-    password = bcrypt.hash(user['password'])
-    role = user['role']
-    cur = conn.cursor()
-    cur.execute("INSERT INTO users (firebase_uid, username, password_hash, role) VALUES (%s, %s, %s, %s)",
-                (firebase_uid, username, password, role))
-    conn.commit()
-    return {"message": "Created"}
-
-@app.post("/auth/credentials/verify") # type: ignore
-def verify_credentials(user: dict, token: str = Depends(verify_token)): # pyright: ignore[reportUndefinedVariable]
-    firebase_uid = user['firebase_uid'] or token
-    username = user['username']
-    cur = conn.cursor()
-    cur.execute("SELECT password_hash FROM users WHERE firebase_uid = %s AND username = %s", (firebase_uid, username))
-    result = cur.fetchone()
-    if result and bcrypt.verify(user['password'], result[0]):
-        return {"message": "Verified"}
-    raise HTTPException(status_code=401, detail="Invalid credentials")
-
-@app.post("/auth/reset-password") # type: ignore
-def reset_password(data: dict):
-    email = data['email']
-    # Placeholder: Send email via smtplib or service
-    # e.g., server = smtplib.SMTP('smtp.example.com'); server.sendmail(...)
-    print(f"Reset for {email}")
-    return {"message": "Sent"}
-
-
+# Define verify_token HERE (before any endpoints use it)
+def verify_token(token: str):
+    try:
+        decoded_token = auth.verify_id_token(token)
+        return decoded_token['uid']
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 # CORS
-from fastapi.middleware.cors import CORSMiddleware # type: ignore
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://job-crawler-wine.vercel.app", "http://localhost:3000"],
@@ -65,15 +35,15 @@ app.add_middleware(
 )
 
 # Firebase
-cred = credentials.Certificate("path/to/serviceAccount.json")
+cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
 # PostgreSQL (Docker service)
 conn = psycopg2.connect(
-    dbname="jobcrawler",
+    dbname="JobCrawlerDB",
     user="postgres",
-    password="postgres",
-    host="postgres",  # Docker service name
+    password="Krushna@123",
+    host="localhost",  # Docker service name
     port="5432"
 )
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
@@ -109,12 +79,37 @@ class Job(BaseModel):
     company: str
     skills: list
 
-def verify_token(token: str):
-    try:
-        decoded_token = auth.verify_id_token(token)
-        return decoded_token['uid']
-    except:
-        raise HTTPException(status_code=401, detail="Invalid token")
+# Endpoints
+@app.post("/auth/credentials/create")
+def create_credentials(user: dict, token: str = Depends(verify_token)):
+    firebase_uid = user['firebase_uid'] or token  # Use token UID
+    username = user['username']
+    password = bcrypt.hash(user['password'])
+    role = user['role']
+    cur = conn.cursor()
+    cur.execute("INSERT INTO users (firebase_uid, username, password_hash, role) VALUES (%s, %s, %s, %s)",
+                (firebase_uid, username, password, role))
+    conn.commit()
+    return {"message": "Created"}
+
+@app.post("/auth/credentials/verify")
+def verify_credentials(user: dict, token: str = Depends(verify_token)):
+    firebase_uid = user['firebase_uid'] or token
+    username = user['username']
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE firebase_uid = %s AND username = %s", (firebase_uid, username))
+    result = cur.fetchone()
+    if result and bcrypt.verify(user['password'], result[0]):
+        return {"message": "Verified"}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+@app.post("/auth/reset-password")
+def reset_password(data: dict):
+    email = data['email']
+    # Placeholder: Send email via smtplib or service
+    # e.g., server = smtplib.SMTP('smtp.example.com'); server.sendmail(...)
+    print(f"Reset for {email}")
+    return {"message": "Sent"}
 
 @app.post("/upload-resume")
 async def upload_resume(file: UploadFile, token: str = Depends(verify_token)):
