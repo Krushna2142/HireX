@@ -6,6 +6,7 @@ import { getFirebaseAuth } from '@/lib/firebase/Client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useRouter } from 'next/navigation';
+import { X, User, Lock, Mail, Loader2 } from 'lucide-react'; // Icons for better UI
 
 type Props = {
   open: boolean;
@@ -31,7 +32,7 @@ export default function CredentialsModal({ open, onClose }: Props) {
     return () => document.removeEventListener('keydown', onEsc);
   }, [open, onClose]);
 
-  // Prevent rendering if not open or no user
+  // Prevent rendering if not open or no user (Firebase auth required)
   if (!open || !user) return null;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -64,7 +65,7 @@ export default function CredentialsModal({ open, onClose }: Props) {
         localStorage.setItem('userRole', role);
         localStorage.setItem('username', username);
         onClose();
-        router.push('/dashboard'); // Ensure redirect to protected route
+        router.push('/dashboard'); // Redirect to protected route
       } else {
         const errData = await response.json();
         setError(errData.message || 'Credentials setup failed');
@@ -104,61 +105,175 @@ export default function CredentialsModal({ open, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-background p-6 rounded-lg shadow-lg max-w-md w-full mx-4">
-        {forgotMode ? (
-          <form onSubmit={handleForgotPassword}>
-            <h2 className="text-xl font-semibold">Reset Password</h2>
-            <p className="text-sm text-muted-foreground">Enter your email</p>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <Input
-              placeholder="Email"
-              value={resetEmail}
-              onChange={(e) => setResetEmail(e.target.value)}
-              required
-            />
-            <Button type="submit" className="w-full mt-4" disabled={loading}>
-              {loading ? 'Sending...' : 'Send Reset'}
-            </Button>
-            <Button variant="ghost" onClick={() => setForgotMode(false)} className="w-full mt-2">
-              Back
-            </Button>
-          </form>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <h2 className="text-xl font-semibold">Complete Login</h2>
-            <p className="text-sm text-muted-foreground">
-              {mode === 'create' ? 'Create credentials' : 'Enter your credentials'}
-            </p>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <div className="flex gap-4 mt-4">
-              <label>
-                <input type="radio" checked={mode === 'create'} onChange={() => setMode('create')} /> New User
-              </label>
-              <label>
-                <input type="radio" checked={mode === 'login'} onChange={() => setMode('login')} /> Existing
-              </label>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+      <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full mx-auto max-h-[90vh] overflow-y-auto">
+        {/* Header with close button */}
+        <div className="flex items-center justify-between p-6 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+              <User className="w-5 h-5 text-white" />
             </div>
-            <div className="flex gap-4 mt-2">
-              <label>
-                <input type="radio" checked={role === 'candidate'} onChange={() => setRole('candidate')} /> Candidate
-              </label>
-              <label>
-                <input type="radio" checked={role === 'recruiter'} onChange={() => setRole('recruiter')} /> Recruiter
-              </label>
+            <div>
+              <h2 className="text-xl font-bold text-foreground">
+                {forgotMode ? 'Reset Password' : 'Complete Your Login'}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {forgotMode
+                  ? 'Enter your email to reset'
+                  : mode === 'create'
+                  ? 'Set up your account'
+                  : 'Sign in to continue'}
+              </p>
             </div>
-            <Input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-            <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            <Button type="submit" className="w-full mt-4" disabled={loading}>
-              {loading ? 'Processing...' : (mode === 'create' ? 'Create Account' : 'Verify and Continue')}
-            </Button>
-            <p className="text-sm mt-2">
-              <button type="button" onClick={() => setForgotMode(true)} className="text-blue-500 underline">
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-muted rounded-full transition-colors"
+            aria-label="Close modal"
+          >
+            <X className="w-5 h-5 text-muted-foreground" />
+          </button>
+        </div>
+
+        {/* Form Content */}
+        <div className="p-6 space-y-6">
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
+
+          {forgotMode ? (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
+                <Input
+                  type="email"
+                  placeholder="Your email address"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
+              <Button
+                type="submit"
+                className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-medium py-3 rounded-lg transition-all"
+                disabled={loading}
+              >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
+                {loading ? 'Sending...' : 'Send Reset Link'}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setForgotMode(false)}
+                className="w-full text-muted-foreground hover:text-foreground transition-colors text-sm"
+              >
+                Back to Login
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Mode Selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Account Type</label>
+                <div className="flex gap-3 sm:gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={mode === 'create'}
+                      onChange={() => setMode('create')}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm">New User</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={mode === 'login'}
+                      onChange={() => setMode('login')}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm">Existing</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Role Selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Role</label>
+                <div className="flex gap-3 sm:gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={role === 'candidate'}
+                      onChange={() => setRole('candidate')}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm">Candidate</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={role === 'recruiter'}
+                      onChange={() => setRole('recruiter')}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm">Recruiter</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Username */}
+              <div className="relative">
+                <User className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
+                <Input
+                  placeholder="Username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
+
+              {/* Password */}
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
+                <Input
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                className="w-full bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white font-medium py-3 rounded-lg transition-all"
+                disabled={loading}
+              >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
+                {loading
+                  ? 'Processing...'
+                  : mode === 'create'
+                  ? 'Create Account'
+                  : 'Sign In'}
+              </Button>
+
+              {/* Forgot Password Link */}
+              <button
+                type="button"
+                onClick={() => setForgotMode(true)}
+                className="w-full text-muted-foreground hover:text-primary transition-colors text-sm underline"
+              >
                 Forgot Password?
               </button>
-            </p>
-          </form>
-        )}
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
