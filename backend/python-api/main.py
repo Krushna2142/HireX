@@ -18,6 +18,9 @@ import redis  # Add for caching
 from passlib.hash import bcrypt  # Add for password hashing
 import smtplib  # For email reset (optional, or use a service)
 
+
+app = FastAPI()
+
 @app.post("/auth/credentials/create") # type: ignore
 def create_credentials(user: dict, token: str = Depends(verify_token)): # pyright: ignore[reportUndefinedVariable]
     firebase_uid = user['firebase_uid'] or token  # Use token UID
@@ -49,7 +52,7 @@ def reset_password(data: dict):
     print(f"Reset for {email}")
     return {"message": "Sent"}
 
-app = FastAPI()
+
 
 # CORS
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
