@@ -7,6 +7,7 @@ import { useAuth } from '../providers/AuthProvider';
 import Avatar from '../ui/Avatar';
 import { useState } from 'react';
 import LoginModal from '@/components/auth/CredentialsModal';
+import { Button } from '@/components/ui/Button';
 
 const publicLinks = [
   { href: '/', label: 'Home' },
@@ -23,8 +24,17 @@ const privateLinks = [
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, signOutUser } = useAuth();
+  const { user, loading, signInWithGoogle, signOutUser } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      setLoginOpen(true); // Open modal after Google sign-in
+    } catch (error) {
+      console.error('Sign-in failed:', error);
+    }
+  };
 
   return (
     <>
@@ -88,12 +98,9 @@ export default function Navbar() {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setLoginOpen(true)}
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm hover:bg-muted"
-              >
-                Sign in
-              </button>
+              <Button onClick={handleSignIn} disabled={loading}>
+                {loading ? 'Signing in...' : 'Sign in with Google'}
+              </Button>
             )}
           </div>
         </div>
