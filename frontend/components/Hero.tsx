@@ -4,9 +4,9 @@ import Link from 'next/link';
 
 export default function Hero() {
   return (
-    <section className="relative overflow-hidden">
+    <section className="relative overflow-hidden pt-0.5 pb-0.5">
       <div
-        className="pointer-events-none absolute inset-0 -z-10 opacity-60 blur-3xl"
+        className="pointer-events-none absolute  inset-0 -z-10 opacity-60 blur-3xl"
         aria-hidden
         style={{
           background:
