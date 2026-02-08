@@ -6,7 +6,8 @@ import { getFirebaseAuth } from '@/lib/firebase/Client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useRouter } from 'next/navigation';
-import { X, User, Lock, Mail, Loader2 } from 'lucide-react'; // Icons for better UI
+import { X, User, Lock, Mail, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 type Props = {
   open: boolean;
@@ -32,7 +33,7 @@ export default function CredentialsModal({ open, onClose }: Props) {
     return () => document.removeEventListener('keydown', onEsc);
   }, [open, onClose]);
 
-  // Prevent rendering if not open or no user (Firebase auth required)
+  // Prevent rendering if not open or no user
   if (!open || !user) return null;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -65,7 +66,7 @@ export default function CredentialsModal({ open, onClose }: Props) {
         localStorage.setItem('userRole', role);
         localStorage.setItem('username', username);
         onClose();
-        router.push('/dashboard'); // Redirect to protected route
+        router.push('/dashboard');
       } else {
         const errData = await response.json();
         setError(errData.message || 'Credentials setup failed');
@@ -104,177 +105,266 @@ export default function CredentialsModal({ open, onClose }: Props) {
     }
   }
 
+  // Animation variants (corrected: no 'transition' inside)
+  const backdropVariants = {
+    hidden: { opacity: 0 },
+    visible: { opacity: 1 },
+    exit: { opacity: 0 },
+  };
+
+  const modalVariants = {
+    hidden: { opacity: 0, scale: 0.8, y: 50 },
+    visible: { opacity: 1, scale: 1, y: 0 },
+    exit: { opacity: 0, scale: 0.9, y: 20 },
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0 },
+  };
+
+  const staggerContainer = {
+    hidden: { opacity: 1 },
+    visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-      <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full mx-auto max-h-[90vh] overflow-y-auto">
-        {/* Header with close button */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-              <User className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-foreground">
-                {forgotMode ? 'Reset Password' : 'Complete Your Login'}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {forgotMode
-                  ? 'Enter your email to reset'
-                  : mode === 'create'
-                  ? 'Set up your account'
-                  : 'Sign in to continue'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-muted rounded-full transition-colors"
-            aria-label="Close modal"
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          variants={backdropVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          transition={{ duration: 0.3 }}
+        >
+          <motion.div
+            className="bg-card border border-border rounded-2xl shadow-2xl max-w-lg w-full mx-auto max-h-[90vh] overflow-y-auto"
+            variants={modalVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            transition={{ duration: 0.4, ease: 'easeOut' }}
           >
-            <X className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </div>
-
-        {/* Form Content */}
-        <div className="p-6 space-y-6">
-          {error && (
-            <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-
-          {forgotMode ? (
-            <form onSubmit={handleForgotPassword} className="space-y-4">
-              <div className="relative">
-                <Mail className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
-                <Input
-                  type="email"
-                  placeholder="Your email address"
-                  value={resetEmail}
-                  onChange={(e) => setResetEmail(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-medium py-3 rounded-lg transition-all"
-                disabled={loading}
-              >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
-                {loading ? 'Sending...' : 'Send Reset Link'}
-              </Button>
-              <button
-                type="button"
-                onClick={() => setForgotMode(false)}
-                className="w-full text-muted-foreground hover:text-foreground transition-colors text-sm"
-              >
-                Back to Login
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Mode Selection */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Account Type</label>
-                <div className="flex gap-3 sm:gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={mode === 'create'}
-                      onChange={() => setMode('create')}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm">New User</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={mode === 'login'}
-                      onChange={() => setMode('login')}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm">Existing</span>
-                  </label>
+            {/* Header with close button */}
+            <motion.div
+              className="flex items-center justify-between p-6 border-b border-border"
+              variants={itemVariants}
+            >
+              <div className="flex items-center gap-3">
+                <motion.div
+                  className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center"
+                  whileHover={{ scale: 1.1 }}
+                  transition={{ type: 'spring', stiffness: 300 }}
+                >
+                  <User className="w-5 h-5 text-white" />
+                </motion.div>
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">
+                    {forgotMode ? 'Reset Password' : 'Complete Your Login'}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {forgotMode
+                      ? 'Enter your email to reset'
+                      : mode === 'create'
+                      ? 'Set up your account'
+                      : 'Sign in to continue'}
+                  </p>
                 </div>
               </div>
-
-              {/* Role Selection */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Role</label>
-                <div className="flex gap-3 sm:gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={role === 'candidate'}
-                      onChange={() => setRole('candidate')}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm">Candidate</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={role === 'recruiter'}
-                      onChange={() => setRole('recruiter')}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm">Recruiter</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Username */}
-              <div className="relative">
-                <User className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
-                <Input
-                  placeholder="Username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-
-              {/* Password */}
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
-                <Input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
-                  required
-                />
-              </div>
-
-              {/* Submit Button */}
-              <Button
-                type="submit"
-                className="w-full bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white font-medium py-3 rounded-lg transition-all"
-                disabled={loading}
+              <motion.button
+                onClick={onClose}
+                className="p-2 hover:bg-muted rounded-full transition-colors"
+                aria-label="Close modal"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
               >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : null}
-                {loading
-                  ? 'Processing...'
-                  : mode === 'create'
-                  ? 'Create Account'
-                  : 'Sign In'}
-              </Button>
+                <X className="w-5 h-5 text-muted-foreground" />
+              </motion.button>
+            </motion.div>
 
-              {/* Forgot Password Link */}
-              <button
-                type="button"
-                onClick={() => setForgotMode(true)}
-                className="w-full text-muted-foreground hover:text-primary transition-colors text-sm underline"
-              >
-                Forgot Password?
-              </button>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
+            {/* Form Content */}
+            <motion.div
+              className="p-6 space-y-6"
+              variants={staggerContainer}
+              initial="hidden"
+              animate="visible"
+            >
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm"
+                    variants={itemVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                  >
+                    {error}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {forgotMode ? (
+                <motion.form
+                  onSubmit={handleForgotPassword}
+                  className="space-y-4"
+                  variants={staggerContainer}
+                  initial="hidden"
+                  animate="visible"
+                >
+                  <motion.div className="relative" variants={itemVariants}>
+                    <Mail className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="email"
+                      placeholder="Your email address"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      className="pl-10 transition-all focus:ring-2 focus:ring-primary"
+                      required
+                    />
+                  </motion.div>
+                  <motion.div variants={itemVariants}>
+                    <Button
+                      type="submit"
+                      className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-medium py-3 rounded-lg transition-all hover:scale-105"
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        >
+                          <Loader2 className="w-5 h-5" />
+                        </motion.div>
+                      ) : (
+                        'Send Reset Link'
+                      )}
+                    </Button>
+                  </motion.div>
+                  <motion.button
+                    type="button"
+                    onClick={() => setForgotMode(false)}
+                    className="w-full text-muted-foreground hover:text-primary transition-colors text-sm underline"
+                    variants={itemVariants}
+                  >
+                    Back to Login
+                  </motion.button>
+                </motion.form>
+              ) : (
+                <motion.form
+                  onSubmit={handleSubmit}
+                  className="space-y-4"
+                  variants={staggerContainer}
+                  initial="hidden"
+                  animate="visible"
+                >
+                  {/* Mode Selection */}
+                  <motion.div className="space-y-2" variants={itemVariants}>
+                    <label className="text-sm font-medium text-foreground">Account Type</label>
+                    <div className="flex gap-3 sm:gap-4">
+                      {['create', 'login'].map((m) => (
+                        <motion.label
+                          key={m}
+                          className="flex items-center gap-2 cursor-pointer"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          <input
+                            type="radio"
+                            checked={mode === m}
+                            onChange={() => setMode(m as 'create' | 'login')}
+                            className="accent-primary"
+                          />
+                          <span className="text-sm">{m === 'create' ? 'New User' : 'Existing'}</span>
+                        </motion.label>
+                      ))}
+                    </div>
+                  </motion.div>
+
+                  {/* Role Selection */}
+                  <motion.div className="space-y-2" variants={itemVariants}>
+                    <label className="text-sm font-medium text-foreground">Role</label>
+                    <div className="flex gap-3 sm:gap-4">
+                      {['candidate', 'recruiter'].map((r) => (
+                        <motion.label
+                          key={r}
+                          className="flex items-center gap-2 cursor-pointer"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          <input
+                            type="radio"
+                            checked={role === r}
+                            onChange={() => setRole(r as 'candidate' | 'recruiter')}
+                            className="accent-primary"
+                          />
+                          <span className="text-sm capitalize">{r}</span>
+                        </motion.label>
+                      ))}
+                    </div>
+                  </motion.div>
+
+                  {/* Username */}
+                  <motion.div className="relative" variants={itemVariants}>
+                    <User className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      placeholder="Username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="pl-10 transition-all focus:ring-2 focus:ring-primary"
+                      required
+                    />
+                  </motion.div>
+
+                  {/* Password */}
+                  <motion.div className="relative" variants={itemVariants}>
+                    <Lock className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="password"
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-10 transition-all focus:ring-2 focus:ring-primary"
+                      required
+                    />
+                  </motion.div>
+
+                  {/* Submit Button */}
+                  <motion.div variants={itemVariants}>
+                    <Button
+                      type="submit"
+                      className="w-full bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white font-medium py-3 rounded-lg transition-all hover:scale-105"
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        >
+                          <Loader2 className="w-5 h-5" />
+                        </motion.div>
+                      ) : (
+                        mode === 'create' ? 'Create Account' : 'Sign In'
+                      )}
+                    </Button>
+                  </motion.div>
+
+                  {/* Forgot Password Link */}
+                  <motion.button
+                    type="button"
+                    onClick={() => setForgotMode(true)}
+                    className="w-full text-muted-foreground hover:text-primary transition-colors text-sm underline"
+                    variants={itemVariants}
+                  >
+                    Forgot Password?
+                  </motion.button>
+                </motion.form>
+              )}
+            </motion.div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
