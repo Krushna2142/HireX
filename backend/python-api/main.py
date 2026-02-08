@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, HTTPException, Depends
 from fastapi.websockets import WebSocket
+from fastapi.middleware.cors import CORSMiddleware  # Move here
 from pydantic import BaseModel
 import psycopg2
 import spacy
@@ -35,15 +36,15 @@ app.add_middleware(
 )
 
 # Firebase
-cred = credentials.Certificate("serviceAccount.json")
+cred = credentials.Certificate("path/to/serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
 # PostgreSQL (Docker service)
 conn = psycopg2.connect(
-    dbname="JobCrawlerDB",
+    dbname="jobcrawler",
     user="postgres",
-    password="Krushna@123",
-    host="localhost",  # Docker service name
+    password="postgres",
+    host="postgres",  # Docker service name
     port="5432"
 )
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
