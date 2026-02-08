@@ -32,7 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-cred = credentials.Certificate("path/to/serviceAccount.json")
+cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
 conn = psycopg2.connect(
