@@ -9,6 +9,9 @@ import { useRouter } from 'next/navigation';
 import { X, User, Lock, Mail, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -51,15 +54,26 @@ export default function CredentialsModal({ open, onClose }: Props) {
         return;
       }
 
-      const endpoint = mode === 'create' ? '/api/auth/credentials/create' : '/api/auth/credentials/verify';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ username, password, role }),
-      });
+      const endpoint =
+        mode === 'create'
+          ? '/auth/credentials/create'
+          : '/auth/credentials/verify';
+
+      const response = await fetch(
+        `${API_BASE_URL}${endpoint}?token=${encodeURIComponent(idToken)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            firebase_uid: user.uid,
+            username,
+            password,
+            role,
+          }),
+        }
+      );
 
       if (response.ok) {
         localStorage.setItem('credentialsComplete', 'true');
@@ -68,8 +82,15 @@ export default function CredentialsModal({ open, onClose }: Props) {
         onClose();
         router.push('/dashboard');
       } else {
-        const errData = await response.json();
-        setError(errData.message || 'Credentials setup failed');
+        let message = 'Credentials setup failed';
+        try {
+          const errData = await response.json();
+          if (errData?.message) message = errData.message;
+        } catch {
+          const text = await response.text();
+          if (text) message = text;
+        }
+        setError(message);
       }
     } catch (error) {
       console.error('Error:', error);
@@ -85,17 +106,28 @@ export default function CredentialsModal({ open, onClose }: Props) {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetEmail }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/auth/reset-password`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: resetEmail }),
+        }
+      );
 
       if (response.ok) {
         alert('Reset link sent (if email exists)');
         setForgotMode(false);
       } else {
-        setError('Reset failed');
+        let message = 'Reset failed';
+        try {
+          const errData = await response.json();
+          if (errData?.message) message = errData.message;
+        } catch {
+          const text = await response.text();
+          if (text) message = text;
+        }
+        setError(message);
       }
     } catch (error) {
       console.error(error);
