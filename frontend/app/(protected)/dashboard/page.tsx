@@ -35,13 +35,15 @@ export default function DashboardPage() {
   const [sortBy, setSortBy] = useState<'appliedAt' | 'stage'>('appliedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
+  const [socketUrl, setSocketUrl] = useState<string | null>(null);
 
   const auth = getAuth();
   const user = auth.currentUser;
-  const backendUrl = 'http://localhost:8000';  // Change to deployed URL (e.g., https://your-backend.railway.app)
+  const backendUrl =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
 
   // WebSocket for real-time updates
-  const { lastMessage } = useWebSocket(`${backendUrl.replace('http', 'ws')}/ws?token=${user?.getIdToken()}`, {
+  const { lastMessage } = useWebSocket(socketUrl, {
     shouldReconnect: () => true,
   });
 
@@ -51,10 +53,13 @@ export default function DashboardPage() {
       if (!user) return;
       try {
         const token = await user.getIdToken();
-        const config = { headers: { Authorization: `Bearer ${token}` } };
         const [appsRes, alertsRes] = await Promise.all([
-          axios.get(`${backendUrl}/jobs`, config),
-          axios.get(`${backendUrl}/alerts`, config)
+          axios.get(
+            `${backendUrl}/jobs?token=${encodeURIComponent(token)}`
+          ),
+          axios.get(
+            `${backendUrl}/alerts?token=${encodeURIComponent(token)}`
+          ),
         ]);
         // Map backend response to frontend format
         setApplications(appsRes.data.jobs.map((j: any) => ({
@@ -74,6 +79,30 @@ export default function DashboardPage() {
       }
     };
     fetchData();
+  }, [user, backendUrl]);
+
+  // Initialize WebSocket URL once we have a user + token
+  useEffect(() => {
+    let cancelled = false;
+
+    const setupSocket = async () => {
+      if (!user) {
+        setSocketUrl(null);
+        return;
+      }
+      const token = await user.getIdToken();
+      if (cancelled) return;
+      const wsBase = backendUrl.replace(/^http/, 'ws');
+      setSocketUrl(
+        `${wsBase}/mock-interview?token=${encodeURIComponent(token)}`
+      );
+    };
+
+    setupSocket();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, backendUrl]);
 
   // Handle WebSocket messages
