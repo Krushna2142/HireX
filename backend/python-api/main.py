@@ -5,7 +5,6 @@ from pydantic import BaseModel
 import psycopg2
 import spacy
 import requests
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import firebase_admin
 from firebase_admin import auth, credentials
 import asyncio
@@ -17,12 +16,14 @@ import ast  # For safely parsing stored skills representations
 
 app = FastAPI()
 
+
 def verify_token(token: str):
     try:
         decoded_token = auth.verify_id_token(token)
-        return decoded_token['uid']
-    except:
+        return decoded_token["uid"]
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,10 +56,20 @@ else:
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
 nlp = spacy.load("en_core_web_sm")
-model_name = "microsoft/DialoGPT-small"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-openai.api_key = os.getenv('OPENAI_API_KEY', 'your_openai_key')
+
+# Control use of local transformers SLM via env var to avoid OOM on small instances.
+USE_LOCAL_SLM = os.getenv("USE_LOCAL_SLM", "false").lower() == "true"
+tokenizer = None
+model = None
+
+if USE_LOCAL_SLM:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    _model_name = "microsoft/DialoGPT-small"
+    tokenizer = AutoTokenizer.from_pretrained(_model_name)
+    model = AutoModelForCausalLM.from_pretrained(_model_name)
+
+openai.api_key = os.getenv("OPENAI_API_KEY", "your_openai_key")
 
 class User(BaseModel):
     email: str
@@ -159,23 +170,45 @@ async def mock_interview(websocket: WebSocket, token: str):
         user_message = await websocket.receive_text()
         slm_response = None
         openai_response_text = None
-        try:
-            input_ids = tokenizer.encode(chat_history + user_message + tokenizer.eos_token, return_tensors="pt")
-            response_ids = model.generate(input_ids, max_length=100, pad_token_id=tokenizer.eos_token_id)
-            slm_response = tokenizer.decode(response_ids[:, input_ids.shape[-1]:][0], skip_special_tokens=True)
-            await websocket.send_text(f"SLM: {slm_response}")
-        except Exception:
+
+        if USE_LOCAL_SLM and tokenizer is not None and model is not None:
+            try:
+                input_ids = tokenizer.encode(
+                    chat_history + user_message + tokenizer.eos_token,
+                    return_tensors="pt",
+                )
+                response_ids = model.generate(
+                    input_ids,
+                    max_length=100,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+                slm_response = tokenizer.decode(
+                    response_ids[:, input_ids.shape[-1] :][0],
+                    skip_special_tokens=True,
+                )
+                await websocket.send_text(f"SLM: {slm_response}")
+            except Exception:
+                slm_response = None
+
+        if slm_response is None:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": f"Mock interviewer for skills: {skills}."},
+                    {
+                        "role": "system",
+                        "content": f"Mock interviewer for skills: {skills}.",
+                    },
                     {"role": "user", "content": user_message},
                 ],
             )
             openai_response_text = response.choices[0].message.content
             await websocket.send_text(f"OpenAI: {openai_response_text}")
 
-        final_reply = slm_response if slm_response is not None else openai_response_text or ""
+        final_reply = (
+            slm_response
+            if slm_response is not None
+            else openai_response_text or ""
+        )
         chat_history += f"User: {user_message}\nAI: {final_reply}\n"
 
 @app.get("/jobs")
