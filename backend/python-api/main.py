@@ -10,10 +10,10 @@ import firebase_admin
 from firebase_admin import auth, credentials
 import asyncio
 import openai
-from minio import Minio
-import redis
 from passlib.hash import bcrypt
 import smtplib
+import os  # For environment variables
+import ast  # For safely parsing stored skills representations
 
 app = FastAPI()
 
@@ -35,32 +35,30 @@ app.add_middleware(
 cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
-conn = psycopg2.connect(
-    dbname="jobcrawler",
-    user="postgres",
-    password="postgres",
-    host="postgres",
-    port="5432"
-)
+# Use DATABASE_URL when provided; otherwise fall back to individual env vars.
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    conn = psycopg2.connect(database_url)
+else:
+    db_name = os.getenv("POSTGRES_DB", "jobcrawlerdb")
+    db_user = os.getenv("POSTGRES_USER", "jobcrawlerdb_user")
+    db_password = os.getenv("POSTGRES_PASSWORD", "")
+    db_host = os.getenv("POSTGRES_HOST", "postgres")
+    db_port = os.getenv("POSTGRES_PORT", "5432")
+    conn = psycopg2.connect(
+        dbname=db_name,
+        user=db_user,
+        password=db_password,
+        host=db_host,
+        port=db_port,
+    )
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-
-redis_client = redis.Redis(host='redis', port=6379, decode_responses=True)
-
-minio_client = Minio(
-    "minio:9000",
-    access_key="minioadmin",
-    secret_key="minioadmin",
-    secure=False
-)
-bucket_name = "resumes"
-if not minio_client.bucket_exists(bucket_name):
-    minio_client.make_bucket(bucket_name)
 
 nlp = spacy.load("en_core_web_sm")
 model_name = "microsoft/DialoGPT-small"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
-openai.api_key = "your_openai_key"
+openai.api_key = os.getenv('OPENAI_API_KEY', 'your_openai_key')
 
 class User(BaseModel):
     email: str
@@ -105,14 +103,17 @@ async def upload_resume(file: UploadFile, token: str = Depends(verify_token)):
     user_id = verify_token(token)
     content = await file.read()
     text = content.decode('utf-8')
-    file_path = f"{user_id}/{file.filename}"
-    minio_client.put_object(bucket_name, file_path, content, len(content))
+    # Save to local filesystem (temporary)
+    os.makedirs(f"uploads/{user_id}", exist_ok=True)
+    file_path = f"uploads/{user_id}/{file.filename}"
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
     doc = nlp(text)
     skills = [ent.text for ent in doc.ents if ent.label_ in ["SKILL", "ORG"]]
     cur = conn.cursor()
     cur.execute("INSERT INTO resumes (user_id, file_path, skills) VALUES (%s, %s, %s)", (user_id, file_path, skills))
     conn.commit()
-    redis_client.set(f"skills:{user_id}", str(skills))
     jobs_response = requests.get(f"https://api.example.com/jobs?skills={','.join(skills)}").json()
     jobs = jobs_response.get('jobs', [])
     for job in jobs[:10]:
@@ -124,20 +125,58 @@ async def upload_resume(file: UploadFile, token: str = Depends(verify_token)):
 async def mock_interview(websocket: WebSocket, token: str):
     user_id = verify_token(token)
     await websocket.accept()
-    skills = redis_client.get(f"skills:{user_id}")
-    skills = eval(skills) if skills else []
+    # Fetch skills from DB
+    cur = conn.cursor()
+    cur.execute("SELECT skills FROM resumes WHERE user_id = %s ORDER BY id DESC LIMIT 1", (user_id,))
+    result = cur.fetchone()
+    raw_skills = result[0] if result else []
+
+    # Normalize skills into a list of strings regardless of how they are stored in the DB.
+    skills: list[str]
+    if isinstance(raw_skills, (list, tuple)):
+        skills = [str(s) for s in raw_skills]
+    elif isinstance(raw_skills, str):
+        # Attempt to parse string representations like "['Python', 'SQL']"
+        parsed = None
+        try:
+            parsed = ast.literal_eval(raw_skills)
+        except (SyntaxError, ValueError):
+            parsed = None
+
+        if isinstance(parsed, (list, tuple)):
+            skills = [str(s) for s in parsed]
+        elif raw_skills:
+            skills = [raw_skills]
+        else:
+            skills = []
+    elif raw_skills is None:
+        skills = []
+    else:
+        skills = [str(raw_skills)]
+
     chat_history = f"User skills: {', '.join(skills)}. Start interview."
     while True:
         user_message = await websocket.receive_text()
+        slm_response = None
+        openai_response_text = None
         try:
             input_ids = tokenizer.encode(chat_history + user_message + tokenizer.eos_token, return_tensors="pt")
             response_ids = model.generate(input_ids, max_length=100, pad_token_id=tokenizer.eos_token_id)
             slm_response = tokenizer.decode(response_ids[:, input_ids.shape[-1]:][0], skip_special_tokens=True)
             await websocket.send_text(f"SLM: {slm_response}")
-        except:
-            response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": f"Mock interviewer for skills: {skills}."}, {"role": "user", "content": user_message}])
-            await websocket.send_text(f"OpenAI: {response.choices[0].message.content}")
-        chat_history += f"User: {user_message}\nAI: {slm_response or response.choices[0].message.content}\n"
+        except Exception:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": f"Mock interviewer for skills: {skills}."},
+                    {"role": "user", "content": user_message},
+                ],
+            )
+            openai_response_text = response.choices[0].message.content
+            await websocket.send_text(f"OpenAI: {openai_response_text}")
+
+        final_reply = slm_response if slm_response is not None else openai_response_text or ""
+        chat_history += f"User: {user_message}\nAI: {final_reply}\n"
 
 @app.get("/jobs")
 def get_jobs(token: str = Depends(verify_token)):
