@@ -129,21 +129,36 @@ class Job(BaseModel):
     skills: list
 
 @app.post("/auth/credentials/create")
-def create_credentials(user: dict, token: str = Depends(verify_token)):
-    firebase_uid = user['firebase_uid'] or token
-    username = user['username']
-    password = bcrypt.hash(user['password'])
-    role = user['role']
+def create_credentials(user: dict, user_id: str = Depends(verify_token)):
+    """
+    Create username/password credentials linked to the Firebase user.
+    """
+    firebase_uid = user.get("firebase_uid") or user_id
+    username = user["username"]
+    password = bcrypt.hash(user["password"])
+    role = user["role"]
+
     cur = conn.cursor()
-    cur.execute("INSERT INTO users (firebase_uid, username, password_hash, role) VALUES (%s, %s, %s, %s)",
-                (firebase_uid, username, password, role))
-    conn.commit()
+    try:
+        cur.execute(
+            "INSERT INTO users (firebase_uid, username, password_hash, role) VALUES (%s, %s, %s, %s)",
+            (firebase_uid, username, password, role),
+        )
+        conn.commit()
+    except psycopg2.IntegrityError:
+        # Duplicate (firebase_uid, username)
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="Credentials already exist")
+
     return {"message": "Created"}
 
 @app.post("/auth/credentials/verify")
-def verify_credentials(user: dict, token: str = Depends(verify_token)):
-    firebase_uid = user['firebase_uid'] or token
-    username = user['username']
+def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
+    """
+    Verify username/password for the current Firebase user.
+    """
+    firebase_uid = user.get("firebase_uid") or user_id
+    username = user["username"]
     cur = conn.cursor()
     cur.execute("SELECT password_hash FROM users WHERE firebase_uid = %s AND username = %s", (firebase_uid, username))
     result = cur.fetchone()
@@ -158,8 +173,7 @@ def reset_password(data: dict):
     return {"message": "Sent"}
 
 @app.post("/upload-resume")
-async def upload_resume(file: UploadFile, token: str = Depends(verify_token)):
-    user_id = verify_token(token)
+async def upload_resume(file: UploadFile, user_id: str = Depends(verify_token)):
     content = await file.read()
     text = content.decode('utf-8')
     # Save to local filesystem (temporary)
@@ -267,8 +281,7 @@ async def mock_interview(websocket: WebSocket, token: str):
         chat_history += f"User: {user_message}\nAI: {final_reply}\n"
 
 @app.get("/jobs")
-def get_jobs(token: str = Depends(verify_token)):
-    user_id = verify_token(token)
+def get_jobs(user_id: str = Depends(verify_token)):
     cur = conn.cursor()
     cur.execute("SELECT id, title, company, skills FROM jobs WHERE user_id = %s", (user_id,))
     jobs = cur.fetchall()
