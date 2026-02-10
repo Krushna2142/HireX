@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { getFirebaseAuth } from '@/lib/firebase/Client';
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
 
 export default function CredentialsPage() {
   const { user } = useAuth();
@@ -14,6 +18,8 @@ export default function CredentialsPage() {
   const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) router.replace('/');
@@ -21,14 +27,67 @@ export default function CredentialsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
 
-    // TODO: call backend to create/verify credentials in PostgreSQL
+    if (!user) {
+      setError('You must be signed in with Google first.');
+      return;
+    }
 
-    localStorage.setItem('credentialsComplete', 'true');
-    localStorage.setItem('userRole', role);
-    localStorage.setItem('username', username);
+    try {
+      setSubmitting(true);
 
-    router.push('/dashboard');
+      // Get Firebase ID token for backend verification
+      const auth = getFirebaseAuth();
+      const fbUser = auth.currentUser;
+      const idToken = await fbUser?.getIdToken();
+
+      if (!idToken) {
+        throw new Error('Unable to get authentication token.');
+      }
+
+      const endpoint =
+        mode === 'create'
+          ? '/auth/credentials/create'
+          : '/auth/credentials/verify';
+
+      const res = await fetch(
+        `${API_BASE_URL}${endpoint}?token=${encodeURIComponent(idToken)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            firebase_uid: user.uid,
+            username,
+            password,
+            role,
+          }),
+        }
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(
+          `Server error (${res.status}): ${
+            text || 'unable to complete request'
+          }`
+        );
+      }
+
+      // Persist minimal state locally for UI use
+      localStorage.setItem('credentialsComplete', 'true');
+      localStorage.setItem('userRole', role);
+      localStorage.setItem('username', username);
+
+      router.push('/dashboard');
+    } catch (err: any) {
+      console.error('Credentials error', err);
+      setError(err.message || 'Something went wrong');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -97,8 +156,18 @@ export default function CredentialsPage() {
           required
         />
 
-        <Button type="submit" className="w-full">
-          {mode === 'create' ? 'Create account' : 'Verify and continue'}
+        {error && (
+          <p className="text-sm text-red-500" role="alert">
+            {error}
+          </p>
+        )}
+
+        <Button type="submit" className="w-full" disabled={submitting}>
+          {submitting
+            ? 'Please wait...'
+            : mode === 'create'
+            ? 'Create account'
+            : 'Verify and continue'}
         </Button>
       </form>
     </div>
