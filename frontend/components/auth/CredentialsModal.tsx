@@ -45,6 +45,11 @@ export default function CredentialsModal({ open, onClose }: Props) {
     setError('');
 
     try {
+      if (!user) {
+        setError('You must be signed in first.');
+        return;
+      }
+
       const auth = getFirebaseAuth();
       const fbUser = auth.currentUser;
       const idToken = await fbUser?.getIdToken();
