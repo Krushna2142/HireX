@@ -55,6 +55,54 @@ else:
     )
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
+
+def init_db():
+    """
+    Ensure required tables exist in production so requests
+    don't crash with UndefinedTable errors.
+    """
+    cur = conn.cursor()
+    # Users table for credentials
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            firebase_uid TEXT NOT NULL,
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            UNIQUE(firebase_uid, username)
+        );
+        """
+    )
+    # Resumes table for uploaded resumes / skills
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS resumes (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            skills TEXT
+        );
+        """
+    )
+    # Jobs table for recommendations
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            skills TEXT,
+            user_id TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
+init_db()
+
 nlp = spacy.load("en_core_web_sm")
 
 # Control use of local transformers SLM via env var to avoid OOM on small instances.
