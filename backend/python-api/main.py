@@ -136,11 +136,18 @@ async def upload_resume(file: UploadFile, token: str = Depends(verify_token)):
 async def mock_interview(websocket: WebSocket, token: str):
     user_id = verify_token(token)
     await websocket.accept()
-    # Fetch skills from DB
+    # Fetch skills from DB; tolerate missing table or rows
     cur = conn.cursor()
-    cur.execute("SELECT skills FROM resumes WHERE user_id = %s ORDER BY id DESC LIMIT 1", (user_id,))
-    result = cur.fetchone()
-    raw_skills = result[0] if result else []
+    try:
+        cur.execute(
+            "SELECT skills FROM resumes WHERE user_id = %s ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        )
+        result = cur.fetchone()
+        raw_skills = result[0] if result else []
+    except psycopg2.errors.UndefinedTable:
+        # If the resumes table does not exist yet, proceed with empty skills
+        raw_skills = []
 
     # Normalize skills into a list of strings regardless of how they are stored in the DB.
     skills: list[str]
