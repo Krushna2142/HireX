@@ -6,10 +6,8 @@ minio
 firebase-admin
 pydantic
 spacy
-transformers
-torch  # For transformers
 openai
 bcrypt
-passlib[bcrypt]  # This includes bcrypt support
+passlib[bcrypt]
 requests
-python-multipart  # For file uploads
+python-multipart
