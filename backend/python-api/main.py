@@ -27,7 +27,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# After app.add_middleware(...)
 
+@app.options("/{path:path}", include_in_schema=False)
+def options_handler():
+    return {}
 # -------------------- Firebase --------------------
 
 cred = credentials.Certificate("serviceAccount.json")
