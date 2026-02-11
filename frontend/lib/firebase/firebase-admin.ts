@@ -8,7 +8,7 @@ if (!process.env.FIREBASE_PRIVATE_KEY) {
 
 const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-const app =
+export const app =
   getApps().length === 0
     ? initializeApp({
         credential: cert({

@@ -47,3 +47,5 @@ export function getFirebaseAuth() {
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export const app = getFirebaseApp();
