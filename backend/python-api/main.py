@@ -206,72 +206,30 @@ async def upload_resume(file: UploadFile, user_id: str = Depends(verify_token)):
 
 @app.websocket("/mock-interview")
 async def mock_interview(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+
+    if not token:
+        await websocket.close()
+        return
+
+    try:
+        decoded = auth.verify_id_token(token)
+    except:
+        await websocket.close()
+        return
 
     await websocket.accept()
 
     try:
-        token = websocket.query_params.get("token")
-
-        if not token:
-            await websocket.close(code=1008)
-            return
-
-        decoded_token = auth.verify_id_token(token)
-        user_id = decoded_token["uid"]
-
-    except Exception as e:
-        print("Token verification failed:", e)
-        await websocket.close(code=1008)
-        return
-
-    # Fetch skills
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute(
-        "SELECT skills FROM resumes WHERE user_id = %s ORDER BY id DESC LIMIT 1",
-        (user_id,),
-    )
-
-    result = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    raw_skills = result[0] if result else "[]"
-
-    try:
-        skills = ast.literal_eval(raw_skills)
-    except:
-        skills = []
-
-    try:
         while True:
-            user_message = await websocket.receive_text()
+            data = await websocket.receive_text()
+            print("Received:", data)
 
-            try:
-                response = openai.ChatCompletion.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": f"You are a professional mock interviewer. Conduct structured technical rounds based on: {skills}"
-                        },
-                        {
-                            "role": "user",
-                            "content": user_message
-                        },
-                    ],
-                )
-
-                ai_response = response.choices[0].message.content
-
-            except Exception as e:
-                ai_response = f"AI Error: {str(e)}"
-
-            await websocket.send_text(ai_response)
+            await websocket.send_text(f"AI response to: {data}")
 
     except WebSocketDisconnect:
         print("Client disconnected")
+
 
 # -------------------- GET JOBS --------------------
 
