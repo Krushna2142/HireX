@@ -54,12 +54,12 @@ export default function DashboardPage() {
       try {
         const token = await user.getIdToken();
         const [appsRes, alertsRes] = await Promise.all([
-          axios.get(
-            `${backendUrl}/jobs?token=${encodeURIComponent(token)}`
-          ),
-          axios.get(
-            `${backendUrl}/alerts?token=${encodeURIComponent(token)}`
-          ),
+          axios.get(`${backendUrl}/jobs`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
+          axios.get(`${backendUrl}/alerts`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }),
         ]);
         // Map backend response to frontend format
         setApplications(appsRes.data.jobs.map((j: any) => ({
