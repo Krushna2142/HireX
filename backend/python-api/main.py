@@ -7,7 +7,7 @@ import firebase_admin
 import psycopg2
 import os
 import time
-from passlib.hash import bcrypt
+from passlib.hash import bcrypt 
 import spacy
 import openai
 import asyncio
