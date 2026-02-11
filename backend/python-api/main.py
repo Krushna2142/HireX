@@ -42,7 +42,7 @@ def get_db_connection():
         print(f"Connecting to Supabase database...")
         for attempt in range(5):
             try:
-                conn = psycopg2.connect(database_url, family=2, connect_timeout=10)  # Force IPv4 + timeout
+                conn = psycopg2.connect(database_url, connect_timeout=10)  # Removed family=2; timeout kept
                 print("Connected to database: True")
                 return conn
             except psycopg2.OperationalError as e:
@@ -51,6 +51,20 @@ def get_db_connection():
                     time.sleep(1)
         raise Exception("Failed to connect to database after 5 attempts")
     # Fallback code...
+    db_name = os.getenv("POSTGRES_DB", "jobcrawlerdb")
+    db_user = os.getenv("POSTGRES_USER", "jobcrawlerdb_user")
+    db_password = os.getenv("POSTGRES_PASSWORD", "")
+    db_host = os.getenv("POSTGRES_HOST", "postgres")
+    db_port = os.getenv("POSTGRES_PORT", "5432")
+    conn = psycopg2.connect(
+        dbname=db_name,
+        user=db_user,
+        password=db_password,
+        host=db_host,
+        port=db_port,
+    )
+    print("Connected to database: False (using fallback env vars)")
+    return conn
 
 
 conn = get_db_connection()
