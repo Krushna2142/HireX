@@ -1,7 +1,7 @@
-from fastapi import FastAPI, UploadFile, HTTPException, Depends
-from fastapi.websockets import WebSocket
+from fastapi import FastAPI, UploadFile, HTTPException, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer  # Added
+from fastapi.security import HTTPBearer
+from fastapi import WebSocketDisconnect
 from firebase_admin import auth, credentials
 import firebase_admin
 import psycopg2
@@ -27,19 +27,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# After app.add_middleware(...)
 
 @app.options("/{path:path}", include_in_schema=False)
 def options_handler():
     return {}
+
 # -------------------- Firebase --------------------
 
 cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
-bearer = HTTPBearer()  # Added
+bearer = HTTPBearer()
 
-def verify_token(credentials = Depends(bearer)):  # Updated
+def verify_token(credentials=Depends(bearer)):
     try:
         token = credentials.credentials
         decoded_token = auth.verify_id_token(token)
@@ -111,13 +111,12 @@ def startup_event():
     init_db()
     print("Database ready.")
 
-# -------------------- NLP and AI Setup --------------------
+# -------------------- NLP & AI --------------------
 
 nlp = spacy.load("en_core_web_sm")
 
-# DeepSeek setup (free)
 openai.api_base = "https://api.deepseek.com"
-openai.api_key = os.getenv("DEEPSEEK_API_KEY", "your_deepseek_key")
+openai.api_key = os.getenv("DEEPSEEK_API_KEY")
 
 # -------------------- AUTH --------------------
 
@@ -125,7 +124,7 @@ openai.api_key = os.getenv("DEEPSEEK_API_KEY", "your_deepseek_key")
 def create_credentials(user: dict, user_id: str = Depends(verify_token)):
     firebase_uid = user.get("firebase_uid") or user_id
     username = user["username"]
-    password = user["password"][:72]  # Truncate
+    password = user["password"][:72]
     password_hash = bcrypt.hash(password)
     role = user["role"]
 
@@ -151,7 +150,7 @@ def create_credentials(user: dict, user_id: str = Depends(verify_token)):
 def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
     firebase_uid = user.get("firebase_uid") or user_id
     username = user["username"]
-    password = user["password"][:72]  # Truncate
+    password = user["password"][:72]
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -176,7 +175,7 @@ def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
 @app.post("/upload-resume")
 async def upload_resume(file: UploadFile, user_id: str = Depends(verify_token)):
     content = await file.read()
-    text = content.decode('utf-8')
+    text = content.decode("utf-8", errors="ignore")
 
     os.makedirs(f"uploads/{user_id}", exist_ok=True)
     file_path = f"uploads/{user_id}/{file.filename}"
@@ -184,9 +183,8 @@ async def upload_resume(file: UploadFile, user_id: str = Depends(verify_token)):
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Extract skills with NLP
     doc = nlp(text)
-    skills = [ent.text for ent in doc.ents if ent.label_ in ["SKILL", "ORG", "PERSON"]]
+    skills = [ent.text for ent in doc.ents]
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -201,50 +199,76 @@ async def upload_resume(file: UploadFile, user_id: str = Depends(verify_token)):
 
     return {"message": "Resume uploaded and analyzed", "skills": skills}
 
-# -------------------- MOCK INTERVIEW --------------------
+# -------------------- MOCK INTERVIEW (FIXED) --------------------
 
 @app.websocket("/mock-interview")
-async def mock_interview(websocket: WebSocket, token: str):
-    user_id = verify_token(token)
+async def mock_interview(websocket: WebSocket):
+
     await websocket.accept()
 
-    # Fetch skills from DB
+    try:
+        token = websocket.query_params.get("token")
+
+        if not token:
+            await websocket.close(code=1008)
+            return
+
+        decoded_token = auth.verify_id_token(token)
+        user_id = decoded_token["uid"]
+
+    except Exception as e:
+        print("Token verification failed:", e)
+        await websocket.close(code=1008)
+        return
+
+    # Fetch skills
     conn = get_db_connection()
     cur = conn.cursor()
+
     cur.execute(
         "SELECT skills FROM resumes WHERE user_id = %s ORDER BY id DESC LIMIT 1",
         (user_id,),
     )
+
     result = cur.fetchone()
     cur.close()
     conn.close()
 
     raw_skills = result[0] if result else "[]"
+
     try:
         skills = ast.literal_eval(raw_skills)
     except:
         skills = []
 
-    chat_history = f"User skills: {', '.join(skills)}. Start interview."
+    try:
+        while True:
+            user_message = await websocket.receive_text()
 
-    while True:
-        user_message = await websocket.receive_text()
+            try:
+                response = openai.ChatCompletion.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": f"You are a professional mock interviewer. Conduct structured technical rounds based on: {skills}"
+                        },
+                        {
+                            "role": "user",
+                            "content": user_message
+                        },
+                    ],
+                )
 
-        # Use DeepSeek for free AI
-        try:
-            response = openai.ChatCompletion.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": f"Mock interviewer for skills: {skills}."},
-                    {"role": "user", "content": user_message},
-                ],
-            )
-            ai_response = response.choices[0].message.content
-            await websocket.send_text(f"DeepSeek: {ai_response}")
-        except Exception as e:
-            await websocket.send_text(f"Error: {str(e)}")
+                ai_response = response.choices[0].message.content
 
-        chat_history += f"User: {user_message}\nAI: {ai_response}\n"
+            except Exception as e:
+                ai_response = f"AI Error: {str(e)}"
+
+            await websocket.send_text(ai_response)
+
+    except WebSocketDisconnect:
+        print("Client disconnected")
 
 # -------------------- GET JOBS --------------------
 
@@ -259,7 +283,6 @@ def get_jobs(user_id: str = Depends(verify_token)):
     )
 
     jobs = cur.fetchall()
-
     cur.close()
     conn.close()
 
@@ -280,7 +303,13 @@ def get_jobs(user_id: str = Depends(verify_token)):
 @app.get("/alerts")
 def get_alerts(user_id: str = Depends(verify_token)):
     alerts = [
-        {"id": "1", "title": "New Match", "message": "2 roles match your profile", "severity": "info", "createdAt": "2026-02-11"}
+        {
+            "id": "1",
+            "title": "New Match",
+            "message": "2 roles match your profile",
+            "severity": "info",
+            "createdAt": "2026-02-11"
+        }
     ]
     return {"alerts": alerts}
 
