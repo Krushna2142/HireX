@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, HTTPException, Depends
 from fastapi.websockets import WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer  # Added
 from firebase_admin import auth, credentials
 import firebase_admin
 import psycopg2
@@ -32,8 +33,11 @@ app.add_middleware(
 cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
-def verify_token(token: str):
+bearer = HTTPBearer()  # Added
+
+def verify_token(credentials = Depends(bearer)):  # Updated
     try:
+        token = credentials.credentials
         decoded_token = auth.verify_id_token(token)
         return decoded_token["uid"]
     except Exception:
@@ -115,10 +119,9 @@ openai.api_key = os.getenv("DEEPSEEK_API_KEY", "your_deepseek_key")
 
 @app.post("/auth/credentials/create")
 def create_credentials(user: dict, user_id: str = Depends(verify_token)):
-
     firebase_uid = user.get("firebase_uid") or user_id
     username = user["username"]
-    password = user["password"][:72]  # Truncate to 72 chars for bcrypt
+    password = user["password"][:72]  # Truncate
     password_hash = bcrypt.hash(password)
     role = user["role"]
 
@@ -142,10 +145,9 @@ def create_credentials(user: dict, user_id: str = Depends(verify_token)):
 
 @app.post("/auth/credentials/verify")
 def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
-
     firebase_uid = user.get("firebase_uid") or user_id
     username = user["username"]
-    password = user["password"][:72]  # Truncate to 72 chars for bcrypt
+    password = user["password"][:72]  # Truncate
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -169,7 +171,6 @@ def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
 
 @app.post("/upload-resume")
 async def upload_resume(file: UploadFile, user_id: str = Depends(verify_token)):
-
     content = await file.read()
     text = content.decode('utf-8')
 
@@ -245,7 +246,6 @@ async def mock_interview(websocket: WebSocket, token: str):
 
 @app.get("/jobs")
 def get_jobs(user_id: str = Depends(verify_token)):
-
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -270,6 +270,15 @@ def get_jobs(user_id: str = Depends(verify_token)):
             for j in jobs
         ]
     }
+
+# -------------------- ALERTS --------------------
+
+@app.get("/alerts")
+def get_alerts(user_id: str = Depends(verify_token)):
+    alerts = [
+        {"id": "1", "title": "New Match", "message": "2 roles match your profile", "severity": "info", "createdAt": "2026-02-11"}
+    ]
+    return {"alerts": alerts}
 
 # -------------------- HEALTH CHECK --------------------
 

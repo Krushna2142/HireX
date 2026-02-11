@@ -6,6 +6,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { getFirebaseAuth } from '@/lib/firebase/Client';
+import axios, { AxiosError } from 'axios';  // Added AxiosError import
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
@@ -51,38 +52,36 @@ export default function CredentialsPage() {
           ? '/auth/credentials/create'
           : '/auth/credentials/verify';
 
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, {  // Removed ?token= query
-        method: 'POST',
+      const res = await axios.post(`${API_BASE_URL}${endpoint}`, {
+        firebase_uid: user.uid,
+        username,
+        password,
+        role,
+      }, {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,  // Added header
+          'Authorization': `Bearer ${idToken}`,
         },
-        body: JSON.stringify({
-          firebase_uid: user.uid,
-          username,
-          password,
-          role,
-        }),
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(
-          `Server error (${res.status}): ${
-            text || 'unable to complete request'
-          }`
-        );
+      if (res.status === 200) {
+        // Success logic
+        localStorage.setItem('credentialsComplete', 'true');
+        localStorage.setItem('userRole', role);
+        localStorage.setItem('username', username);
+        router.push('/dashboard');
+      } else {
+        throw new Error(`Server error (${res.status}): ${res.data?.message || 'Request failed'}`);
       }
-
-      // Persist minimal state locally for UI use
-      localStorage.setItem('credentialsComplete', 'true');
-      localStorage.setItem('userRole', role);
-      localStorage.setItem('username', username);
-
-      router.push('/dashboard');
     } catch (err) {
       console.error('Credentials error', err);
-      setError(err.message || 'Something went wrong');
+      // Fixed TypeScript error: properly handle unknown type with AxiosError check
+      const errorMessage = err instanceof AxiosError 
+        ? err.response?.data?.message || err.message 
+        : err instanceof Error 
+        ? err.message 
+        : 'Something went wrong';
+      setError(errorMessage);
     } finally {
       setSubmitting(false);
     }
