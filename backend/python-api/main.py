@@ -118,7 +118,8 @@ def create_credentials(user: dict, user_id: str = Depends(verify_token)):
 
     firebase_uid = user.get("firebase_uid") or user_id
     username = user["username"]
-    password_hash = bcrypt.hash(user["password"])
+    password = user["password"][:72]  # Truncate to 72 chars for bcrypt
+    password_hash = bcrypt.hash(password)
     role = user["role"]
 
     conn = get_db_connection()
@@ -144,6 +145,7 @@ def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
 
     firebase_uid = user.get("firebase_uid") or user_id
     username = user["username"]
+    password = user["password"][:72]  # Truncate to 72 chars for bcrypt
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -158,7 +160,7 @@ def verify_credentials(user: dict, user_id: str = Depends(verify_token)):
     cur.close()
     conn.close()
 
-    if result and bcrypt.verify(user["password"], result[0]):
+    if result and bcrypt.verify(password, result[0]):
         return {"message": "Verified"}
 
     raise HTTPException(status_code=401, detail="Invalid credentials")
