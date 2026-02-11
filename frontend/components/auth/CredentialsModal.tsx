@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { useRouter } from 'next/navigation';
 import { X, User, Lock, Mail, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import axios, { AxiosError } from 'axios';  // Added axios and AxiosError
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
@@ -64,23 +65,20 @@ export default function CredentialsModal({ open, onClose }: Props) {
           ? '/auth/credentials/create'
           : '/auth/credentials/verify';
 
-      const response = await fetch(
-        `${API_BASE_URL}${endpoint}?token=${encodeURIComponent(idToken)}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            firebase_uid: user.uid,
-            username,
-            password,
-            role,
-          }),
-        }
-      );
+      // Updated to use axios with Authorization header (no query params)
+      const response = await axios.post(`${API_BASE_URL}${endpoint}`, {
+        firebase_uid: user.uid,
+        username,
+        password,
+        role,
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+      });
 
-      if (response.ok) {
+      if (response.status === 200) {
         localStorage.setItem('credentialsComplete', 'true');
         localStorage.setItem('userRole', role);
         localStorage.setItem('username', username);
@@ -89,17 +87,23 @@ export default function CredentialsModal({ open, onClose }: Props) {
       } else {
         let message = 'Credentials setup failed';
         try {
-          const errData = await response.json();
+          const errData = response.data;
           if (errData?.message) message = errData.message;
         } catch {
-          const text = await response.text();
+          const text = response.statusText;
           if (text) message = text;
         }
         setError(message);
       }
-    } catch (error) {
-      console.error('Error:', error);
-      setError('An error occurred');
+    } catch (err) {
+      console.error('Error:', err);
+      // Fixed TypeScript error: safely handle unknown type
+      const errorMessage = err instanceof AxiosError 
+        ? err.response?.data?.message || err.message 
+        : err instanceof Error 
+        ? err.message 
+        : 'An error occurred';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -111,32 +115,35 @@ export default function CredentialsModal({ open, onClose }: Props) {
     setError('');
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/auth/reset-password`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: resetEmail }),
-        }
-      );
+      const response = await axios.post(`${API_BASE_URL}/auth/reset-password`, {
+        email: resetEmail,
+      }, {
+        headers: { 'Content-Type': 'application/json' },
+      });
 
-      if (response.ok) {
+      if (response.status === 200) {
         alert('Reset link sent (if email exists)');
         setForgotMode(false);
       } else {
         let message = 'Reset failed';
         try {
-          const errData = await response.json();
+          const errData = response.data;
           if (errData?.message) message = errData.message;
         } catch {
-          const text = await response.text();
+          const text = response.statusText;
           if (text) message = text;
         }
         setError(message);
       }
-    } catch (error) {
-      console.error(error);
-      setError('An error occurred');
+    } catch (err) {
+      console.error(err);
+      // Fixed TypeScript error
+      const errorMessage = err instanceof AxiosError 
+        ? err.response?.data?.message || err.message 
+        : err instanceof Error 
+        ? err.message 
+        : 'An error occurred';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
