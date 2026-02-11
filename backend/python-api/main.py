@@ -36,41 +36,21 @@ app.add_middleware(
 
 cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
-
-
 def get_db_connection():
-    """
-    Connect to the database with retries for robustness.
-    """
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         print(f"Connecting to Supabase database...")
-        for attempt in range(5):  # Retry up to 5 times
+        for attempt in range(5):
             try:
-                conn = psycopg2.connect(database_url)
+                conn = psycopg2.connect(database_url, family=2, connect_timeout=10)  # Force IPv4 + timeout
                 print("Connected to database: True")
                 return conn
             except psycopg2.OperationalError as e:
                 print(f"Connection attempt {attempt + 1} failed: {e}")
                 if attempt < 4:
-                    time.sleep(1)  # Wait 1 second before retry
+                    time.sleep(1)
         raise Exception("Failed to connect to database after 5 attempts")
-    else:
-        # Fallback to individual env vars (for local dev)
-        db_name = os.getenv("POSTGRES_DB", "jobcrawlerdb")
-        db_user = os.getenv("POSTGRES_USER", "jobcrawlerdb_user")
-        db_password = os.getenv("POSTGRES_PASSWORD", "")
-        db_host = os.getenv("POSTGRES_HOST", "postgres")
-        db_port = os.getenv("POSTGRES_PORT", "5432")
-        conn = psycopg2.connect(
-            dbname=db_name,
-            user=db_user,
-            password=db_password,
-            host=db_host,
-            port=db_port,
-        )
-        print("Connected to database: False (using fallback env vars)")
-        return conn
+    # Fallback code...
 
 
 conn = get_db_connection()
