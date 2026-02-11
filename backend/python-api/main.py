@@ -13,6 +13,7 @@ from passlib.hash import bcrypt
 import smtplib
 import os  # For environment variables
 import ast  # For safely parsing stored skills representations
+import time  # For connection retries
 
 app = FastAPI()
 
@@ -36,23 +37,43 @@ app.add_middleware(
 cred = credentials.Certificate("serviceAccount.json")
 firebase_admin.initialize_app(cred)
 
-# Use DATABASE_URL when provided; otherwise fall back to individual env vars.
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    conn = psycopg2.connect(database_url)
-else:
-    db_name = os.getenv("POSTGRES_DB", "jobcrawlerdb")
-    db_user = os.getenv("POSTGRES_USER", "jobcrawlerdb_user")
-    db_password = os.getenv("POSTGRES_PASSWORD", "")
-    db_host = os.getenv("POSTGRES_HOST", "postgres")
-    db_port = os.getenv("POSTGRES_PORT", "5432")
-    conn = psycopg2.connect(
-        dbname=db_name,
-        user=db_user,
-        password=db_password,
-        host=db_host,
-        port=db_port,
-    )
+
+def get_db_connection():
+    """
+    Connect to the database with retries for robustness.
+    """
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        print(f"Connecting to Supabase database...")
+        for attempt in range(5):  # Retry up to 5 times
+            try:
+                conn = psycopg2.connect(database_url)
+                print("Connected to database: True")
+                return conn
+            except psycopg2.OperationalError as e:
+                print(f"Connection attempt {attempt + 1} failed: {e}")
+                if attempt < 4:
+                    time.sleep(1)  # Wait 1 second before retry
+        raise Exception("Failed to connect to database after 5 attempts")
+    else:
+        # Fallback to individual env vars (for local dev)
+        db_name = os.getenv("POSTGRES_DB", "jobcrawlerdb")
+        db_user = os.getenv("POSTGRES_USER", "jobcrawlerdb_user")
+        db_password = os.getenv("POSTGRES_PASSWORD", "")
+        db_host = os.getenv("POSTGRES_HOST", "postgres")
+        db_port = os.getenv("POSTGRES_PORT", "5432")
+        conn = psycopg2.connect(
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+            host=db_host,
+            port=db_port,
+        )
+        print("Connected to database: False (using fallback env vars)")
+        return conn
+
+
+conn = get_db_connection()
 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
 
 
