@@ -51,21 +51,19 @@ export default function CredentialsPage() {
           ? '/auth/credentials/create'
           : '/auth/credentials/verify';
 
-      const res = await fetch(
-        `${API_BASE_URL}${endpoint}?token=${encodeURIComponent(idToken)}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            firebase_uid: user.uid,
-            username,
-            password,
-            role,
-          }),
-        }
-      );
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {  // Removed ?token= query
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,  // Added header
+        },
+        body: JSON.stringify({
+          firebase_uid: user.uid,
+          username,
+          password,
+          role,
+        }),
+      });
 
       if (!res.ok) {
         const text = await res.text();
@@ -82,7 +80,7 @@ export default function CredentialsPage() {
       localStorage.setItem('username', username);
 
       router.push('/dashboard');
-    } catch (err: any) {
+    } catch (err) {
       console.error('Credentials error', err);
       setError(err.message || 'Something went wrong');
     } finally {
