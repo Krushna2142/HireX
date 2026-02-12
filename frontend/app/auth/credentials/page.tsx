@@ -6,7 +6,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { getFirebaseAuth } from '@/lib/firebase/Client';
-import axios, { AxiosError } from 'axios';  // Added AxiosError import
+import axios, { AxiosError } from 'axios';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
@@ -38,11 +38,18 @@ export default function CredentialsPage() {
     try {
       setSubmitting(true);
 
-      // Get Firebase ID token for backend verification
+      // ✅ SAFE Firebase Auth handling (fix)
       const auth = getFirebaseAuth();
-      const fbUser = auth.currentUser;
-      const idToken = await fbUser?.getIdToken();
+      if (!auth) {
+        throw new Error('Firebase Auth not available (client not ready).');
+      }
 
+      const fbUser = auth.currentUser;
+      if (!fbUser) {
+        throw new Error('No Firebase user found.');
+      }
+
+      const idToken = await fbUser.getIdToken();
       if (!idToken) {
         throw new Error('Unable to get authentication token.');
       }
@@ -52,35 +59,44 @@ export default function CredentialsPage() {
           ? '/auth/credentials/create'
           : '/auth/credentials/verify';
 
-      const res = await axios.post(`${API_BASE_URL}${endpoint}`, {
-        firebase_uid: user.uid,
-        username,
-        password,
-        role,
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
+      const res = await axios.post(
+        `${API_BASE_URL}${endpoint}`,
+        {
+          firebase_uid: user.uid,
+          username,
+          password,
+          role,
         },
-      });
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+        }
+      );
 
       if (res.status === 200) {
-        // Success logic
         localStorage.setItem('credentialsComplete', 'true');
         localStorage.setItem('userRole', role);
         localStorage.setItem('username', username);
         router.push('/dashboard');
       } else {
-        throw new Error(`Server error (${res.status}): ${res.data?.message || 'Request failed'}`);
+        throw new Error(
+          `Server error (${res.status}): ${
+            res.data?.message || 'Request failed'
+          }`
+        );
       }
     } catch (err) {
       console.error('Credentials error', err);
-      // Fixed TypeScript error: properly handle unknown type with AxiosError check
-      const errorMessage = err instanceof AxiosError 
-        ? err.response?.data?.message || err.message 
-        : err instanceof Error 
-        ? err.message 
-        : 'Something went wrong';
+
+      const errorMessage =
+        err instanceof AxiosError
+          ? err.response?.data?.message || err.message
+          : err instanceof Error
+          ? err.message
+          : 'Something went wrong';
+
       setError(errorMessage);
     } finally {
       setSubmitting(false);
