@@ -2,41 +2,35 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { getFirebaseAuth } from '@/lib/firebase/Client';
+import { useCallback, useRef, useState } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 type Analysis = {
   summary: string;
   skills: { category: string; items: string[] }[];
-  roleRecommendations: { role: string; match: number; rationale: string }[];
+  roleRecommendations: {
+    role: string;
+    match: number;
+    rationale: string;
+  }[];
   missingSkills: string[];
-  learningPaths: { skill: string; resources: { title: string; url: string; type: 'free' | 'paid' }[] }[];
+  learningPaths: {
+    skill: string;
+    resources: { title: string; url: string; type: 'free' | 'paid' }[];
+  }[];
 };
 
 export default function ResumePage() {
+  const { user } = useAuth();
+
   const [status, setStatus] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-useEffect(() => {
-  const auth = getFirebaseAuth();
-
-  if (!auth) return; // ✅ handle null safely
-
-  const unsub = onAuthStateChanged(auth, (u) => {
-    setUser(u);
-  });
-
-  return () => unsub();
-}, []);
-
 
   const transformResultToAnalysis = (res: any): Analysis => {
     return {
@@ -126,6 +120,7 @@ useEffect(() => {
   );
 
   const onUploadClick = useCallback(() => inputRef.current?.click(), []);
+
   const onDrop = useCallback(
     async (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -136,11 +131,13 @@ useEffect(() => {
     },
     [handleFile]
   );
+
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(true);
   }, []);
+
   const onDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -151,14 +148,18 @@ useEffect(() => {
     <section className="px-4 sm:px-6 lg:px-8 relative">
       {uploading && (
         <div className="fixed bottom-6 right-6 bg-black border border-[var(--neon-1)] p-4 rounded-lg shadow-lg w-64 z-50">
-          <div className="text-sm font-semibold mb-2">Uploading Resume...</div>
+          <div className="text-sm font-semibold mb-2">
+            Uploading Resume...
+          </div>
           <div className="w-full bg-gray-700 rounded-full h-2">
             <div
               className="bg-[var(--neon-1)] h-2 rounded-full transition-all"
               style={{ width: `${uploadProgress}%` }}
             />
           </div>
-          <div className="text-xs mt-1 text-right">{uploadProgress}%</div>
+          <div className="text-xs mt-1 text-right">
+            {uploadProgress}%
+          </div>
         </div>
       )}
 
@@ -188,6 +189,7 @@ useEffect(() => {
                 Upload Resume
               </button>
             </div>
+
             <input
               ref={inputRef}
               type="file"
@@ -202,16 +204,23 @@ useEffect(() => {
               Error: {errorMsg}
             </div>
           )}
+
+          {analysis && (
+            <div className="mt-6 space-y-4">
+              <div className="text-lg font-semibold">
+                {analysis.summary}
+              </div>
+            </div>
+          )}
         </div>
 
         <aside className="panel p-4 text-sm">
-          <div className="text-[var(--text-muted)] text-xs">Signed in as</div>
+          <div className="text-[var(--text-muted)] text-xs">
+            Signed in as
+          </div>
           <div className="font-medium truncate">
             {user?.email || 'Not signed in'}
           </div>
-          {user?.emailVerified && (
-            <div className="text-xs text-green-400 mt-1">Verified</div>
-          )}
         </aside>
       </div>
     </section>

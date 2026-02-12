@@ -1,6 +1,6 @@
 'use client';
 
-import React, {
+import {
   createContext,
   useContext,
   useEffect,
@@ -22,11 +22,11 @@ export type AuthUser = {
   photoURL: string | null;
 };
 
-export type AuthContextType = {
+type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
-  signOutUser: () => Promise<void>;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -36,55 +36,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      (fbUser: User | null) => {
-        if (fbUser) {
-          setUser({
-            uid: fbUser.uid,
-            displayName: fbUser.displayName,
-            email: fbUser.email,
-            photoURL: fbUser.photoURL,
-          });
-        } else {
-          setUser(null);
-        }
-        setLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, (fbUser: User | null) => {
+      if (fbUser) {
+        setUser({
+          uid: fbUser.uid,
+          displayName: fbUser.displayName,
+          email: fbUser.email,
+          photoURL: fbUser.photoURL,
+        });
+      } else {
+        setUser(null);
       }
-    );
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, []);
 
   const signInWithGoogle = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error('Google sign-in failed:', error);
-      throw error;
-    }
+    await signInWithPopup(auth, googleProvider);
   };
 
-  const signOutUser = async () => {
-    try {
-      await signOut(auth);
-      localStorage.clear();
-      sessionStorage.clear();
-    } catch (error) {
-      console.error('Sign-out failed:', error);
-      throw error;
-    }
-  };
-
-  const value: AuthContextType = {
-    user,
-    loading,
-    signInWithGoogle,
-    signOutUser,
+  const logout = async () => {
+    await signOut(auth);
+    localStorage.clear();
+    sessionStorage.clear();
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider
+      value={{ user, loading, signInWithGoogle, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -92,10 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error('useAuth must be used inside AuthProvider');
   }
-
   return context;
 }

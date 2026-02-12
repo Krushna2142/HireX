@@ -12,12 +12,14 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID!,
 };
 
-// ✅ Initialize Firebase App (singleton)
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Initialize app safely
+const app = !getApps().length
+  ? initializeApp(firebaseConfig)
+  : getApp();
 
-// ✅ Always return auth (never null)
+// Export singleton auth
 export const auth = getAuth(app);
 
-// ✅ Google Provider
+// Google Provider
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
