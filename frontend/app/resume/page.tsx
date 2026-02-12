@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
+export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -23,14 +24,19 @@ export default function ResumePage() {
   const [user, setUser] = useState<User | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+useEffect(() => {
   const auth = getFirebaseAuth();
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
-    return () => unsub();
-  }, [auth]);
+  if (!auth) return; // ✅ handle null safely
+
+  const unsub = onAuthStateChanged(auth, (u) => {
+    setUser(u);
+  });
+
+  return () => unsub();
+}, []);
+
 
   const transformResultToAnalysis = (res: any): Analysis => {
     return {
@@ -157,7 +163,9 @@ export default function ResumePage() {
       )}
 
       <div className="section-header">
-        <h1 className="text-4xl font-extrabold tracking-tight">Resume Intelligence</h1>
+        <h1 className="text-4xl font-extrabold tracking-tight">
+          Resume Intelligence
+        </h1>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
