@@ -1,18 +1,20 @@
 'use client';
 
-import {
+import React, {
   createContext,
   useContext,
   useEffect,
   useState,
   ReactNode,
 } from 'react';
+
 import {
   onAuthStateChanged,
   signInWithPopup,
   signOut,
   User,
 } from 'firebase/auth';
+
 import { auth, googleProvider } from '@/lib/firebase/Client';
 
 export type AuthUser = {
@@ -22,11 +24,11 @@ export type AuthUser = {
   photoURL: string | null;
 };
 
-type AuthContextType = {
+export type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
-  logout: () => Promise<void>;
+  signOutUser: () => Promise<void>; // ✅ REQUIRED (fixes your error)
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -54,28 +56,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, googleProvider);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error('Google sign-in failed:', error);
+      throw error;
+    }
   };
 
-  const logout = async () => {
-    await signOut(auth);
-    localStorage.clear();
-    sessionStorage.clear();
+  const signOutUser = async () => {
+    try {
+      await signOut(auth);
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (error) {
+      console.error('Sign-out failed:', error);
+      throw error;
+    }
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, signInWithGoogle, logout }}
+      value={{
+        user,
+        loading,
+        signInWithGoogle,
+        signOutUser, // ✅ must be included
+      }}
     >
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
+
   if (!context) {
-    throw new Error('useAuth must be used inside AuthProvider');
+    throw new Error('useAuth must be used within AuthProvider');
   }
+
   return context;
 }
