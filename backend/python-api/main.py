@@ -314,7 +314,7 @@ def get_alerts(user_id: str = Depends(verify_token)):
     return {"alerts": alerts}
 
 # -------------------- HEALTH CHECK --------------------
->>>>>>> parent of 4c09b63 (Allowedorigins)
+
 
 @app.get("/")
 def root():
