@@ -1,7 +1,7 @@
 'use client';
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -24,8 +24,8 @@ function getClientApp() {
 }
 
 // ✅ Auth (safe for Next.js)
-export function getFirebaseAuth() {
-  const app = getClientApp();
+export function getFirebaseAuth(): Auth | null {
+  const app = getClientApp();   // ✅ FIXED HERE
   if (!app) return null;
   return getAuth(app);
 }
