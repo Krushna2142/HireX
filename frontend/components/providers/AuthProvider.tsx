@@ -1,5 +1,5 @@
 'use client';
-//frontend/components/providers/AuthProvider.tsx
+
 import React, {
   createContext,
   useContext,
@@ -13,7 +13,7 @@ import {
   signOut,
   User,
 } from 'firebase/auth';
-import { getFirebaseAuth, googleProvider } from '@/lib/firebase/Client';
+import { auth, googleProvider } from '@/lib/firebase/Client';
 
 export type AuthUser = {
   uid: string;
@@ -36,11 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let authUnsub: ReturnType<typeof onAuthStateChanged> | null = null;
-
-    if (typeof window !== 'undefined') {
-      const auth = getFirebaseAuth();
-      authUnsub = onAuthStateChanged(auth, (fbUser: User | null) => {
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (fbUser: User | null) => {
         if (fbUser) {
           setUser({
             uid: fbUser.uid,
@@ -52,21 +50,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
         }
         setLoading(false);
-      });
-    }
+      }
+    );
 
-    return () => {
-      if (authUnsub) authUnsub();
-    };
+    return () => unsubscribe();
   }, []);
 
   const signInWithGoogle = async () => {
-    if (typeof window === 'undefined') {
-      console.error('Attempting to use sign-in on the server. This is not allowed.');
-      return;
-    }
     try {
-      const auth = getFirebaseAuth();
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error('Google sign-in failed:', error);
@@ -75,7 +66,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOutUser = async () => {
-    const auth = getFirebaseAuth();
     try {
       await signOut(auth);
       localStorage.clear();
@@ -94,14 +84,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
   );
 }
 
 export function useAuth() {
   const context = useContext(AuthContext);
+
   if (!context) {
     throw new Error('useAuth must be used within AuthProvider');
   }
+
   return context;
 }

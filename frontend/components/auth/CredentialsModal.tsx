@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { getFirebaseAuth } from '@/lib/firebase/Client';
+import { auth } from '@/lib/firebase/Client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useRouter } from 'next/navigation';
@@ -31,12 +31,12 @@ export default function CredentialsModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
 
-    const onEsc = (e: KeyboardEvent) => {
+    const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
-    document.addEventListener('keydown', onEsc);
-    return () => document.removeEventListener('keydown', onEsc);
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
   }, [open, onClose]);
 
   if (!open || !user) return null;
@@ -47,22 +47,13 @@ export default function CredentialsModal({ open, onClose }: Props) {
     setError('');
 
     try {
-      // ✅ Get Firebase Auth safely
-      const auth = getFirebaseAuth();
-      if (!auth) {
-        throw new Error('Firebase auth not initialized');
-      }
-
       const fbUser = auth.currentUser;
+
       if (!fbUser) {
-        throw new Error('Firebase user not found');
+        throw new Error('User not authenticated');
       }
 
       const idToken = await fbUser.getIdToken();
-
-      if (!user) {
-        throw new Error('User not authenticated');
-      }
 
       const endpoint =
         mode === 'create'
@@ -72,7 +63,6 @@ export default function CredentialsModal({ open, onClose }: Props) {
       const response = await axios.post(
         `${API_BASE_URL}${endpoint}`,
         {
-          firebase_uid: user.uid,
           username,
           password,
           role,
@@ -114,13 +104,16 @@ export default function CredentialsModal({ open, onClose }: Props) {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-        <h2 className="text-xl font-bold mb-2">Complete Login</h2>
+        <h2 className="text-xl font-bold mb-4">
+          {mode === 'create' ? 'Create Credentials' : 'Login with Credentials'}
+        </h2>
 
         {error && (
           <p className="text-red-500 text-sm mb-3">{error}</p>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+
           {/* Mode Selection */}
           <div className="flex gap-4 text-sm">
             <label className="flex items-center gap-1">
