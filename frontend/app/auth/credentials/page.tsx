@@ -1,11 +1,13 @@
 'use client';
-//frontend/app/auth/credentials/page.tsx
+
+// frontend/app/auth/credentials/page.tsx
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { getFirebaseAuth } from '@/lib/firebase/Client';
+import { auth } from '@/lib/firebase/Client';
 import axios, { AxiosError } from 'axios';
 
 const API_BASE_URL =
@@ -38,18 +40,14 @@ export default function CredentialsPage() {
     try {
       setSubmitting(true);
 
-      // ✅ SAFE Firebase Auth handling (fix)
-      const auth = getFirebaseAuth();
-      if (!auth) {
-        throw new Error('Firebase Auth not available (client not ready).');
-      }
-
       const fbUser = auth.currentUser;
+
       if (!fbUser) {
         throw new Error('No Firebase user found.');
       }
 
       const idToken = await fbUser.getIdToken();
+
       if (!idToken) {
         throw new Error('Unable to get authentication token.');
       }
@@ -161,6 +159,7 @@ export default function CredentialsPage() {
           onChange={(e) => setUsername(e.target.value)}
           required
         />
+
         <Input
           placeholder="Password"
           type="password"
