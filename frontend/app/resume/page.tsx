@@ -2,10 +2,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { getFirebaseAuth } from '@/lib/firebase/Client';
 
-const app = getFirebaseAuth().app;
 type Analysis = {
   summary: string;
   skills: { category: string; items: string[] }[];
@@ -24,9 +23,8 @@ export default function ResumePage() {
   const [user, setUser] = useState<User | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const auth = getAuth(app);
+  const auth = getFirebaseAuth();
 
-  // 🔥 Real-time logged in user
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -145,7 +143,6 @@ export default function ResumePage() {
 
   return (
     <section className="px-4 sm:px-6 lg:px-8 relative">
-      {/* 🔥 Upload Popup */}
       {uploading && (
         <div className="fixed bottom-6 right-6 bg-black border border-[var(--neon-1)] p-4 rounded-lg shadow-lg w-64 z-50">
           <div className="text-sm font-semibold mb-2">Uploading Resume...</div>
@@ -199,7 +196,6 @@ export default function ResumePage() {
           )}
         </div>
 
-        {/* 🔥 Right Side Account Panel (Improved + Real Data) */}
         <aside className="panel p-4 text-sm">
           <div className="text-[var(--text-muted)] text-xs">Signed in as</div>
           <div className="font-medium truncate">
