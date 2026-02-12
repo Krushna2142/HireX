@@ -3,8 +3,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
-import { app } from '@/lib/firebase/Client';
+import { getFirebaseAuth } from '@/lib/firebase/Client';
 
+const app = getFirebaseAuth().app;
 type Analysis = {
   summary: string;
   skills: { category: string; items: string[] }[];

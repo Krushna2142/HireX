@@ -1,5 +1,4 @@
 // Client-only Firebase initializer for Next.js
-//frontend/lib/firebase/Client.ts
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
@@ -22,7 +21,9 @@ function maskKey(key = '') {
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
   console.info('[firebase] apiKey:', maskKey(firebaseConfig.apiKey));
   if (!firebaseConfig.apiKey) {
-    console.error('[firebase] NEXT_PUBLIC_FIREBASE_API_KEY is not set. Add it to .env.local and restart the dev server.');
+    console.error(
+      '[firebase] NEXT_PUBLIC_FIREBASE_API_KEY is not set. Add it to .env.local and restart the dev server.'
+    );
   }
 }
 
@@ -36,10 +37,6 @@ function ensureClientApp() {
   return getApps()[0]!;
 }
 
-export function getFirebaseApp() {
-  return ensureClientApp();
-}
-
 export function getFirebaseAuth() {
   const app = ensureClientApp();
   return getAuth(app);
@@ -47,5 +44,3 @@ export function getFirebaseAuth() {
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
-
-export const app = getFirebaseApp();
