@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 export const dynamic = 'force-dynamic';
@@ -218,7 +219,7 @@ export default function ResumePage() {
         </div>
 
         <aside className="panel p-4 text-sm">
-          <div className="text-[var(--text-muted)] text-xs">
+          <div className="text-(--text-muted) text-xs">
             Signed in as
           </div>
           <div className="font-medium truncate">
