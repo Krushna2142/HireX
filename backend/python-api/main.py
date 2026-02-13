@@ -26,11 +26,20 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # Log the actual exception for debugging
+    import logging
+    logging.error(f"Unhandled exception: {exc}", exc_info=True)
+    
+    # Get the origin from the request, fallback to first allowed origin
+    origin = request.headers.get("origin")
+    if origin not in origins:
+        origin = origins[0] if origins else "http://localhost:3000"
+    
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
         headers={
-            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
         },
     )
