@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import analyze, resumes, auth
+from routers import analyze, resumes, auth, jobs
 
-from core import firebase  # ensures firebase admin initializes
+from core import firebase
 
 app = FastAPI()
 
@@ -26,7 +26,8 @@ app.add_middleware(
 # Routers
 app.include_router(analyze.router, prefix="/api")
 app.include_router(resumes.router, prefix="/api")
-app.include_router(auth.router)  # /auth/...
+app.include_router(jobs.router)      # /jobs, /alerts
+app.include_router(auth.router)      # /auth/...
 
 @app.options("/{path:path}", include_in_schema=False)
 def options_handler():
