@@ -1,19 +1,12 @@
-from datetime import datetime
 from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import bcrypt
-import psycopg2
-import os
 
+from core.database import get_db_connection
 from utils.dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-def get_db_connection():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 
 class CredentialsCreate(BaseModel):
@@ -31,11 +24,10 @@ class CredentialsVerify(BaseModel):
 
 @router.post("/credentials/create")
 async def create_credentials(
-    payload: CredentialsCreate, current_user=Depends(get_current_user)
+    payload: CredentialsCreate,
+    current_user=Depends(get_current_user)
 ):
     firebase_uid = payload.firebase_uid or current_user.get("uid")
-    if not firebase_uid:
-        raise HTTPException(status_code=400, detail="Missing firebase_uid")
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -44,12 +36,14 @@ async def create_credentials(
         "SELECT id FROM users WHERE firebase_uid=%s AND username=%s",
         (firebase_uid, payload.username),
     )
+
     if cur.fetchone():
         conn.close()
         raise HTTPException(status_code=409, detail="Credentials already exist")
 
     password_hash = bcrypt.hashpw(
-        payload.password[:72].encode("utf-8"), bcrypt.gensalt()
+        payload.password[:72].encode("utf-8"),
+        bcrypt.gensalt()
     ).decode("utf-8")
 
     cur.execute(
@@ -68,20 +62,16 @@ async def create_credentials(
 
 @router.post("/credentials/verify")
 async def verify_credentials(
-    payload: CredentialsVerify, current_user=Depends(get_current_user)
+    payload: CredentialsVerify,
+    current_user=Depends(get_current_user)
 ):
     firebase_uid = payload.firebase_uid or current_user.get("uid")
-    if not firebase_uid:
-        raise HTTPException(status_code=400, detail="Missing firebase_uid")
 
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute(
-        """
-        SELECT password_hash FROM users
-        WHERE firebase_uid=%s AND username=%s
-        """,
+        "SELECT password_hash FROM users WHERE firebase_uid=%s AND username=%s",
         (firebase_uid, payload.username),
     )
 

@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers import analyze, resumes, auth, jobs
 
-from core import firebase
 
 app = FastAPI()
 origins = [
