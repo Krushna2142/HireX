@@ -102,79 +102,103 @@ export default function CredentialsModal({ open, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-        <h2 className="text-xl font-bold mb-4">
-          {mode === 'create' ? 'Create Credentials' : 'Login with Credentials'}
+  <div className="fixed inset-0 z-50 flex items-center justify-center">
+    {/* Overlay with Blur */}
+    <div
+      className="absolute inset-0 bg-black/60 backdrop-blur-md"
+      onClick={onClose}
+    />
+
+    {/* Modal */}
+    <div className="relative w-full max-w-md mx-4">
+      <div className="bg-[#0f172a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl animate-fadeIn">
+
+        {/* Title */}
+        <h2 className="text-2xl font-semibold text-white mb-6 text-center">
+          {mode === 'create'
+            ? 'Create Credentials'
+            : 'Login with Credentials'}
         </h2>
 
         {error && (
-          <p className="text-red-500 text-sm mb-3">{error}</p>
+          <p className="text-red-400 text-sm mb-4 text-center">
+            {error}
+          </p>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
 
-          {/* Mode Selection */}
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1">
+          {/* Mode */}
+          <div className="flex justify-center gap-6 text-sm text-gray-300">
+            <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
                 checked={mode === 'create'}
                 onChange={() => setMode('create')}
+                className="accent-purple-500"
               />
               New
             </label>
 
-            <label className="flex items-center gap-1">
+            <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
                 checked={mode === 'login'}
                 onChange={() => setMode('login')}
+                className="accent-purple-500"
               />
               Existing
             </label>
           </div>
 
-          {/* Role Selection */}
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-1">
+          {/* Role */}
+          <div className="flex justify-center gap-6 text-sm text-gray-300">
+            <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
                 checked={role === 'candidate'}
                 onChange={() => setRole('candidate')}
+                className="accent-purple-500"
               />
               Candidate
             </label>
 
-            <label className="flex items-center gap-1">
+            <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
                 checked={role === 'recruiter'}
                 onChange={() => setRole('recruiter')}
+                className="accent-purple-500"
               />
               Recruiter
             </label>
           </div>
 
-          <Input
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-          />
+          {/* Inputs */}
+          <div className="space-y-4">
+            <Input
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              className="bg-white/5 border-white/10 text-white placeholder-gray-400"
+            />
 
-          <Input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+            <Input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="bg-white/5 border-white/10 text-white placeholder-gray-400"
+            />
+          </div>
 
+          {/* Button */}
           <Button
             type="submit"
-            className="w-full"
             disabled={loading}
+            className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90 transition-all duration-200"
           >
             {loading
               ? 'Please wait...'
@@ -186,12 +210,14 @@ export default function CredentialsModal({ open, onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="text-sm text-gray-500 w-full"
+            className="text-sm text-gray-400 w-full hover:text-white transition"
           >
             Cancel
           </button>
+
         </form>
       </div>
     </div>
-  );
+  </div>
+);
 }
