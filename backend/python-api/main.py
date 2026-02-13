@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import analyze, resumes, auth  # absolute import (no leading dot)
+from routers import analyze, resumes, auth
 
 from core import firebase  # ensures firebase admin initializes
 
