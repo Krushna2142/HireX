@@ -74,7 +74,12 @@ export default function ResumePage() {
       fd.append('file', file);
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/analyze', true);
+     xhr.open(
+  'POST',
+  'https://job-crawler-fcwr.onrender.com/resume/analyze',
+  true
+);
+
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
