@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const backendUrl = process.env.BACKEND_URL || 'https://job-crawler-s0wz.onrender.com';
+  const backendUrl = process.env.BACKEND_URL || 'https://job-crawler-fcwr.onrender.com';
   const token = req.headers.get('authorization')?.replace('Bearer ', '');
   const res = await fetch(`${backendUrl}/auth/credentials/create`, {
     method: 'POST',
