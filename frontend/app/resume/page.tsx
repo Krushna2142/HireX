@@ -33,86 +33,100 @@ export default function ResumePage() {
 
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!API_URL) {
+    throw new Error('NEXT_PUBLIC_API_URL is not defined');
+  }
+
   const transformResultToAnalysis = (res: any): Analysis => {
     return {
       summary: res?.summary || 'Resume uploaded successfully',
-      skills: [],
-      roleRecommendations: [],
-      missingSkills: [],
-      learningPaths: [],
+      skills: res?.skills || [],
+      roleRecommendations: res?.roleRecommendations || [],
+      missingSkills: res?.missingSkills || [],
+      learningPaths: res?.learningPaths || [],
     };
   };
 
-  const handleFile = useCallback(async (file: File | null) => {
-    setStatus(null);
-    setErrorMsg(null);
-    setAnalysis(null);
-    if (!file || !user) return;
-
-    const allowed =
-      file.type.includes('pdf') ||
-      file.type.includes('word') ||
-      file.name.endsWith('.docx');
-
-    if (!allowed) {
-      setErrorMsg('Only PDF and DOCX files are supported.');
-      return;
-    }
-
-    try {
-      setUploading(true);
-      setUploadProgress(0);
-      setStatus('Uploading...');
-
-      const fd = new FormData();
-      fd.append('file', file);
-
-      const token = await user.getIdToken();
-
-      const xhr = new XMLHttpRequest();
-
-      xhr.open(
-        'POST',
-        `${process.env.NEXT_PUBLIC_API_URL}/analyze`,
-        true
-      );
-
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(percent);
-        }
-      };
-
-      xhr.onload = () => {
-        setUploading(false);
-
-        if (xhr.status === 200) {
-          const json = JSON.parse(xhr.responseText);
-          const normalized = transformResultToAnalysis(json);
-          setAnalysis(normalized);
-          setStatus('Upload successful');
-        } else {
-          setErrorMsg(`Upload failed (${xhr.status})`);
-          setStatus(null);
-        }
-      };
-
-      xhr.onerror = () => {
-        setUploading(false);
-        setErrorMsg('Network error');
-        setStatus(null);
-      };
-
-      xhr.send(fd);
-    } catch (err: any) {
-      setUploading(false);
-      setErrorMsg(err?.message ?? String(err));
+  const handleFile = useCallback(
+    async (file: File | null) => {
       setStatus(null);
-    }
-  }, [user]);
+      setErrorMsg(null);
+      setAnalysis(null);
+
+      if (!file || !user) {
+        setErrorMsg('You must be logged in.');
+        return;
+      }
+
+      const allowed =
+        file.type.includes('pdf') ||
+        file.type.includes('word') ||
+        file.name.endsWith('.docx');
+
+      if (!allowed) {
+        setErrorMsg('Only PDF and DOCX files are supported.');
+        return;
+      }
+
+      try {
+        setUploading(true);
+        setUploadProgress(0);
+        setStatus('Uploading...');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const token = await user.getIdToken();
+
+        const xhr = new XMLHttpRequest();
+
+        // 🔥 FIXED ENDPOINT
+        xhr.open('POST', `${API_URL}/api/analyze`, true);
+
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round(
+              (event.loaded / event.total) * 100
+            );
+            setUploadProgress(percent);
+          }
+        };
+
+        xhr.onload = () => {
+          setUploading(false);
+
+          if (xhr.status === 200) {
+            const json = JSON.parse(xhr.responseText);
+            const normalized = transformResultToAnalysis(json);
+            setAnalysis(normalized);
+            setStatus('Upload successful');
+          } else {
+            setErrorMsg(
+              `Upload failed (${xhr.status}) - ${xhr.responseText}`
+            );
+            setStatus(null);
+          }
+        };
+
+        xhr.onerror = () => {
+          setUploading(false);
+          setErrorMsg('Network error');
+          setStatus(null);
+        };
+
+        xhr.send(formData);
+      } catch (err: any) {
+        setUploading(false);
+        setErrorMsg(err?.message ?? String(err));
+        setStatus(null);
+      }
+    },
+    [user, API_URL]
+  );
 
   const onFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
