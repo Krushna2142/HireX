@@ -17,38 +17,22 @@ import {
 
 import { auth, googleProvider } from '@/lib/firebase/Client';
 
-export type AuthUser = {
-  uid: string;
-  displayName: string | null;
-  email: string | null;
-  photoURL: string | null;
-};
-
 export type AuthContextType = {
-  user: AuthUser | null;
+  user: User | null; // ✅ real Firebase User
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
-  signOutUser: () => Promise<void>; // ✅ REQUIRED (fixes your error)
+  signOutUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (fbUser: User | null) => {
-      if (fbUser) {
-        setUser({
-          uid: fbUser.uid,
-          displayName: fbUser.displayName,
-          email: fbUser.email,
-          photoURL: fbUser.photoURL,
-        });
-      } else {
-        setUser(null);
-      }
+      setUser(fbUser); // ✅ store full Firebase user
       setLoading(false);
     });
 
@@ -56,23 +40,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error('Google sign-in failed:', error);
-      throw error;
-    }
+    await signInWithPopup(auth, googleProvider);
   };
 
   const signOutUser = async () => {
-    try {
-      await signOut(auth);
-      localStorage.clear();
-      sessionStorage.clear();
-    } catch (error) {
-      console.error('Sign-out failed:', error);
-      throw error;
-    }
+    await signOut(auth);
+    localStorage.clear();
+    sessionStorage.clear();
   };
 
   return (
@@ -81,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         loading,
         signInWithGoogle,
-        signOutUser, // ✅ must be included
+        signOutUser,
       }}
     >
       {children}
