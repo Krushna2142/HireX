@@ -1,23 +1,41 @@
-import { getApps, initializeApp, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getApps, initializeApp, cert, type App } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
-if (!process.env.FIREBASE_PRIVATE_KEY) {
-  throw new Error('FIREBASE_PRIVATE_KEY is missing');
+let _app: App | undefined;
+
+function ensureApp(): App {
+  if (_app) return _app;
+  if (getApps().length > 0) {
+    _app = getApps()[0];
+    return _app;
+  }
+
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error('FIREBASE_PRIVATE_KEY is missing');
+  }
+
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  if (!projectId) {
+    throw new Error('FIREBASE_PROJECT_ID is missing');
+  }
+
+  _app = initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: privateKey.replace(/\\n/g, '\n'),
+    }),
+  });
+
+  return _app;
 }
 
-const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+export function getAdminAuth(): Auth {
+  return getAuth(ensureApp());
+}
 
-export const app =
-  getApps().length === 0
-    ? initializeApp({
-        credential: cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey,
-        }),
-      })
-    : getApps()[0];
-
-export const adminAuth = getAuth(app);
-export const adminDb = getFirestore(app);
+export function getAdminDb(): Firestore {
+  return getFirestore(ensureApp());
+}
