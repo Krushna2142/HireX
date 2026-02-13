@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from core.init_db import init_db
 
 from routers import analyze, resumes, auth, jobs
 
 
 app = FastAPI()
+init_db()
 origins = [
     "http://localhost:3000",
     "https://job-crawler-wine.vercel.app",
