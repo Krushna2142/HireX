@@ -34,17 +34,10 @@ export default function ResumePage() {
 
   const transformResultToAnalysis = (res: any): Analysis => {
     return {
-      summary: res?.summary || 'Resume analysis complete',
-      skills: res?.skillsCategorized
-        ? Object.entries(res.skillsCategorized).map(([category, items]) => ({
-            category,
-            items: Array.isArray(items) ? items : [],
-          }))
-        : [],
-      roleRecommendations: Array.isArray(res?.roleRecommendations)
-        ? res.roleRecommendations
-        : [],
-      missingSkills: res?.missingSkills || [],
+      summary: res?.summary || 'Resume uploaded successfully',
+      skills: [],
+      roleRecommendations: [],
+      missingSkills: [],
       learningPaths: [],
     };
   };
@@ -53,7 +46,7 @@ export default function ResumePage() {
     setStatus(null);
     setErrorMsg(null);
     setAnalysis(null);
-    if (!file) return;
+    if (!file || !user) return;
 
     const allowed =
       file.type.includes('pdf') ||
@@ -73,13 +66,17 @@ export default function ResumePage() {
       const fd = new FormData();
       fd.append('file', file);
 
-      const xhr = new XMLHttpRequest();
-     xhr.open(
-  'POST',
-  'https://job-crawler-fcwr.onrender.com/resume/analyze',
-  true
-);
+      const token = await user.getIdToken();
 
+      const xhr = new XMLHttpRequest();
+
+      xhr.open(
+        'POST',
+        `${process.env.NEXT_PUBLIC_API_URL}/analyze`,
+        true
+      );
+
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -90,13 +87,14 @@ export default function ResumePage() {
 
       xhr.onload = () => {
         setUploading(false);
+
         if (xhr.status === 200) {
           const json = JSON.parse(xhr.responseText);
           const normalized = transformResultToAnalysis(json);
           setAnalysis(normalized);
-          setStatus('Analysis complete');
+          setStatus('Upload successful');
         } else {
-          setErrorMsg(`Analysis failed (${xhr.status})`);
+          setErrorMsg(`Upload failed (${xhr.status})`);
           setStatus(null);
         }
       };
@@ -113,7 +111,7 @@ export default function ResumePage() {
       setErrorMsg(err?.message ?? String(err));
       setStatus(null);
     }
-  }, []);
+  }, [user]);
 
   const onFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
