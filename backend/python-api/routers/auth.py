@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from passlib.hash import bcrypt
+import bcrypt
 
 from core.firebase import db
 from utils.dependencies import get_current_user
@@ -38,7 +38,8 @@ async def create_credentials(
     if existing:
         raise HTTPException(status_code=409, detail="Credentials already exist")
 
-    password_hash = bcrypt.hash(payload.password[:72])
+    password_bytes = payload.password[:72].encode("utf-8")
+    password_hash = bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
     users_ref.add({
         "firebase_uid": firebase_uid,
@@ -71,7 +72,10 @@ async def verify_credentials(
     for doc in docs:
         data = doc.to_dict() or {}
         stored_hash = data.get("password_hash")
-        if stored_hash and bcrypt.verify(payload.password[:72], stored_hash):
+        if stored_hash and bcrypt.checkpw(
+            payload.password[:72].encode("utf-8"),
+            stored_hash.encode("utf-8")
+        ):
             return {"message": "Verified"}
 
     raise HTTPException(status_code=401, detail="Invalid credentials")
