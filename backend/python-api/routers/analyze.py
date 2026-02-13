@@ -1,12 +1,14 @@
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Depends
+import uuid
 
-from core.firebase import db
+from core.database import get_db_connection
 from utils.dependencies import get_current_user
 from services.storage_service import save_resume_file
 from services.resume_parser import parse_resume
 
 router = APIRouter()
+
 
 @router.post("/analyze")
 async def analyze_resume(
@@ -16,13 +18,26 @@ async def analyze_resume(
     file_path, file_id = save_resume_file(file)
     text = parse_resume(file_path)
 
-    db.collection("resumes").document(file_id).set({
-        "user_id": user["uid"],
-        "file_name": file.filename,
-        "file_path": file_path,
-        "content": text[:1000],
-        "created_at": datetime.utcnow()
-    })
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO resumes (id, user_id, file_name, file_path, content, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            file_id,
+            user["uid"],
+            file.filename,
+            file_path,
+            text[:1000],
+            datetime.utcnow(),
+        ),
+    )
+
+    conn.commit()
+    conn.close()
 
     return {
         "message": "Resume uploaded successfully",

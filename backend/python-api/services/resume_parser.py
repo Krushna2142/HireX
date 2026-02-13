@@ -1,6 +1,7 @@
 import pdfplumber
 import docx
 
+
 def parse_resume(file_path: str) -> str:
     if file_path.endswith(".pdf"):
         text = ""

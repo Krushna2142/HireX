@@ -6,6 +6,7 @@ UPLOAD_DIR = os.getenv("RESUME_UPLOAD_DIR", "resumes")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+
 def save_resume_file(file):
     file_id = str(uuid.uuid4())
     file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
