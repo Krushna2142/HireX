@@ -6,13 +6,13 @@ from routers import analyze, resumes, auth, jobs
 from core import firebase
 
 app = FastAPI()
-
 origins = [
     "http://localhost:3000",
     "https://job-crawler-wine.vercel.app",
     "https://job-crawler-krushna2142s-projects.vercel.app",
     "https://job-crawler-git-main-krushna2142s-projects.vercel.app",
-    "https://job-crawler-7o0thjixu-krushna2142s-projects.vercel.app",
+    "https://job-crawler-n4spykvj6-krushna2142s-projects.vercel.app",
+    "https://job-crawler-fcwr.onrender.com",
 ]
 
 app.add_middleware(
