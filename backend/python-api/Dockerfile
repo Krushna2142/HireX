@@ -2,11 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY python-api/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY python-api/main.py .
-COPY python-api/serviceAccount.json .
+COPY main.py .
+COPY serviceAccount.json .
 
 RUN python -m spacy download en_core_web_sm
 
