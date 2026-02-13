@@ -3,7 +3,6 @@
 'use client';
 
 import { useMemo, useState, useEffect } from 'react';
-import useWebSocket from 'react-use-websocket';
 import { getAuth } from 'firebase/auth';
 import axios from 'axios';
 
@@ -35,17 +34,11 @@ export default function DashboardPage() {
   const [sortBy, setSortBy] = useState<'appliedAt' | 'stage'>('appliedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
-  const [socketUrl, setSocketUrl] = useState<string | null>(null);
 
   const auth = getAuth();
   const user = auth.currentUser;
   const backendUrl =
     process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
-
-  // WebSocket for real-time updates
-  const { lastMessage } = useWebSocket(socketUrl, {
-    shouldReconnect: () => true,
-  });
 
   // Fetch initial data
   useEffect(() => {
@@ -80,42 +73,6 @@ export default function DashboardPage() {
     };
     fetchData();
   }, [user, backendUrl]);
-
-  // Initialize WebSocket URL once we have a user + token
-  useEffect(() => {
-    let cancelled = false;
-
-    const setupSocket = async () => {
-      if (!user) {
-        setSocketUrl(null);
-        return;
-      }
-      const token = await user.getIdToken();
-      if (cancelled) return;
-      const wsBase = backendUrl.replace(/^http/, 'ws');
-      setSocketUrl(
-        `${wsBase}/mock-interview?token=${encodeURIComponent(token)}`
-      );
-    };
-
-    setupSocket();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user, backendUrl]);
-
-  // Handle WebSocket messages
-  useEffect(() => {
-    if (lastMessage) {
-      const data = JSON.parse(lastMessage.data);
-      if (data.type === 'new_job') {
-        setApplications(prev => [...prev, data.job]);
-      } else if (data.type === 'update_alert') {
-        setAlerts(prev => [data.alert, ...prev]);
-      }
-    }
-  }, [lastMessage]);
 
   // Filtered and sorted
   const filtered = useMemo(() => {
@@ -305,7 +262,7 @@ export default function DashboardPage() {
   );
 }
 
-/* Components remain the same */
+/* Helper Components */
 
 function StatCard({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (
