@@ -1,3 +1,3 @@
-from . import analyze, resumes, auth
+from . import analyze, resumes, auth, jobs
 
-__all__ = ["analyze", "resumes", "auth"]
+__all__ = ["analyze", "resumes", "auth", "jobs"]
