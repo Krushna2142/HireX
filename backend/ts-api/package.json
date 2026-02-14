@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "google-search-results-nodejs": "^2.1.0",
+    "process": "^0.11.10"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3"
+  }
+}

@@ -1,84 +1,48 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextRequest, NextResponse } from 'next/server';
+import SerpApi from "google-search-results-nodejs";
+import { NextRequest } from "next/dist/server/web/spec-extension/request";
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-type Job = {
-  id: string;
-  title: string;
-  company: string;
-  location: string;
-  salary?: string | null;
-  url: string;
-  source: string;
-  postedAt?: string | null;
-  descriptionSnippet?: string | null;
-};
-
-function uniq<T>(arr: T[], key: (x: T) => string) {
-  const seen = new Set<string>();
-  return arr.filter((x) => {
-    const k = key(x);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}
+const search = new SerpApi.GoogleSearch(process.env.SERP_API_KEY);
 
 export async function POST(req: NextRequest) {
   try {
-    const { skills = [], titles = [], location = '' } = await req.json();
+    const { skills = [], titles = [], location = "" } = await req.json();
 
-    const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-    if (!RAPIDAPI_KEY) {
-      return NextResponse.json({ error: 'RAPIDAPI_KEY missing' }, { status: 500 });
-    }
+    const queryParts: string[] = [];
+    if (titles?.length) queryParts.push(titles.slice(0, 3).join(" OR "));
+    if (skills?.length) queryParts.push(skills.slice(0, 5).join(" "));
 
-    // Build a concise query
-    const qParts: string[] = [];
-    if (titles?.length) qParts.push(titles.slice(0, 3).join(' OR '));
-    if (skills?.length) qParts.push(skills.slice(0, 5).join(' '));
-    const query = qParts.join(' ');
+    const query = queryParts.join(" ") || "software engineer";
 
-    const params = new URLSearchParams({
-      query: query || 'software engineer',
-      page: '1',
-      num_pages: '1',
-      date_posted: 'month',
-      remote_jobs_only: 'false',
-    });
-    if (location) params.set('location', location);
+    const params = {
+      engine: "google_jobs",
+      q: query,
+      location: location || "India",
+      hl: "en",
+      api_key: process.env.SERP_API_KEY,
+    };
 
-    const jsearchRes = await fetch(`https://jsearch.p.rapidapi.com/search?${params.toString()}`, {
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY,
-        'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
-      },
-      cache: 'no-store',
+    const results = await new Promise<any>((resolve, reject) => {
+      search.json(params, (data: any) => {
+        if (!data) reject("No data");
+        resolve(data);
+      });
     });
 
-    if (!jsearchRes.ok) {
-      const t = await jsearchRes.text();
-      return NextResponse.json({ error: `JSearch failed: ${t}` }, { status: 502 });
-    }
-
-    const jjson = await jsearchRes.json();
-    const jobs: Job[] = (jjson?.data ?? []).map((j: any): Job => ({
-      id: String(j.job_id ?? j.job_posted_at_timestamp ?? Math.random()),
-      title: String(j.job_title ?? ''),
-      company: String(j.employer_name ?? ''),
-      location: String(j.job_city ? `${j.job_city}, ${j.job_country}` : j.job_country ?? ''),
-      salary: j.job_min_salary && j.job_max_salary ? `$${j.job_min_salary} - $${j.job_max_salary}` : null,
-      url: String(j.job_apply_link ?? j.job_google_link ?? j.job_offer_expiration_datetime_utc ?? '#'),
-      source: 'JSearch',
-      postedAt: j.job_posted_at_datetime_utc ?? null,
-      descriptionSnippet: j.job_description?.slice(0, 240) ?? null,
+    const jobs = (results.jobs_results || []).map((job: any) => ({
+      id: job.job_id,
+      title: job.title,
+      company: job.company_name,
+      location: job.location,
+      description: job.description,
+      url: job.related_links?.[0]?.link,
+      source: "SerpAPI",
     }));
 
-    const deduped = uniq(jobs, (x) => x.url || x.id);
-    return NextResponse.json({ jobs: deduped, count: deduped.length, query });
+    return NextResponse.json({ jobs });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? 'Jobs fetch failed' }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message ?? "SerpAPI fetch failed" },
+      { status: 500 }
+    );
   }
 }
