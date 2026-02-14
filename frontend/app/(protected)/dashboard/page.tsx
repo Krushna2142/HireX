@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const auth = getAuth();
   const user = auth.currentUser;
   const backendUrl =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
+    process.env.NEXT_PUBLIC_API_URL;
 
   // Fetch initial data
   useEffect(() => {

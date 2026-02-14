@@ -1,6 +1,12 @@
 [
   {
-    "origin": ["http://localhost:3000", "http://127.0.0.1:3000"],
+    "origin": [
+      "https://job-crawler-wine.vercel.app",
+    "https://job-crawler-krushna2142s-projects.vercel.app",
+    "https://job-crawler-git-main-krushna2142s-projects.vercel.app",
+    "https://job-crawler-n4spykvj6-krushna2142s-projects.vercel.app",
+    "https://job-crawler-fcwr.onrender.com"
+    ],
     "method": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
     "responseHeader": ["Content-Type", "x-goog-resumable", "Content-Length", "Authorization"],
     "maxAgeSeconds": 3600
