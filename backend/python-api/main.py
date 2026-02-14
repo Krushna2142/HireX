@@ -8,7 +8,7 @@ from routers import analyze, resumes, auth, jobs
 app = FastAPI()
 init_db()
 origins = [
-    "http://localhost:3000",
+    
     "https://job-crawler-wine.vercel.app",
     "https://job-crawler-krushna2142s-projects.vercel.app",
     "https://job-crawler-git-main-krushna2142s-projects.vercel.app",
