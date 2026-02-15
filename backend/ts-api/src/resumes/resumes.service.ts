@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { createClient } from '@supabase/supabase-js';
 import { firstValueFrom } from 'rxjs';
+import FormData from 'form-data';
 
 @Injectable()
 export class ResumesService {
@@ -32,11 +33,14 @@ export class ResumesService {
     const apiKey = this.configService.get('pythonApiKey');
 
     const formData = new FormData();
-    formData.append('file', new Blob([new Uint8Array(file.buffer)]), file.originalname);
+    formData.append('file', file.buffer, file.originalname);
 
     const response = await firstValueFrom(
       this.httpService.post(`${pythonUrl}/ai/resume/parse`, formData, {
-        headers: { 'X-API-KEY': apiKey },
+        headers: {
+          'X-API-KEY': apiKey,
+          ...formData.getHeaders(),
+        },
       }),
     );
 
