@@ -1,5 +1,5 @@
 export default () => ({
-  port: parseInt(process.env.PORT, 10) || 3001,
+  port: parseInt(process.env.PORT || '3001', 10),
   pythonApiUrl: process.env.PYTHON_API_URL,
   pythonApiKey: process.env.PYTHON_API_KEY,
   supabase: {

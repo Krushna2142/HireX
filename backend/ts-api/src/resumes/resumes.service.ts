@@ -13,15 +13,15 @@ export class ResumesService {
     private configService: ConfigService,
   ) {
     this.supabase = createClient(
-      this.configService.get('supabase.url'),
-      this.configService.get('supabase.anonKey'),
+      this.configService.get('supabase.url') || '',
+      this.configService.get('supabase.anonKey') || '',
     );
   }
 
   async uploadResume(file: Express.Multer.File) {
     // Upload to Supabase storage
     const fileName = `${Date.now()}-${file.originalname}`;
-    const { data, error } = await this.supabase.storage
+    const { error } = await this.supabase.storage
       .from('resumes')
       .upload(fileName, file.buffer);
 
@@ -32,7 +32,7 @@ export class ResumesService {
     const apiKey = this.configService.get('pythonApiKey');
 
     const formData = new FormData();
-    formData.append('file', new Blob([file.buffer]), file.originalname);
+    formData.append('file', new Blob([new Uint8Array(file.buffer)]), file.originalname);
 
     const response = await firstValueFrom(
       this.httpService.post(`${pythonUrl}/ai/resume/parse`, formData, {

@@ -1,4 +1,11 @@
-import { Controller, Post, Get, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ResumesService } from './resumes.service';
 import { FirebaseGuard } from '../auth/firebase.guard';

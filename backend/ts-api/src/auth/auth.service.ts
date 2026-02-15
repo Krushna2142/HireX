@@ -9,8 +9,8 @@ export class AuthService {
 
   constructor(private configService: ConfigService) {
     this.supabase = createClient(
-      this.configService.get('supabase.url'),
-      this.configService.get('supabase.anonKey'),
+      this.configService.get('supabase.url') || '',
+      this.configService.get('supabase.anonKey') || '',
     );
   }
 
