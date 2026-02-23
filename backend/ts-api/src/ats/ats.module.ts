@@ -1,6 +1,7 @@
+/* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
-import { AtsService } from './ats.service';
 import { HttpModule } from '@nestjs/axios';
+import { AtsService } from './ats.service';
 
 @Module({
   imports: [HttpModule],

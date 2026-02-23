@@ -1,17 +1,21 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 
 @Injectable()
 export class FirebaseGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const token = request.headers.authorization?.split('Bearer ')[1];
+    const req = context.switchToHttp().getRequest();
+    const token = req.headers.authorization?.split('Bearer ')[1];
 
     if (!token) return false;
 
     try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      request.user = decodedToken;
+      const decoded = await admin.auth().verifyIdToken(token);
+      req.user = decoded;
       return true;
     } catch {
       return false;

@@ -1,59 +1,35 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { createClient } from '@supabase/supabase-js';
-import { firstValueFrom } from 'rxjs';
 import FormData from 'form-data';
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class ResumesService {
-  private supabase;
+  constructor(private http: HttpService, private config: ConfigService) {}
 
-  constructor(
-    private httpService: HttpService,
-    private configService: ConfigService,
-  ) {
-    this.supabase = createClient(
-      this.configService.get('supabase.url') || '',
-      this.configService.get('supabase.anonKey') || '',
-    );
-  }
+  async parseResume(file: Express.Multer.File) {
+    const form = new FormData();
+    form.append('file', file.buffer, file.originalname);
 
-  async uploadResume(file: Express.Multer.File) {
-    // Upload to Supabase storage
-    const fileName = `${Date.now()}-${file.originalname}`;
-    const { error } = await this.supabase.storage
-      .from('resumes')
-      .upload(fileName, file.buffer);
-
-    if (error) throw new Error(error.message);
-
-    // Call Python AI to parse
-    const pythonUrl = this.configService.get('pythonApiUrl');
-    const apiKey = this.configService.get('pythonApiKey');
-
-    const formData = new FormData();
-    formData.append('file', file.buffer, file.originalname);
+    const pythonUrl = this.config.get('pythonApiUrl');
+    const apiKey = this.config.get('pythonApiKey');
 
     const response = await firstValueFrom(
-      this.httpService.post(`${pythonUrl}/ai/resume/parse`, formData, {
+      this.http.post(`${pythonUrl}/ai/resume/parse`, form, {
         headers: {
+          ...form.getHeaders(),
           'X-API-KEY': apiKey,
-          ...formData.getHeaders(),
         },
       }),
     );
 
-    return { message: 'Resume uploaded', data: response.data };
-  }
-
-  async getMyResumes() {
-    const { data, error } = await this.supabase
-      .from('resumes')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw new Error(error.message);
-    return { resumes: data };
+    return response.data;
   }
 }

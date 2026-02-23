@@ -1,20 +1,21 @@
+/* eslint-disable prettier/prettier */
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { FirebaseGuard } from './firebase.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly auth: AuthService) {}
 
   @Post('credentials/create')
   @UseGuards(FirebaseGuard)
-  async createCredentials(@Body() body: any) {
-    return this.authService.createCredentials(body);
+  async create(@Body() body: any) {
+    return this.auth.createCredentials(body);
   }
 
   @Post('credentials/verify')
   @UseGuards(FirebaseGuard)
-  async verifyCredentials(@Body() body: any) {
-    return this.authService.verifyCredentials(body);
+  async verify(@Body() body: any) {
+    return this.auth.verifyCredentials(body);
   }
 }

@@ -1,27 +1,37 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { Injectable } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import SerpApi from 'google-search-results-nodejs';
 
 @Injectable()
 export class JobsService {
-  constructor(
-    private httpService: HttpService,
-    private configService: ConfigService,
-  ) {}
+  private search;
 
-  async fetchJobs(query: any) {
-    const serpApiKey = this.configService.get('serpApiKey');
-    const response = await firstValueFrom(
-      this.httpService.get('https://serpapi.com/search', {
-        params: {
-          api_key: serpApiKey,
-          engine: 'google_jobs',
-          q: query.query,
-        },
-      }),
-    );
+  constructor(private config: ConfigService) { 
+    this.search = new SerpApi.GoogleSearch(
+  this.config.getOrThrow<string>('serpApiKey')
+);
+  }
 
-    return response.data;
+  async fetchJobs(query: string, location = 'India') {
+    const params = {
+      engine: 'google_jobs',
+      q: query,
+      location,
+      hl: 'en',
+      api_key: this.config.get('serpApiKey'),
+    };
+
+    return new Promise((resolve, reject) => {
+      this.search.json(params, (data) => {
+        if (!data) return reject('No data');
+        resolve(data);
+      });
+    });
   }
 }

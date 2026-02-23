@@ -1,28 +1,19 @@
-import {
-  Controller,
-  Post,
-  Get,
-  UseGuards,
-  UseInterceptors,
-  UploadedFile,
-} from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+import { Controller, Post, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ResumesService } from './resumes.service';
 import { FirebaseGuard } from '../auth/firebase.guard';
+import { ResumesService } from './resumes.service';
 
 @Controller('resumes')
 @UseGuards(FirebaseGuard)
 export class ResumesController {
-  constructor(private readonly resumesService: ResumesService) {}
+  constructor(private readonly resumes: ResumesService) {}
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadResume(@UploadedFile() file: Express.Multer.File) {
-    return this.resumesService.uploadResume(file);
-  }
-
-  @Get('me')
-  async getMyResumes() {
-    return this.resumesService.getMyResumes();
+  upload(@UploadedFile() file: Express.Multer.File) {
+    return this.resumes.parseResume(file);
   }
 }
