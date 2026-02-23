@@ -1,15 +1,5 @@
 fastapi
 uvicorn[standard]
-psycopg2-binary
-redis
-minio
-firebase-admin
-pydantic
-spacy
-openai
-bcrypt==3.2.2
-passlib[bcrypt]==1.7.4
-requests
 python-multipart
 pdfplumber
 python-docx

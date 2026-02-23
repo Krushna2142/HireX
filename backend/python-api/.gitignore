@@ -1,8 +1,3 @@
-.vercel
-.env*.local
-.env
-
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,8 +6,7 @@ __pycache__/
 venv/
 env/
 ENV/
-
-# Node
-node_modules/
+.env
+*.egg-info/
 dist/
 build/
