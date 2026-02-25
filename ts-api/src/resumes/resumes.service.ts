@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
@@ -6,7 +10,10 @@ import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class ResumesService {
-  constructor(private http: HttpService, private config: ConfigService) {}
+  constructor(
+    private http: HttpService,
+    private config: ConfigService,
+  ) {}
 
   async parseResume(file: Express.Multer.File) {
     const form = new FormData();

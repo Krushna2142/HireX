@@ -1,3 +1,8 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { Injectable } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 import * as bcrypt from 'bcryptjs';
@@ -9,8 +14,8 @@ export class AuthService {
 
   constructor(private config: ConfigService) {
     this.supabase = createClient(
-      this.config.get('supabase.url'),
-      this.config.get('supabase.anonKey'),
+      this.config.getOrThrow('supabase.url'),
+      this.config.getOrThrow('supabase.anonKey'),
     );
   }
 

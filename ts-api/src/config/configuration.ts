@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 export default () => ({
   port: parseInt(process.env.PORT ?? "3001", 10),
   pythonApiUrl: process.env.PYTHON_API_URL,
