@@ -14,8 +14,8 @@ export class AuthService {
 
   constructor(private config: ConfigService) {
     this.supabase = createClient(
-      this.config.getOrThrow('supabase.url'),
-      this.config.getOrThrow('supabase.anonKey'),
+      this.config.getOrThrow('SUPABASE_URL'),
+      this.config.getOrThrow('SUPABASE_ANON_KEY'),
     );
   }
 
