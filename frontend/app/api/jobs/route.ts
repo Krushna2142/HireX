@@ -1,7 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import SerpApi from "google-search-results-nodejs";
 import { NextRequest } from "next/dist/server/web/spec-extension/request";
+import { NextResponse } from "next/server";
 
-const search = new SerpApi.GoogleSearch(process.env.SERP_API_KEY);
+const serpApiKey = process.env.SERP_API_KEY;
+if (!serpApiKey) {
+  throw new Error("SERP_API_KEY environment variable is not set");
+}
+const search = new SerpApi.GoogleSearch(serpApiKey);
 
 export async function POST(req: NextRequest) {
   try {
