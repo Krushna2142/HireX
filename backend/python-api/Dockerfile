@@ -2,17 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY python-api/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY python-api/main.py .
-COPY python-api/serviceAccount.json .
-COPY python-api/routers/ ./routers/
-COPY python-api/core/ ./core/
-COPY python-api/utils/ ./utils/
-COPY python-api/services/ ./services/
-
-RUN python -m spacy download en_core_web_sm
+COPY . .
 
 EXPOSE 8000
 
