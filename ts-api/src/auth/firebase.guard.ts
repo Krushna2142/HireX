@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+// C:\Projects\Job-Crawler\ts-api\src\auth\firebase.guard.ts
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 

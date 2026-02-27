@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.init_db import init_db
-
+# C:\Projects\Job-Crawler\backend\python-api\main.py
 from routers import analyze, resumes, auth, jobs
 
 

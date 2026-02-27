@@ -1,3 +1,4 @@
+//C:\Projects\Job-Crawler\ts-api\src\types\google-search-results-nodejs.d.ts
 declare module 'google-search-results-nodejs' {
   export class GoogleSearch {
     constructor(apiKey: string);

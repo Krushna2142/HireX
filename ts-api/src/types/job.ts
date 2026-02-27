@@ -1,3 +1,4 @@
+//C:\Projects\Job-Crawler\ts-api\src\types\job.ts
 export interface NormalizedJob {
   externalId: string;
   source: string;

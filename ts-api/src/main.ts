@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-floating-promises */
+// C:\Projects\Job-Crawler\ts-api\src\main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 

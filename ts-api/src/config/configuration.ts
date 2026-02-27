@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+// C:\Projects\Job-Crawler\ts-api\src\config\configuration.ts
 export default () => ({
   port: parseInt(process.env.PORT ?? "3001", 10),
   pythonApiUrl: process.env.PYTHON_API_URL,

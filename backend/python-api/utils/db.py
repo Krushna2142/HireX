@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from psycopg2 import pool
-
+# C:\Projects\Job-Crawler\backend\python-api\utils\db.py
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")

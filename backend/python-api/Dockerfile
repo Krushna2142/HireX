@@ -1,5 +1,5 @@
 FROM python:3.11-slim
-
+# C:\Projects\Job-Crawler\backend\python-api\Dockerfile
 WORKDIR /app
 
 COPY requirements.txt .
