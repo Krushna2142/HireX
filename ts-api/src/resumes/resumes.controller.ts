@@ -1,23 +1,14 @@
-//C:\Projects\Job-Crawler\ts-api\src\resumes\resumes.controller.ts
-import {
-  Controller,
-  Post,
-  UseGuards,
-  UseInterceptors,
-  UploadedFile,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { FirebaseGuard } from '../auth/firebase.guard';
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable prettier/prettier */
+import { Controller, Post, Body } from '@nestjs/common';
 import { ResumesService } from './resumes.service';
 
 @Controller('resumes')
-@UseGuards(FirebaseGuard)
 export class ResumesController {
-  constructor(private readonly resumes: ResumesService) {}
+  constructor(private readonly service: ResumesService) {}
 
-  @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
-  upload(@UploadedFile() file: Express.Multer.File) {
-    return this.resumes.parseResume(file);
+  @Post()
+  async upload(@Body() body: { content: string; userId: string }) {
+    return this.service.create(body.content, body.userId);
   }
 }

@@ -1,19 +1,21 @@
-//  C:\Projects\Job-Crawler\ts-api\src\jobs\jobs.controller.ts
-/* eslint-disable prettier/prettier */
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+import { Controller, Get, Query, Param } from '@nestjs/common';
 import { JobsService } from './jobs.service';
-import { FirebaseGuard } from '../auth/firebase.guard';
 
 @Controller('jobs')
-@UseGuards(FirebaseGuard)
 export class JobsController {
-  constructor(private readonly jobsService: JobsService) {}
+  constructor(private readonly service: JobsService) {}
 
-  @Get()
-  async getJobs(
+  @Get('search')
+  async search(
     @Query('q') query: string,
     @Query('location') location?: string,
   ) {
-    return this.jobsService.fetchJobs(query, location);
+    return this.service.fetchAndStore(query, location);
+  }
+
+  @Get('match/:resumeId')
+  async match(@Param('resumeId') resumeId: string) {
+    return this.service.match(resumeId);
   }
 }
