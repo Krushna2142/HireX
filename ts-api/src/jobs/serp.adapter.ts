@@ -1,3 +1,4 @@
+//C:\Projects\Job-Crawler\ts-api\src\jobs\serp.adapter.ts
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import SerpApi from 'google-search-results-nodejs';

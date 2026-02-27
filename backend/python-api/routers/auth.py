@@ -1,3 +1,4 @@
+# C:\Projects\Job-Crawler\backend\python-api\routers\auth.py
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel

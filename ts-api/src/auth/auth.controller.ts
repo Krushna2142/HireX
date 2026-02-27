@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+// C:\Projects\Job-Crawler\ts-api\src\auth\auth.controller.ts
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { FirebaseGuard } from './firebase.guard';

@@ -1,3 +1,4 @@
+# C:\Projects\Job-Crawler\backend\python-api\routers\resumes.py
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from core.database import get_db_connection
 from utils.dependencies import get_current_user

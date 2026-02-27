@@ -1,3 +1,4 @@
+//  C:\Projects\Job-Crawler\ts-api\src\auth\auth.module.ts
 /* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
 import { AuthController } from './auth.controller';

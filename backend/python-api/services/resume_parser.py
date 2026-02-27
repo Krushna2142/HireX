@@ -1,17 +1,22 @@
 import pdfplumber
 import docx
+import tempfile
 
+async def parse_resume(file):
+    suffix = file.filename.split(".")[-1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{suffix}") as tmp:
+        tmp.write(await file.read())
+        path = tmp.name
 
-def parse_resume(file_path: str) -> str:
-    if file_path.endswith(".pdf"):
+    if suffix == "pdf":
         text = ""
-        with pdfplumber.open(file_path) as pdf:
+        with pdfplumber.open(path) as pdf:
             for page in pdf.pages:
                 text += page.extract_text() or ""
         return text
 
-    if file_path.endswith(".docx"):
-        document = docx.Document(file_path)
-        return "\n".join([p.text for p in document.paragraphs])
+    if suffix == "docx":
+        doc = docx.Document(path)
+        return "\n".join(p.text for p in doc.paragraphs)
 
-    return "Unsupported file format"
+    return ""
