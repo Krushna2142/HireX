@@ -1,28 +1,53 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable prettier/prettier */
-// C:\Projects\Job-Crawler\ts-api\src\ats\ats.service.ts
-import { Injectable } from '@nestjs/common';
+// src/ats/ats.service.ts
+
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 
+export interface AtsScoreResponse {
+  score: number;
+  strengths: string[];
+  weaknesses: string[];
+  suggestions: string[];
+}
+
 @Injectable()
 export class AtsService {
-  constructor(private http: HttpService, private config: ConfigService) {}
+  private readonly pythonUrl: string;
+  private readonly apiKey: string;
 
-  async score(resumeText: string) {
-    const pythonUrl = this.config.get('pythonApiUrl');
-    const apiKey = this.config.get('pythonApiKey');
+  constructor(
+    private readonly http: HttpService,
+    private readonly config: ConfigService,
+  ) {
+    this.pythonUrl = this.config.get<string>('pythonApiUrl') ?? '';
+    this.apiKey = this.config.get<string>('pythonApiKey') ?? '';
 
-    const response = await firstValueFrom(
-      this.http.post(
-        `${pythonUrl}/ai/ats/score`,
-        { resume_text: resumeText },
-        { headers: { 'X-API-KEY': apiKey } },
-      ),
-    );
+    if (!this.pythonUrl || !this.apiKey) {
+      throw new Error('ATS Service: Missing Python API configuration');
+    }
+  }
 
-    return response.data;
+  async score(resumeText: string): Promise<AtsScoreResponse> {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<AtsScoreResponse>(
+          `${this.pythonUrl}/ai/ats/score`,
+          { resume_text: resumeText },
+          {
+            headers: {
+              'X-API-KEY': this.apiKey,
+            },
+          },
+        ),
+      );
+
+      return response.data;
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to fetch ATS score from AI service',
+      );
+    }
   }
 }

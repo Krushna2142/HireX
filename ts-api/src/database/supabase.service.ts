@@ -1,17 +1,38 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable prettier/prettier */
+// src/database/supabase.service.ts
+
 import { Injectable } from '@nestjs/common';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable()
 export class SupabaseService {
-  public client: SupabaseClient;
+  rpc(arg0: string, arg1: { query_embedding: any; match_threshold: number; match_count: number; }): { data: any; error: any; } | PromiseLike<{ data: any; error: any; }> {
+    throw new Error('Method not implemented.');
+  }
+  private readonly client: SupabaseClient;
 
-  constructor(private config: ConfigService) {
-    this.client = createClient(
-      this.config.getOrThrow<string>('SUPABASE_URL'),
-      this.config.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
-    );
+  constructor(private readonly config: ConfigService) {
+    const supabaseUrl = this.config.get<string>('SUPABASE_URL');
+    const supabaseKey = this.config.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error(
+        'SupabaseService: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY',
+      );
+    }
+
+    this.client = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: false,
+      },
+    });
+  }
+
+  /**
+   * Returns the Supabase client instance.
+   * Used by services to perform DB operations.
+   */
+  getClient(): SupabaseClient {
+    return this.client;
   }
 }
