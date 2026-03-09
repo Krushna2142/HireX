@@ -1,19 +1,22 @@
-from fastapi import APIRouter, UploadFile, File, Header, HTTPException
-from services.resume_parser import parse_resume
-from services.ats_service import analyze_resume
+import pdfplumber
+import docx
+import tempfile
 
-router = APIRouter()
+async def parse_resume(file):
+    suffix = file.filename.split(".")[-1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{suffix}") as tmp:
+        tmp.write(await file.read())
+        path = tmp.name
 
-API_KEY = "your-secret-key"
+    if suffix == "pdf":
+        text = ""
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+        return text
 
+    if suffix == "docx":
+        doc = docx.Document(path)
+        return "\n".join(p.text for p in doc.paragraphs)
 
-@router.post("/analyze")
-async def analyze(file: UploadFile = File(...), x_api_key: str = Header(None)):
-
-    if x_api_key != API_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    text = await parse_resume(file)
-    result = analyze_resume(text)
-
-    return result
+    return ""

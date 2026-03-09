@@ -27,6 +27,6 @@ import { QUEUES } from './queue.constants';
     }),
   ],
   providers: [QueueProcessor],
-  exports: [],
+  exports: [BullModule],  // ✅ Export BullModule so other modules can use the queue
 })
 export class QueueModule {}

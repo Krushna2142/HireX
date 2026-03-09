@@ -5,7 +5,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Controller, Get, UseGuards, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { FirebaseGuard } from '../auth/firebase.guard';
+import { FirebaseGuard } from '../auth/supabase.guard';
 
 @Controller('users')
 @UseGuards(FirebaseGuard)
