@@ -1,14 +1,11 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core.init_db import init_db
-# C:\Projects\Job-Crawler\backend\python-api\main.py
-from routers import analyze, resumes, auth, jobs
-
+from routers import analyze
 
 app = FastAPI()
-init_db()
+
 origins = [
-    
     "https://job-crawler-wine.vercel.app",
     "https://job-crawler-krushna2142s-projects.vercel.app",
     "https://job-crawler-git-main-krushna2142s-projects.vercel.app",
@@ -24,11 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
+# AI/ML Routers only
 app.include_router(analyze.router, prefix="/api")
-app.include_router(resumes.router, prefix="/api")
-app.include_router(jobs.router)      # /jobs, /alerts
-app.include_router(auth.router)      # /auth/...
 
 @app.options("/{path:path}", include_in_schema=False)
 def options_handler():
@@ -36,4 +30,4 @@ def options_handler():
 
 @app.get("/")
 def root():
-    return {"message": "JobCrawler Backend Running 🚀"}
+    return {"message": "JobCrawler AI Service Running 🚀"}
