@@ -3,14 +3,21 @@ import SerpApi from "google-search-results-nodejs";
 import { NextRequest } from "next/dist/server/web/spec-extension/request";
 import { NextResponse } from "next/server";
 
-const serpApiKey = process.env.SERP_API_KEY;
-if (!serpApiKey) {
-  throw new Error("SERP_API_KEY environment variable is not set");
-}
-const search = new SerpApi.GoogleSearch(serpApiKey);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
+    const serpApiKey = process.env.SERP_API_KEY;
+    if (!serpApiKey) {
+      return NextResponse.json(
+        { error: "SERP_API_KEY environment variable is not set" },
+        { status: 500 }
+      );
+    }
+
+    const search = new SerpApi.GoogleSearch(serpApiKey);
+
     const { skills = [], titles = [], location = "" } = await req.json();
 
     const queryParts: string[] = [];
@@ -24,7 +31,7 @@ export async function POST(req: NextRequest) {
       q: query,
       location: location || "India",
       hl: "en",
-      api_key: process.env.SERP_API_KEY,
+      api_key: serpApiKey,
     };
 
     const results = await new Promise<any>((resolve, reject) => {
