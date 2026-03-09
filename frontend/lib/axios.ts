@@ -1,8 +1,7 @@
 import axios from 'axios';
-import { auth } from '@/lib/firebase/Client';
+import { supabase } from '@/lib/supabase/client';
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -11,11 +10,11 @@ const api = axios.create({
 // 🔥 Request Interceptor
 api.interceptors.request.use(
   async (config) => {
-    const user = auth.currentUser;
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
 
-    if (user) {
-      const token = await user.getIdToken();
-      config.headers.Authorization = `Bearer ${token}`;
+    if (session?.access_token) {
+      config.headers.Authorization = `Bearer ${session.access_token}`;
     }
 
     return config;
