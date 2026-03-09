@@ -1,43 +1,69 @@
-"use client";
+'use client';
 
-import { useAuth } from "@/components/providers/AuthProvider"; // Import useAuth from the correct path
-import { Loader2, LogIn } from "lucide-react";
+import { createClient } from '@supabase/supabase-js';
+import { Loader2, LogOut, LogIn } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import CredentialsModal from './CredentialsModal';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function SignInButton() {
-  const { user, loading, signInWithGoogle, signOutUser } = useAuth(); // Corrected to use signOutUser
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+      }
+    );
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   if (loading) {
     return (
-      <button className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-gray-100 rounded-md">
-        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+      <button className="px-4 py-2 text-sm bg-gray-100 rounded-md">
+        <Loader2 className="w-4 h-4 animate-spin mr-2 inline" />
         Loading...
       </button>
     );
   }
 
-  if (user) {
+  if (session) {
     return (
       <button
-        className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-gray-100 rounded-md hover:bg-gray-200"
+        className="px-4 py-2 text-sm bg-gray-100 rounded-md"
         onClick={async () => {
-          await signOutUser(); // Corrected to use signOutUser
+          await supabase.auth.signOut();
         }}
       >
-        <LogIn className="w-4 h-4" />
+        <LogOut className="w-4 h-4 inline mr-2" />
         Sign Out
       </button>
     );
   }
 
   return (
-    <button
-      className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-100 bg-blue-500 rounded-md hover:bg-blue-600"
-      onClick={async () => {
-        await signInWithGoogle(); // Sign user in with Google
-      }}
-    >
-      <LogIn className="w-4 h-4" />
-      Sign In with Google
-    </button>
+    <>
+      <button
+        className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        onClick={() => setOpen(true)}
+      >
+        <LogIn className="w-4 h-4 inline mr-2" />
+        Sign In
+      </button>
+
+      <CredentialsModal open={open} onClose={() => setOpen(false)} />
+    </>
   );
 }
