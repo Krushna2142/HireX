@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Menu, X } from 'lucide-react';
 import ThemeToggle from './../ThemeToggle';
 import { useAuth } from '../providers/AuthProvider';
 import Avatar from '../ui/Avatar';
-import { useState } from 'react';
 import LoginModal from '@/components/auth/CredentialsModal';
 import { Button } from '@/components/ui/Button';
-import { Menu, X } from 'lucide-react';
 
 const publicLinks = [
   { href: '/', label: 'Home' },
@@ -27,178 +28,152 @@ export default function Navbar() {
   const router = useRouter();
   const { user, loading, signInWithGoogle, signOutUser } = useAuth();
 
-  const [loginOpen, setLoginOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
-  const handleSignIn = async () => {
-    try {
-      await signInWithGoogle();
-      setLoginOpen(true);
-    } catch (error) {
-      console.error('Sign-in failed:', error);
-    }
+  const isActive = (href: string) => {
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
   };
 
-  const closeMobile = () => setMobileOpen(false);
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 40);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   return (
     <>
-      <header className="sticky top-0 z-50 w-full border-b border-border bg-background/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-8">
+      <header
+        className={`sticky top-0 z-50 w-full border-b border-border bg-background transition-all duration-300 ${scrolled ? 'py-2 shadow-sm' : 'py-4'
+          }`}
+      >
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center">
 
-          {/* Logo */}
-          <Link href="/" className="text-lg font-semibold tracking-tight">
-            JobCrawler
-          </Link>
+            {/* Logo */}
+            <Link href="/" className="text-lg font-semibold tracking-tight">
+              JobCrawler
+            </Link>
 
-          {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-6 text-sm">
-            {publicLinks.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="hover:text-foreground transition"
-              >
-                {l.label}
-              </Link>
-            ))}
+            {/* Desktop Nav */}
+            <nav className="relative ml-12 hidden md:flex items-center gap-8 text-sm">
+              {[...publicLinks, ...(user ? privateLinks : [])].map((l) => (
+                <div key={l.href} className="relative">
+                  <Link
+                    href={l.href}
+                    className={`relative px-1 py-1 transition ${isActive(l.href)
+                        ? 'text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                  >
+                    {l.label}
 
-            {user &&
-              privateLinks.map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className="hover:text-foreground transition"
-                >
-                  {l.label}
-                </Link>
+                    {isActive(l.href) && (
+                      <motion.span
+                        layoutId="activeIndicator"
+                        className="absolute -bottom-2 left-0 h-[2px] w-full bg-primary rounded-full"
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                  </Link>
+                </div>
               ))}
-          </nav>
+            </nav>
 
-          {/* Right Section */}
-          <div className="flex items-center gap-3">
+            {/* Right Section */}
+            <div className="ml-auto flex items-center gap-4">
 
-            <ThemeToggle />
+              <ThemeToggle />
 
-            {/* Desktop Auth */}
-            <div className="hidden md:flex items-center gap-3">
-              {loading ? (
-                <span className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
-                  Loading…
-                </span>
-              ) : user ? (
-                <>
+              {/* Desktop Auth */}
+              <div className="hidden md:flex items-center gap-3">
+                {loading ? (
+                  <span className="text-sm text-muted-foreground">Loading…</span>
+                ) : user ? (
+                  <>
+                    <button
+                      onClick={() => router.push('/dashboard')}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted transition"
+                    >
+                      <Avatar
+                        src={user.user_metadata?.avatar_url ?? undefined}
+                        name={
+                          user.user_metadata?.full_name ??
+                          user.email ??
+                          'User'
+                        }
+                        size={34}
+                        className="border border-border"
+                      />
+                    </button>
+
+                    {/* Glass Button */}
+                    <button
+                      onClick={async () => {
+                        await signOutUser();
+                        router.push('/');
+                      }}
+                      className="rounded-lg px-4 py-2 text-sm font-medium
+                      bg-white/10 backdrop-blur-md
+                      border border-white/20
+                      hover:bg-white/20
+                      transition"
+                    >
+                      Sign out
+                    </button>
+                  </>
+                ) : (
                   <button
-                    onClick={() => router.push('/dashboard')}
-                    className="flex items-center gap-2 rounded-md hover:bg-muted px-2 py-1"
+                    onClick={signInWithGoogle}
+                    className="rounded-lg px-4 py-2 text-sm font-medium
+                    bg-white/10 backdrop-blur-md
+                    border border-white/20
+                    hover:bg-white/20
+                    transition"
                   >
-                    <Avatar
-                      src={user.photoURL}
-                      name={user.displayName ?? user.email ?? 'User'}
-                      size={36}
-                      className="border border-border"
-                    />
-                    <span className="text-sm hidden lg:inline">
-                      {user.displayName ?? user.email}
-                    </span>
+                    Sign in
                   </button>
+                )}
+              </div>
 
-                  <button
-                    className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-                    onClick={async () => {
-                      await signOutUser();
-                      router.push('/');
-                    }}
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <Button onClick={handleSignIn} disabled={loading}>
-                  Sign in
-                </Button>
-              )}
+              {/* Mobile Menu Button */}
+              <button
+                className="md:hidden p-2 rounded-md hover:bg-muted transition"
+                onClick={() => setMobileOpen(!mobileOpen)}
+              >
+                {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+              </button>
             </div>
-
-            {/* Mobile Menu Button */}
-            <button
-              className="md:hidden p-2 rounded-md hover:bg-muted"
-              onClick={() => setMobileOpen(!mobileOpen)}
-            >
-              {mobileOpen ? <X size={22} /> : <Menu size={22} />}
-            </button>
           </div>
         </div>
 
-        {/* Mobile Menu */}
-        {mobileOpen && (
-          <div className="md:hidden border-t border-border bg-background px-4 pb-4 pt-3 space-y-3">
-
-            {publicLinks.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                onClick={closeMobile}
-                className="block text-sm hover:text-foreground"
-              >
-                {l.label}
-              </Link>
-            ))}
-
-            {user &&
-              privateLinks.map((l) => (
+        {/* Mobile Animated Menu */}
+        <AnimatePresence>
+          {mobileOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+              className="md:hidden overflow-hidden border-t border-border bg-background px-6 pb-6 pt-4 space-y-4"
+            >
+              {[...publicLinks, ...(user ? privateLinks : [])].map((l) => (
                 <Link
                   key={l.href}
                   href={l.href}
-                  onClick={closeMobile}
-                  className="block text-sm hover:text-foreground"
+                  onClick={() => setMobileOpen(false)}
+                  className="block text-sm hover:text-primary"
                 >
                   {l.label}
                 </Link>
               ))}
-
-            <div className="pt-3 border-t border-border">
-              {loading ? (
-                <span className="text-sm text-muted-foreground">
-                  Loading…
-                </span>
-              ) : user ? (
-                <>
-                  <button
-                    onClick={() => {
-                      router.push('/dashboard');
-                      closeMobile();
-                    }}
-                    className="block w-full text-left text-sm py-2"
-                  >
-                    Dashboard
-                  </button>
-
-                  <button
-                    onClick={async () => {
-                      await signOutUser();
-                      router.push('/');
-                      closeMobile();
-                    }}
-                    className="block w-full text-left text-sm py-2 text-red-500"
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <Button
-                  onClick={() => {
-                    handleSignIn();
-                    closeMobile();
-                  }}
-                  className="w-full"
-                >
-                  Sign in
-                </Button>
-              )}
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />

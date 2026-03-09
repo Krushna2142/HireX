@@ -1,151 +1,140 @@
 'use client';
 
-// frontend/app/auth/credentials/page.tsx
-
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/components/providers/AuthProvider';
+import { createClient } from '@supabase/supabase-js';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { auth } from '@/lib/firebase/Client';
-import axios, { AxiosError } from 'axios';
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL;
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function CredentialsPage() {
-  const { user } = useAuth();
   const router = useRouter();
 
   const [mode, setMode] = useState<'create' | 'login'>('create');
   const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!user) router.replace('/');
-  }, [user, router]);
+  function validatePassword(pass: string) {
+    return (
+      pass.length >= 8 &&
+      /[A-Z]/.test(pass) &&
+      /[0-9]/.test(pass) &&
+      /[!@#$%^&*]/.test(pass)
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (!user) {
-      setError('You must be signed in with Google first.');
+    if (!validatePassword(password) && mode === 'create') {
+      setError(
+        'Password must be 8+ chars, include uppercase, number & special character.'
+      );
       return;
     }
 
+    setLoading(true);
+
     try {
-      setSubmitting(true);
-
-      const fbUser = auth.currentUser;
-
-      if (!fbUser) {
-        throw new Error('No Firebase user found.');
-      }
-
-      const idToken = await fbUser.getIdToken();
-
-      if (!idToken) {
-        throw new Error('Unable to get authentication token.');
-      }
-
-      const endpoint =
-        mode === 'create'
-          ? '/auth/credentials/create'
-          : '/auth/credentials/verify';
-
-      const res = await axios.post(
-        `${API_BASE_URL}${endpoint}`,
-        {
-          firebase_uid: user.uid,
-          username,
+      if (mode === 'create') {
+        const { error } = await supabase.auth.signUp({
+          email,
           password,
-          role,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          },
-        }
-      );
+        });
 
-      if (res.status === 200) {
-        localStorage.setItem('credentialsComplete', 'true');
-        localStorage.setItem('userRole', role);
-        localStorage.setItem('username', username);
-        router.push('/dashboard');
+        if (error) throw error;
+
+        alert('Check your email to verify your account.');
       } else {
-        throw new Error(
-          `Server error (${res.status}): ${
-            res.data?.message || 'Request failed'
-          }`
-        );
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+
+        const user = (await supabase.auth.getUser()).data.user;
+
+        if (!user?.email_confirmed_at) {
+          throw new Error('Please verify your email first.');
+        }
+
+        // update role in profile
+        await supabase
+          .from('profiles')
+          .update({ role })
+          .eq('id', user.id);
+
+        router.push('/dashboard');
       }
-    } catch (err) {
-      console.error('Credentials error', err);
-
-      const errorMessage =
-        err instanceof AxiosError
-          ? err.response?.data?.message || err.message
-          : err instanceof Error
-          ? err.message
-          : 'Something went wrong';
-
-      setError(errorMessage);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
+  }
+
+  async function handleForgotPassword() {
+    if (!email) {
+      setError('Enter your email first.');
+      return;
+    }
+
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    alert('Password reset email sent.');
   }
 
   return (
     <div className="mx-auto max-w-md px-4 py-12">
-      <h1 className="text-2xl font-semibold">Complete your login</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        {mode === 'create'
-          ? 'Create your username and password to finish setup.'
-          : 'Enter your username and password to continue.'}
-      </p>
+      <h1 className="text-2xl font-semibold">
+        {mode === 'create' ? 'Create Account' : 'Login'}
+      </h1>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-        <div className="flex items-center gap-4 text-sm">
-          <label className="flex items-center gap-2">
+
+        <div className="flex gap-4 text-sm">
+          <label>
             <input
               type="radio"
-              name="mode"
               checked={mode === 'create'}
               onChange={() => setMode('create')}
             />
-            New user
+            Sign Up
           </label>
-          <label className="flex items-center gap-2">
+          <label>
             <input
               type="radio"
-              name="mode"
               checked={mode === 'login'}
               onChange={() => setMode('login')}
             />
-            Existing user
+            Login
           </label>
         </div>
 
-        <div className="flex items-center gap-4 text-sm">
-          <label className="flex items-center gap-2">
+        <div className="flex gap-4 text-sm">
+          <label>
             <input
               type="radio"
-              name="role"
               checked={role === 'candidate'}
               onChange={() => setRole('candidate')}
             />
             Candidate
           </label>
-          <label className="flex items-center gap-2">
+          <label>
             <input
               type="radio"
-              name="role"
               checked={role === 'recruiter'}
               onChange={() => setRole('recruiter')}
             />
@@ -154,32 +143,44 @@ export default function CredentialsPage() {
         </div>
 
         <Input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           required
         />
 
-        <Input
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <div className="relative">
+          <Input
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <span
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute right-3 top-2 text-sm cursor-pointer"
+          >
+            {showPassword ? 'Hide' : 'Show'}
+          </span>
+        </div>
 
-        {error && (
-          <p className="text-sm text-red-500" role="alert">
-            {error}
+        {mode === 'login' && (
+          <p
+            onClick={handleForgotPassword}
+            className="text-sm text-blue-500 cursor-pointer"
+          >
+            Forgot Password?
           </p>
         )}
 
-        <Button type="submit" className="w-full" disabled={submitting}>
-          {submitting
-            ? 'Please wait...'
-            : mode === 'create'
-            ? 'Create account'
-            : 'Verify and continue'}
+        {error && (
+          <p className="text-red-500 text-sm">{error}</p>
+        )}
+
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading ? 'Please wait...' : mode === 'create' ? 'Sign Up' : 'Login'}
         </Button>
       </form>
     </div>

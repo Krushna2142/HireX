@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
+//frontend/app/auth/credentials/create/route.ts
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const backendUrl = process.env.BACKEND_URL || 'https://job-crawler-fcwr.onrender.com';
