@@ -2,19 +2,24 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { useAuth } from '@/components/providers/AuthProvider';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 export default function CredentialsPage() {
   const router = useRouter();
+  const { login } = useAuth();
 
   const [mode, setMode] = useState<'create' | 'login'>('create');
   const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   function validatePassword(pass: string) {
@@ -29,8 +34,9 @@ export default function CredentialsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setInfo(null);
 
-    if (!validatePassword(password) && mode === 'create') {
+    if (mode === 'create' && !validatePassword(password)) {
       setError(
         'Password must be 8+ chars, include uppercase, number & special character.'
       );
@@ -41,38 +47,27 @@ export default function CredentialsPage() {
 
     try {
       if (mode === 'create') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
+        const res = await fetch(`${API_URL}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fullName, email, password, role }),
         });
 
-        if (error) throw error;
-
-        alert('Check your email to verify your account.');
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        const user = (await supabase.auth.getUser()).data.user;
-
-        if (!user?.email_confirmed_at) {
-          throw new Error('Please verify your email first.');
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || 'Registration failed');
         }
 
-        // update role in profile
-        await supabase
-          .from('profiles')
-          .update({ role })
-          .eq('id', user.id);
-
+        setInfo('Account created! You can now log in.');
+        setMode('login');
+        setFullName('');
+        setPassword('');
+      } else {
+        await login(email, password);
         router.push('/dashboard');
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
@@ -84,11 +79,22 @@ export default function CredentialsPage() {
       return;
     }
 
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+    setLoading(true);
+    setError(null);
 
-    alert('Password reset email sent.');
+    try {
+      await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      setInfo('If that email is registered, a password reset link has been sent.');
+    } catch {
+      setInfo('If that email is registered, a password reset link has been sent.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -100,7 +106,7 @@ export default function CredentialsPage() {
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
 
         <div className="flex gap-4 text-sm">
-          <label>
+          <label className="flex items-center gap-1">
             <input
               type="radio"
               checked={mode === 'create'}
@@ -108,7 +114,7 @@ export default function CredentialsPage() {
             />
             Sign Up
           </label>
-          <label>
+          <label className="flex items-center gap-1">
             <input
               type="radio"
               checked={mode === 'login'}
@@ -118,24 +124,36 @@ export default function CredentialsPage() {
           </label>
         </div>
 
-        <div className="flex gap-4 text-sm">
-          <label>
-            <input
-              type="radio"
-              checked={role === 'candidate'}
-              onChange={() => setRole('candidate')}
-            />
-            Candidate
-          </label>
-          <label>
-            <input
-              type="radio"
-              checked={role === 'recruiter'}
-              onChange={() => setRole('recruiter')}
-            />
-            Recruiter
-          </label>
-        </div>
+        {mode === 'create' && (
+          <div className="flex gap-4 text-sm">
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                checked={role === 'candidate'}
+                onChange={() => setRole('candidate')}
+              />
+              Candidate
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                checked={role === 'recruiter'}
+                onChange={() => setRole('recruiter')}
+              />
+              Recruiter
+            </label>
+          </div>
+        )}
+
+        {mode === 'create' && (
+          <Input
+            type="text"
+            placeholder="Full Name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            required
+          />
+        )}
 
         <Input
           type="email"
@@ -172,6 +190,10 @@ export default function CredentialsPage() {
 
         {error && (
           <p className="text-red-500 text-sm">{error}</p>
+        )}
+
+        {info && (
+          <p className="text-green-500 text-sm">{info}</p>
         )}
 
         <Button type="submit" className="w-full" disabled={loading}>

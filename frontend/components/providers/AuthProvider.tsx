@@ -1,57 +1,99 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
-import { Session, User } from '@supabase/supabase-js';
+
+type AuthUser = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+};
 
 type AuthContextType = {
-  user: User | null;
-  session: Session | null;
+  user: AuthUser | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signOutUser: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (
+    fullName: string,
+    email: string,
+    password: string,
+    role: string
+  ) => Promise<void>;
+  logout: () => void;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const TOKEN_KEY = 'jc_token';
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
+    const token =
+      typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
+
+    if (!token) {
       setLoading(false);
-    });
+      return;
+    }
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-      }
-    );
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+    fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setUser(data);
+        else localStorage.removeItem(TOKEN_KEY);
+      })
+      .catch(() => localStorage.removeItem(TOKEN_KEY))
+      .finally(() => setLoading(false));
   }, []);
 
-  const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
+  const login = async (email: string, password: string) => {
+    const res = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
     });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || 'Login failed');
+    }
+
+    const data = await res.json();
+    localStorage.setItem(TOKEN_KEY, data.token);
+    setUser(data.user);
   };
 
-  const signOutUser = async () => {
-    await supabase.auth.signOut();
+  const register = async (
+    fullName: string,
+    email: string,
+    password: string,
+    role: string
+  ) => {
+    const res = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName, email, password, role }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || 'Registration failed');
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider
-      value={{ user, session, loading, signInWithGoogle, signOutUser }}
-    >
+    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );
