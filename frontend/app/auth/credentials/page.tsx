@@ -106,41 +106,41 @@ export default function CredentialsPage() {
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
 
         <div className="flex gap-4 text-sm">
-          <label>
+          <label className="flex items-center gap-1">
             <input
               type="radio"
               checked={mode === 'create'}
               onChange={() => setMode('create')}
             />
-            {' '}Sign Up
+            Sign Up
           </label>
-          <label>
+          <label className="flex items-center gap-1">
             <input
               type="radio"
               checked={mode === 'login'}
               onChange={() => setMode('login')}
             />
-            {' '}Login
+            Login
           </label>
         </div>
 
         {mode === 'create' && (
           <div className="flex gap-4 text-sm">
-            <label>
+            <label className="flex items-center gap-1">
               <input
                 type="radio"
                 checked={role === 'candidate'}
                 onChange={() => setRole('candidate')}
               />
-              {' '}Candidate
+              Candidate
             </label>
-            <label>
+            <label className="flex items-center gap-1">
               <input
                 type="radio"
                 checked={role === 'recruiter'}
                 onChange={() => setRole('recruiter')}
               />
-              {' '}Recruiter
+              Recruiter
             </label>
           </div>
         )}

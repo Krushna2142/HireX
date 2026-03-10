@@ -163,15 +163,6 @@ export default function DashboardPage() {
     );
   }
 
-  // suppress unused variable warnings for filter states not used in JSX yet
-  void filtered;
-  void query; void setQuery;
-  void stageFilter; void setStageFilter;
-  void sourceFilter; void setSourceFilter;
-  void sortBy; void setSortBy;
-  void sortDir; void setSortDir;
-  void alerts;
-
   return (
     <section className="px-4 sm:px-6 lg:px-8">
       <div className="section-header">
