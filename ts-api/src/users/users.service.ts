@@ -4,29 +4,22 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createClient } from '@supabase/supabase-js';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { SupabaseService } from '../database/supabase.service';
 
 @Injectable()
 export class UsersService {
-  private supabase;
+  constructor(private readonly supabase: SupabaseService) {}
 
-  constructor(private config: ConfigService) {
-    this.supabase = createClient(
-      this.config.get('supabase.url')!,
-      this.config.get('supabase.anonKey')!,
-    );
-  }
-
-  async getProfile(firebaseUid: string) {
+  async getProfile(userId: string) {
     const { data, error } = await this.supabase
+      .getClient()
       .from('users')
-      .select('*')
-      .eq('firebase_uid', firebaseUid)
+      .select('id, email, full_name, created_at')
+      .eq('id', userId)
       .single();
 
-    if (error) throw error;
+    if (error || !data) throw new NotFoundException('User not found');
     return data;
   }
 }

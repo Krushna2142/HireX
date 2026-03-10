@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/AuthProvider';
+import api from '@/lib/axios';
 
 export default function CompleteProfile() {
   const { user } = useAuth();
@@ -18,6 +18,7 @@ export default function CompleteProfile() {
 
   useEffect(() => {
     if (!user) router.replace('/');
+    else setFullName(user.full_name ?? '');
   }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,21 +27,20 @@ export default function CompleteProfile() {
 
     setLoading(true);
 
-    const { error } = await supabase.from('profiles').insert({
-      id: user.id,
-      full_name: fullName,
-      role,
-      bio,
-      skills: skills.split(',').map((s) => s.trim()),
-      linkedin,
-    });
+    try {
+      await api.patch('/users/profile', {
+        full_name: fullName,
+        role,
+        bio,
+        skills: skills.split(',').map((s) => s.trim()),
+        linkedin,
+      });
 
-    setLoading(false);
-
-    if (!error) {
       router.push('/dashboard');
-    } else {
-      alert(error.message);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -63,7 +63,7 @@ export default function CompleteProfile() {
 
         <select
           value={role}
-          onChange={(e) => setRole(e.target.value as any)}
+          onChange={(e) => setRole(e.target.value as 'candidate' | 'recruiter')}
           className="w-full border border-border rounded-lg px-4 py-2"
         >
           <option value="candidate">Candidate</option>

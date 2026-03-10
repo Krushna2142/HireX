@@ -2,15 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 
 export default function CredentialsPage() {
   const router = useRouter();
+  const { login, register, forgotPassword } = useAuth();
 
   const [mode, setMode] = useState<'create' | 'login'>('create');
-  const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,38 +42,14 @@ export default function CredentialsPage() {
 
     try {
       if (mode === 'create') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        alert('Check your email to verify your account.');
+        await register(fullName, email, password);
+        router.push('/dashboard');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        const user = (await supabase.auth.getUser()).data.user;
-
-        if (!user?.email_confirmed_at) {
-          throw new Error('Please verify your email first.');
-        }
-
-        // update role in profile
-        await supabase
-          .from('profiles')
-          .update({ role })
-          .eq('id', user.id);
-
+        await login(email, password);
         router.push('/dashboard');
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
     }
@@ -84,11 +61,12 @@ export default function CredentialsPage() {
       return;
     }
 
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-
-    alert('Password reset email sent.');
+    try {
+      await forgotPassword(email);
+      alert('If that email exists, a password reset link has been sent.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Request failed');
+    }
   }
 
   return (
@@ -106,7 +84,7 @@ export default function CredentialsPage() {
               checked={mode === 'create'}
               onChange={() => setMode('create')}
             />
-            Sign Up
+            {' '}Sign Up
           </label>
           <label>
             <input
@@ -114,28 +92,19 @@ export default function CredentialsPage() {
               checked={mode === 'login'}
               onChange={() => setMode('login')}
             />
-            Login
+            {' '}Login
           </label>
         </div>
 
-        <div className="flex gap-4 text-sm">
-          <label>
-            <input
-              type="radio"
-              checked={role === 'candidate'}
-              onChange={() => setRole('candidate')}
-            />
-            Candidate
-          </label>
-          <label>
-            <input
-              type="radio"
-              checked={role === 'recruiter'}
-              onChange={() => setRole('recruiter')}
-            />
-            Recruiter
-          </label>
-        </div>
+        {mode === 'create' && (
+          <Input
+            type="text"
+            placeholder="Full Name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            required
+          />
+        )}
 
         <Input
           type="email"
