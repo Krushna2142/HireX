@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
-import { SupabaseService } from './database/supabase.service';
+import { DatabaseModule } from './database/datbase.module';
+import { AuthModule } from './auth/auth.module';
 import { QueueModule } from './queue/queue.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
@@ -11,13 +12,14 @@ import { InterviewsModule } from './interviews/interviews.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [configuration]
+      load: [configuration],
     }),
+    DatabaseModule,
+    AuthModule,
     QueueModule,
     ResumesModule,
     JobsModule,
-    InterviewsModule
+    InterviewsModule,
   ],
-  providers: [SupabaseService]
 })
 export class AppModule {}

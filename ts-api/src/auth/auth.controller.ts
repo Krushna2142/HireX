@@ -1,22 +1,38 @@
-/* eslint-disable prettier/prettier */
-// C:\Projects\Job-Crawler\ts-api\src\auth\auth.controller.ts
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { SupabaseGuard } from './supabase.guard';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  @Post('credentials/create')
-  @UseGuards(SupabaseGuard)
-  async create(@Body() body: any) {
-    return this.auth.createCredentials(body);
+  @Post('register')
+  async register(@Body() body: RegisterDto) {
+    return this.auth.register(body);
   }
 
-  @Post('credentials/verify')
-  @UseGuards(SupabaseGuard)
-  async verify(@Body() body: any) {
-    return this.auth.verifyCredentials(body);
+  @Post('login')
+  async login(@Body() body: LoginDto) {
+    return this.auth.login(body);
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    return this.auth.forgotPassword(body);
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() body: ResetPasswordDto) {
+    return this.auth.resetPassword(body);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async me(@Req() req: any) {
+    return this.auth.getMe(req.user.id);
   }
 }

@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../database/supabase.service';
+import { SupabaseService } from '../database/database.service';
 import { QUEUES } from './queue.constants';
 import IORedis from 'ioredis';
 

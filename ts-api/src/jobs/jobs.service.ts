@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable } from '@nestjs/common';
-import { SupabaseService } from '../database/supabase.service';
+import { SupabaseService } from '../database/database.service';
 import { SerpAdapter } from './serp.adapter';
 
 @Injectable()
