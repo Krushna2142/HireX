@@ -3,7 +3,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import axios from 'axios';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase/client';
 import StatCard from '@/components/dashboard/StatCard';
 
 type Application = {
@@ -24,12 +24,6 @@ type Alert = {
   severity: 'info' | 'warning' | 'success';
   createdAt: string;
 };
-
-// ✅ Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export default function DashboardPage() {
   const [applications, setApplications] = useState<Application[]>([]);
@@ -185,8 +179,6 @@ export default function DashboardPage() {
         Track applications, monitor pipeline, and act on alerts.
       </p>
 
-      {/* 🔽 REST OF YOUR ORIGINAL UI BELOW — UNCHANGED */}
-
       {/* Top stats */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-6">
         <StatCard label="Total" value={stats.total} />
@@ -199,10 +191,4 @@ export default function DashboardPage() {
       {/* everything else stays exactly same */}
     </section>
   );
-}
-
-/* Keep your helper components EXACTLY SAME */
-
-function stageIndex(stage: Application['stage']) {
-  return ['Applied', 'Screen', 'Interview', 'Offer', 'Rejected'].indexOf(stage);
 }
