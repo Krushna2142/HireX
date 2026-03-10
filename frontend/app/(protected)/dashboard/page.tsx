@@ -25,6 +25,20 @@ type Alert = {
   createdAt: string;
 };
 
+// ✅ Helper to sort by stage
+const STAGE_ORDER: Application['stage'][] = [
+  'Applied',
+  'Screen',
+  'Interview',
+  'Offer',
+  'Rejected',
+];
+
+function stageIndex(stage: Application['stage']): number {
+  const idx = STAGE_ORDER.indexOf(stage);
+  return idx === -1 ? STAGE_ORDER.length : idx;
+}
+
 export default function DashboardPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -39,7 +53,6 @@ export default function DashboardPage() {
 
   const [session, setSession] = useState<any>(null);
 
-  // ✅ Reactive Supabase Auth Listener
   useEffect(() => {
     const getSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -59,7 +72,6 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // ✅ Fetch Data When Session Exists
   useEffect(() => {
     const fetchData = async () => {
       if (!session) {
@@ -179,7 +191,6 @@ export default function DashboardPage() {
         Track applications, monitor pipeline, and act on alerts.
       </p>
 
-      {/* Top stats */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-6">
         <StatCard label="Total" value={stats.total} />
         <StatCard label="Interviewing" value={stats.interviewing} accent="var(--neon-1)" />
@@ -188,7 +199,7 @@ export default function DashboardPage() {
         <StatCard label="New this week" value={stats.weekNew} accent="var(--neon-2)" />
       </div>
 
-      {/* everything else stays exactly same */}
+      {/* rest of your UI */}
     </section>
   );
 }
