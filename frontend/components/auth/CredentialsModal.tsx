@@ -2,11 +2,11 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 type Props = {
   open: boolean;
@@ -15,8 +15,10 @@ type Props = {
 
 export default function CredentialsModal({ open, onClose }: Props) {
   const router = useRouter();
+  const { login, register, forgotPassword } = useAuth();
 
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -34,22 +36,11 @@ export default function CredentialsModal({ open, onClose }: Props) {
 
     try {
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        setInfo('Account created. Check email for confirmation.');
+        await register(fullName, email, password);
+        onClose();
+        router.push('/dashboard');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
+        await login(email, password);
         onClose();
         router.push('/dashboard');
       }
@@ -66,12 +57,12 @@ export default function CredentialsModal({ open, onClose }: Props) {
       return;
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset`,
-    });
-
-    if (error) setError(error.message);
-    else setInfo('Password reset email sent.');
+    try {
+      await forgotPassword(email);
+      setInfo('If that email exists, a password reset link has been sent.');
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   return (
@@ -121,6 +112,17 @@ export default function CredentialsModal({ open, onClose }: Props) {
                 Existing
               </label>
             </div>
+
+            {mode === 'signup' && (
+              <Input
+                type="text"
+                placeholder="Full Name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+                className="bg-white/5 border-white/10 text-white"
+              />
+            )}
 
             <Input
               type="email"
