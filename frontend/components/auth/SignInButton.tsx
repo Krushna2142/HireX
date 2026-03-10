@@ -1,14 +1,9 @@
 'use client';
 
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase/client';
 import { Loader2, LogOut, LogIn } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import CredentialsModal from './CredentialsModal';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export default function SignInButton() {
   const [session, setSession] = useState<any>(null);

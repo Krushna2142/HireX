@@ -4,7 +4,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase/client';
 
 type Analysis = {
   summary: string;
@@ -20,11 +20,6 @@ type Analysis = {
     resources: { title: string; url: string; type: 'free' | 'paid' }[];
   }[];
 };
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export default function ResumePage() {
   const [session, setSession] = useState<any>(null);
