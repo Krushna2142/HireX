@@ -2,21 +2,36 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable, UnauthorizedException, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../database/supabase.service';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  private transporter: Transporter;
+
   constructor(
     private readonly supabase: SupabaseService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
   ) {}
+
+  onModuleInit() {
+    this.transporter = nodemailer.createTransport({
+      host: this.config.get<string>('SMTP_HOST'),
+      port: Number(this.config.get<string>('SMTP_PORT') ?? 587),
+      secure: false,
+      auth: {
+        user: this.config.get<string>('SMTP_USER'),
+        pass: this.config.get<string>('SMTP_PASS'),
+      },
+    });
+  }
 
   private signToken(userId: string, email: string): string {
     return this.jwtService.sign({ userId, email });
@@ -87,21 +102,12 @@ export class AuthService {
       .update({ reset_token: resetToken, reset_token_expiry: expiry })
       .eq('id', user.id);
 
-    const frontendUrl = this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
+    const frontendUrl = this.config.getOrThrow<string>('FRONTEND_URL');
     const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+    const smtpUser = this.config.get<string>('SMTP_USER');
 
-    const transporter = nodemailer.createTransport({
-      host: this.config.get<string>('SMTP_HOST'),
-      port: Number(this.config.get<string>('SMTP_PORT') ?? 587),
-      secure: false,
-      auth: {
-        user: this.config.get<string>('SMTP_USER'),
-        pass: this.config.get<string>('SMTP_PASS'),
-      },
-    });
-
-    await transporter.sendMail({
-      from: `"JobCrawler" <${this.config.get<string>('SMTP_USER')}>`,
+    await this.transporter.sendMail({
+      from: `"JobCrawler" <${smtpUser}>`,
       to: email,
       subject: 'Password Reset Request',
       html: `

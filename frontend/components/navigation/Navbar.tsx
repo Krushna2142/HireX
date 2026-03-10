@@ -99,7 +99,6 @@ export default function Navbar() {
                       className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted transition"
                     >
                       <Avatar
-                        src={undefined}
                         name={user.full_name ?? user.email ?? 'User'}
                         size={34}
                         className="border border-border"
