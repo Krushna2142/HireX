@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { SupabaseService } from '../database/supabase.service';
+import { SupabaseService } from '../database/database.service';
 import { QUEUES } from '../queue/queue.constants';
 
 @Injectable()

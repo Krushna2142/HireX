@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ResumesService } from './resumes.service';
 import { ResumesController } from './resumes.controller';
-import { SupabaseService } from '../database/supabase.service';
+import { SupabaseService } from '../database/database.service';
 import { QueueModule } from '../queue/queue.module';  // ✅ Add this import
 
 @Module({

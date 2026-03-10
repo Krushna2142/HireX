@@ -1,12 +1,11 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 type Props = {
   open: boolean;
@@ -15,8 +14,10 @@ type Props = {
 
 export default function CredentialsModal({ open, onClose }: Props) {
   const router = useRouter();
+  const { register, login, forgotPassword } = useAuth();
 
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -34,22 +35,14 @@ export default function CredentialsModal({ open, onClose }: Props) {
 
     try {
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        setInfo('Account created. Check email for confirmation.');
+        if (!fullName.trim()) {
+          throw new Error('Full name is required');
+        }
+        await register(fullName, email, password);
+        onClose();
+        router.push('/dashboard');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
+        await login(email, password);
         onClose();
         router.push('/dashboard');
       }
@@ -65,13 +58,16 @@ export default function CredentialsModal({ open, onClose }: Props) {
       setError('Enter your email first.');
       return;
     }
-
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset`,
-    });
-
-    if (error) setError(error.message);
-    else setInfo('Password reset email sent.');
+    setError('');
+    setLoading(true);
+    try {
+      const msg = await forgotPassword(email);
+      setInfo(msg);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -89,15 +85,11 @@ export default function CredentialsModal({ open, onClose }: Props) {
           </h2>
 
           {error && (
-            <p className="text-red-400 text-sm mb-4 text-center">
-              {error}
-            </p>
+            <p className="text-red-400 text-sm mb-4 text-center">{error}</p>
           )}
 
           {info && (
-            <p className="text-green-400 text-sm mb-4 text-center">
-              {info}
-            </p>
+            <p className="text-green-400 text-sm mb-4 text-center">{info}</p>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -111,7 +103,6 @@ export default function CredentialsModal({ open, onClose }: Props) {
                 />
                 New
               </label>
-
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
@@ -122,65 +113,59 @@ export default function CredentialsModal({ open, onClose }: Props) {
               </label>
             </div>
 
+            {mode === 'signup' && (
+              <Input
+                type="text"
+                placeholder="Full Name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+              />
+            )}
+
             <Input
               type="email"
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="bg-white/5 border-white/10 text-white"
             />
 
             <div className="relative">
               <Input
                 type={showPass ? 'text' : 'password'}
-                placeholder="Password"
+                placeholder="Password (min 6 chars)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="bg-white/5 border-white/10 text-white pr-10"
+                minLength={6}
               />
               <button
                 type="button"
-                onClick={() => setShowPass(!showPass)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                onClick={() => setShowPass(!showPass)}
               >
-                {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
 
             {mode === 'login' && (
-              <div className="text-right text-sm">
-                <button
-                  type="button"
-                  onClick={handleForgotPassword}
-                  className="text-purple-400 hover:underline"
-                >
-                  Forgot password?
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-xs text-blue-400 hover:underline"
+              >
+                Forgot password?
+              </button>
             )}
 
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600"
-            >
+            <Button type="submit" className="w-full" disabled={loading}>
               {loading
                 ? 'Please wait...'
                 : mode === 'signup'
                 ? 'Create Account'
                 : 'Login'}
             </Button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-sm text-gray-400 w-full hover:text-white"
-            >
-              Cancel
-            </button>
-
           </form>
         </div>
       </div>
