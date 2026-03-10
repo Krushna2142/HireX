@@ -3,7 +3,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import axios from 'axios';
-import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/components/providers/AuthProvider';
 import StatCard from '@/components/dashboard/StatCard';
 
 type Application = {
@@ -40,6 +40,7 @@ function stageIndex(stage: Application['stage']): number {
 }
 
 export default function DashboardPage() {
+  const { token } = useAuth();
   const [applications, setApplications] = useState<Application[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [query, setQuery] = useState('');
@@ -51,30 +52,9 @@ export default function DashboardPage() {
 
   const backendUrl = process.env.NEXT_PUBLIC_API_URL;
 
-  const [session, setSession] = useState<any>(null);
-
-  useEffect(() => {
-    const getSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session ?? null);
-    };
-
-    getSession();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-      }
-    );
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
   useEffect(() => {
     const fetchData = async () => {
-      if (!session) {
+      if (!token) {
         setApplications([]);
         setAlerts([]);
         setLoading(false);
@@ -83,8 +63,6 @@ export default function DashboardPage() {
 
       try {
         setLoading(true);
-
-        const token = session.access_token;
 
         const [appsRes, alertsRes] = await Promise.all([
           axios.get(`${backendUrl}/jobs`, {
@@ -118,7 +96,7 @@ export default function DashboardPage() {
     };
 
     fetchData();
-  }, [session, backendUrl]);
+  }, [token, backendUrl]);
 
   const filtered = useMemo(() => {
     let items = [...applications];
@@ -173,7 +151,7 @@ export default function DashboardPage() {
 
   if (loading) return <div>Loading...</div>;
 
-  if (!session) {
+  if (!token) {
     return (
       <section className="px-6 py-10 text-center">
         <h2 className="text-2xl font-bold">Please login to access dashboard</h2>

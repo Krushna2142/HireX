@@ -1,29 +1,15 @@
 'use client';
 
-import { supabase } from '@/lib/supabase/client';
 import { Loader2, LogOut, LogIn } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/providers/AuthProvider';
 import CredentialsModal from './CredentialsModal';
 
 export default function SignInButton() {
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading, logout } = useAuth();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-      }
-    );
-
-    return () => listener.subscription.unsubscribe();
-  }, []);
 
   if (loading) {
     return (
@@ -34,12 +20,13 @@ export default function SignInButton() {
     );
   }
 
-  if (session) {
+  if (user) {
     return (
       <button
         className="px-4 py-2 text-sm bg-gray-100 rounded-md"
-        onClick={async () => {
-          await supabase.auth.signOut();
+        onClick={() => {
+          logout();
+          router.push('/');
         }}
       >
         <LogOut className="w-4 h-4 inline mr-2" />

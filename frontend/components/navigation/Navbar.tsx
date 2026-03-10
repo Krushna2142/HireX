@@ -26,7 +26,7 @@ const privateLinks = [
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, signInWithGoogle, signOutUser } = useAuth();
+  const { user, loading, logout } = useAuth();
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -100,9 +100,9 @@ export default function Navbar() {
                       className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted transition"
                     >
                       <Avatar
-                        src={user.user_metadata?.avatar_url ?? undefined}
+                        src={undefined}
                         name={
-                          user.user_metadata?.full_name ??
+                          user.full_name ??
                           user.email ??
                           'User'
                         }
@@ -113,8 +113,8 @@ export default function Navbar() {
 
                     {/* Glass Button */}
                     <button
-                      onClick={async () => {
-                        await signOutUser();
+                      onClick={() => {
+                        logout();
                         router.push('/');
                       }}
                       className="rounded-lg px-4 py-2 text-sm font-medium
@@ -128,7 +128,7 @@ export default function Navbar() {
                   </>
                 ) : (
                   <button
-                    onClick={signInWithGoogle}
+                    onClick={() => router.push('/auth/credentials')}
                     className="rounded-lg px-4 py-2 text-sm font-medium
                     bg-white/10 backdrop-blur-md
                     border border-white/20
