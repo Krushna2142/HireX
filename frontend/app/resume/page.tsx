@@ -3,7 +3,8 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useRef, useState, useEffect } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
 import { supabase } from '@/lib/supabase/client';
 
 type Analysis = {
@@ -22,7 +23,7 @@ type Analysis = {
 };
 
 export default function ResumePage() {
-  const [session, setSession] = useState<any>(null);
+  const { user } = useAuth();
 
   const [status, setStatus] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -34,22 +35,6 @@ export default function ResumePage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-      }
-    );
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
-  }, []);
 
   const transformResultToAnalysis = (res: any): Analysis => ({
     summary: res?.summary || 'Resume uploaded successfully',
@@ -65,7 +50,7 @@ export default function ResumePage() {
       setErrorMsg(null);
       setAnalysis(null);
 
-      if (!file || !session) {
+      if (!file || !user) {
         setErrorMsg('You must be logged in.');
         return;
       }
@@ -85,39 +70,43 @@ export default function ResumePage() {
         setUploadProgress(0);
         setStatus('Uploading...');
 
-        const userId = session.user.id;
+        const userId = user.id;
         const filePath = `${userId}/resume.${file.name.split('.').pop()}`;
 
-        // ✅ 1. Upload to Supabase Storage
+        // Upload to Supabase Storage
         const { error: uploadError } = await supabase.storage
           .from('resumes')
           .upload(filePath, file, { upsert: true });
 
         if (uploadError) throw uploadError;
 
-        // ✅ 2. Get Public URL
+        // Get Public URL
         const { data } = supabase.storage
           .from('resumes')
           .getPublicUrl(filePath);
 
         const resumeUrl = data.publicUrl;
 
-        // ✅ 3. Save URL in profiles table
+        // Save URL in profiles table
         await supabase
           .from('profiles')
           .update({ resume_url: resumeUrl })
           .eq('id', userId);
 
-        // ✅ 4. Send to your AI backend for analysis
+        // Send to AI backend for analysis
         const formData = new FormData();
         formData.append('file', file);
 
+        const token =
+          typeof window !== 'undefined'
+            ? localStorage.getItem('jc_token')
+            : null;
+
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_URL}/api/analyze`, true);
-        xhr.setRequestHeader(
-          'Authorization',
-          `Bearer ${session.access_token}`
-        );
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
 
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
@@ -157,7 +146,7 @@ export default function ResumePage() {
         setStatus(null);
       }
     },
-    [session, API_URL]
+    [user, API_URL]
   );
 
   const onFileChange = useCallback(
@@ -272,7 +261,7 @@ export default function ResumePage() {
             Signed in as
           </div>
           <div className="font-medium truncate">
-            {session?.user?.email || 'Not signed in'}
+            {user?.email || 'Not signed in'}
           </div>
         </aside>
       </div>

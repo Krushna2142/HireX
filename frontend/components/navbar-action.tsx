@@ -5,7 +5,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import { useAuth } from '@/components/providers/AuthProvider';
 
 export default function NavbarActions() {
-  const { user, loading, signInWithGoogle, signOutUser } = useAuth();
+  const { user, loading, logout } = useAuth();
 
   if (loading) {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
@@ -19,12 +19,12 @@ export default function NavbarActions() {
           <span className="hidden sm:inline text-sm text-muted-foreground">
             {user.email}
           </span>
-          <Button variant="outline" onClick={signOutUser}>
+          <Button variant="outline" onClick={logout}>
             Sign out
           </Button>
         </>
       ) : (
-        <Button onClick={signInWithGoogle}>Sign in</Button>
+        <Button onClick={() => window.location.href = '/auth/credentials'}>Sign in</Button>
       )}
     </div>
   );

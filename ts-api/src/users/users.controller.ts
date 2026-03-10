@@ -5,16 +5,16 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Controller, Get, UseGuards, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { FirebaseGuard } from '../auth/supabase.guard';
+import { JwtGuard } from '../auth/jwt.guard';
 
 @Controller('users')
-@UseGuards(FirebaseGuard)
+@UseGuards(JwtGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('me')
   async getProfile(@Req() req: any) {
-    const uid = req.user.uid;
+    const uid = req.user.sub;
     return this.usersService.getProfile(uid);
   }
 }

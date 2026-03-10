@@ -6,6 +6,7 @@ import { QueueModule } from './queue/queue.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
 import { InterviewsModule } from './interviews/interviews.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { InterviewsModule } from './interviews/interviews.module';
     QueueModule,
     ResumesModule,
     JobsModule,
-    InterviewsModule
+    InterviewsModule,
+    AuthModule
   ],
   providers: [SupabaseService]
 })

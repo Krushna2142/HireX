@@ -2,21 +2,25 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 type Props = {
   open: boolean;
   onClose: () => void;
 };
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+
 export default function CredentialsModal({ open, onClose }: Props) {
   const router = useRouter();
+  const { login } = useAuth();
 
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -34,22 +38,23 @@ export default function CredentialsModal({ open, onClose }: Props) {
 
     try {
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
+        const res = await fetch(`${API_URL}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fullName, email, password, role: 'candidate' }),
         });
 
-        if (error) throw error;
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || 'Registration failed');
+        }
 
-        setInfo('Account created. Check email for confirmation.');
+        setInfo('Account created! You can now log in.');
+        setMode('login');
+        setFullName('');
+        setPassword('');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
+        await login(email, password);
         onClose();
         router.push('/dashboard');
       }
@@ -66,12 +71,22 @@ export default function CredentialsModal({ open, onClose }: Props) {
       return;
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset`,
-    });
+    setLoading(true);
+    setError('');
 
-    if (error) setError(error.message);
-    else setInfo('Password reset email sent.');
+    try {
+      await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      setInfo('If that email is registered, a password reset link has been sent.');
+    } catch {
+      setInfo('If that email is registered, a password reset link has been sent.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -121,6 +136,17 @@ export default function CredentialsModal({ open, onClose }: Props) {
                 Existing
               </label>
             </div>
+
+            {mode === 'signup' && (
+              <Input
+                type="text"
+                placeholder="Full Name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+                className="bg-white/5 border-white/10 text-white"
+              />
+            )}
 
             <Input
               type="email"
