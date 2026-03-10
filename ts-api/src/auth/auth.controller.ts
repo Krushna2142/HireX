@@ -1,22 +1,37 @@
 /* eslint-disable prettier/prettier */
-// C:\Projects\Job-Crawler\ts-api\src\auth\auth.controller.ts
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { SupabaseGuard } from './supabase.guard';
+import { JwtAuthGuard } from './jwt.guard';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  @Post('credentials/create')
-  @UseGuards(SupabaseGuard)
-  async create(@Body() body: any) {
-    return this.auth.createCredentials(body);
+  @Post('register')
+  async register(
+    @Body() body: { full_name: string; email: string; password: string; role: string },
+  ) {
+    return this.auth.register(body);
   }
 
-  @Post('credentials/verify')
-  @UseGuards(SupabaseGuard)
-  async verify(@Body() body: any) {
-    return this.auth.verifyCredentials(body);
+  @Post('login')
+  async login(@Body() body: { email: string; password: string }) {
+    return this.auth.login(body);
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() body: { email: string }) {
+    return this.auth.forgotPassword(body.email);
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() body: { token: string; new_password: string }) {
+    return this.auth.resetPassword(body.token, body.new_password);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getMe(@Req() req: any) {
+    return this.auth.getMe(req.user.id);
   }
 }

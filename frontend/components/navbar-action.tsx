@@ -3,9 +3,11 @@
 import { Button } from '@/components/ui/Button';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { useRouter } from 'next/navigation';
 
 export default function NavbarActions() {
-  const { user, loading, signInWithGoogle, signOutUser } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const router = useRouter();
 
   if (loading) {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
@@ -19,12 +21,12 @@ export default function NavbarActions() {
           <span className="hidden sm:inline text-sm text-muted-foreground">
             {user.email}
           </span>
-          <Button variant="outline" onClick={signOutUser}>
+          <Button variant="outline" onClick={() => { logout(); router.push('/'); }}>
             Sign out
           </Button>
         </>
       ) : (
-        <Button onClick={signInWithGoogle}>Sign in</Button>
+        <Button onClick={() => router.push('/auth/credentials')}>Sign in</Button>
       )}
     </div>
   );

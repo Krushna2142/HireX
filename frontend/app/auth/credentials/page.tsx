@@ -2,19 +2,24 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { useAuth } from '@/components/providers/AuthProvider';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export default function CredentialsPage() {
   const router = useRouter();
+  const { login, register } = useAuth();
 
   const [mode, setMode] = useState<'create' | 'login'>('create');
+  const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   function validatePassword(pass: string) {
@@ -29,8 +34,9 @@ export default function CredentialsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setInfo(null);
 
-    if (!validatePassword(password) && mode === 'create') {
+    if (mode === 'create' && !validatePassword(password)) {
       setError(
         'Password must be 8+ chars, include uppercase, number & special character.'
       );
@@ -41,34 +47,10 @@ export default function CredentialsPage() {
 
     try {
       if (mode === 'create') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        alert('Check your email to verify your account.');
+        await register(fullName, email, password, role);
+        router.push('/dashboard');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        const user = (await supabase.auth.getUser()).data.user;
-
-        if (!user?.email_confirmed_at) {
-          throw new Error('Please verify your email first.');
-        }
-
-        // update role in profile
-        await supabase
-          .from('profiles')
-          .update({ role })
-          .eq('id', user.id);
-
+        await login(email, password);
         router.push('/dashboard');
       }
     } catch (err: any) {
@@ -84,11 +66,22 @@ export default function CredentialsPage() {
       return;
     }
 
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+    try {
+      const res = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
 
-    alert('Password reset email sent.');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? 'Failed to send reset email');
+      }
+
+      setInfo('Password reset email sent. Check your inbox.');
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   return (
@@ -106,7 +99,7 @@ export default function CredentialsPage() {
               checked={mode === 'create'}
               onChange={() => setMode('create')}
             />
-            Sign Up
+            {' '}Sign Up
           </label>
           <label>
             <input
@@ -114,28 +107,40 @@ export default function CredentialsPage() {
               checked={mode === 'login'}
               onChange={() => setMode('login')}
             />
-            Login
+            {' '}Login
           </label>
         </div>
 
-        <div className="flex gap-4 text-sm">
-          <label>
-            <input
-              type="radio"
-              checked={role === 'candidate'}
-              onChange={() => setRole('candidate')}
+        {mode === 'create' && (
+          <>
+            <Input
+              type="text"
+              placeholder="Full Name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
             />
-            Candidate
-          </label>
-          <label>
-            <input
-              type="radio"
-              checked={role === 'recruiter'}
-              onChange={() => setRole('recruiter')}
-            />
-            Recruiter
-          </label>
-        </div>
+
+            <div className="flex gap-4 text-sm">
+              <label>
+                <input
+                  type="radio"
+                  checked={role === 'candidate'}
+                  onChange={() => setRole('candidate')}
+                />
+                {' '}Candidate
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  checked={role === 'recruiter'}
+                  onChange={() => setRole('recruiter')}
+                />
+                {' '}Recruiter
+              </label>
+            </div>
+          </>
+        )}
 
         <Input
           type="email"
@@ -172,6 +177,10 @@ export default function CredentialsPage() {
 
         {error && (
           <p className="text-red-500 text-sm">{error}</p>
+        )}
+
+        {info && (
+          <p className="text-green-500 text-sm">{info}</p>
         )}
 
         <Button type="submit" className="w-full" disabled={loading}>

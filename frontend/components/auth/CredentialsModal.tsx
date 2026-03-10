@@ -2,23 +2,28 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 type Props = {
   open: boolean;
   onClose: () => void;
 };
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+
 export default function CredentialsModal({ open, onClose }: Props) {
   const router = useRouter();
+  const { login, register } = useAuth();
 
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'candidate' | 'recruiter'>('candidate');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,22 +39,15 @@ export default function CredentialsModal({ open, onClose }: Props) {
 
     try {
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        setInfo('Account created. Check email for confirmation.');
+        if (!fullName.trim()) {
+          setError('Full name is required.');
+          return;
+        }
+        await register(fullName.trim(), email, password, role);
+        onClose();
+        router.push('/dashboard');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
+        await login(email, password);
         onClose();
         router.push('/dashboard');
       }
@@ -66,12 +64,22 @@ export default function CredentialsModal({ open, onClose }: Props) {
       return;
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset`,
-    });
+    try {
+      const res = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
 
-    if (error) setError(error.message);
-    else setInfo('Password reset email sent.');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? 'Failed to send reset email');
+      }
+
+      setInfo('Password reset email sent. Check your inbox.');
+    } catch (err: any) {
+      setError(err.message);
+    }
   }
 
   return (
@@ -122,6 +130,17 @@ export default function CredentialsModal({ open, onClose }: Props) {
               </label>
             </div>
 
+            {mode === 'signup' && (
+              <Input
+                type="text"
+                placeholder="Full Name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+                className="bg-white/5 border-white/10 text-white"
+              />
+            )}
+
             <Input
               type="email"
               placeholder="Email"
@@ -148,6 +167,27 @@ export default function CredentialsModal({ open, onClose }: Props) {
                 {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+
+            {mode === 'signup' && (
+              <div className="flex justify-center gap-6 text-sm text-gray-300">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={role === 'candidate'}
+                    onChange={() => setRole('candidate')}
+                  />
+                  Candidate
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={role === 'recruiter'}
+                    onChange={() => setRole('recruiter')}
+                  />
+                  Recruiter
+                </label>
+              </div>
+            )}
 
             {mode === 'login' && (
               <div className="text-right text-sm">
