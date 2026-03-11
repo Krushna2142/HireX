@@ -1,17 +1,13 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable } from '@nestjs/common';
-import { SupabaseService } from '../database/database.service';
+import { DatabaseService } from '../database/database.service';
 import { SerpAdapter } from './serp.adapter';
 
 @Injectable()
 export class JobsService {
   constructor(
-    private readonly supabase: SupabaseService,
+    private readonly db: DatabaseService,
     private readonly serpAdapter: SerpAdapter,
-  ) { }
+  ) {}
 
   /**
    * Fetch jobs from SerpAPI and store in DB
@@ -21,53 +17,75 @@ export class JobsService {
 
     if (!jobs.length) return [];
 
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('jobs')
-      .upsert(
-        jobs.map((job) => ({
-          id: job.id,
-          title: job.title,
-          company: job.company,
-          location: job.location,
-          description: job.description,
-        })),
-        { onConflict: 'id' },
-      )
-      .select();
+    const stored: any[] = [];
 
-    if (error) {
-      throw new Error(`DB insert failed: ${error.message}`);
+    for (const job of jobs) {
+      const result = await this.db.query(
+        `INSERT INTO jobs (id, title, company, location, description)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO UPDATE SET
+           title = EXCLUDED.title,
+           company = EXCLUDED.company,
+           location = EXCLUDED.location,
+           description = EXCLUDED.description
+         RETURNING *`,
+        [job.id, job.title, job.company, job.location, job.description],
+      );
+      stored.push(result.rows[0]);
     }
 
-    return data;
+    return stored;
+  }
+
+  /**
+   * Get all stored jobs, optionally filtered by query
+   */
+  async getAll(search?: string) {
+    if (search) {
+      const result = await this.db.query(
+        `SELECT * FROM jobs
+         WHERE title ILIKE $1 OR company ILIKE $1 OR location ILIKE $1
+         ORDER BY created_at DESC NULLS LAST
+         LIMIT 50`,
+        [`%${search}%`],
+      );
+      return result.rows;
+    }
+
+    const result = await this.db.query(
+      'SELECT * FROM jobs ORDER BY created_at DESC NULLS LAST LIMIT 50',
+    );
+    return result.rows;
   }
 
   /**
    * Semantic match using pgvector
    */
   async match(resumeId: string) {
-    const { data: resume } = await this.supabase
-      .getClient()
-      .from('resumes')
-      .select('embedding')
-      .eq('id', resumeId)
-      .single();
+    // Get the resume embedding
+    const resumeResult = await this.db.query(
+      'SELECT embedding FROM resumes WHERE id = $1',
+      [resumeId],
+    );
 
-    if (!resume?.embedding) {
+    if (resumeResult.rows.length === 0 || !resumeResult.rows[0].embedding) {
       throw new Error('Resume embedding not found');
     }
 
-    const { data, error } = await this.supabase.rpc('match_jobs', {
-      query_embedding: resume.embedding,
-      match_threshold: 0.7,
-      match_count: 10,
-    });
+    const embedding = resumeResult.rows[0].embedding;
 
-    if (error) {
-      throw new Error(error.message);
-    }
+    // Use pgvector similarity search
+    const result = await this.db.query(
+      `SELECT id, title, company, location, description,
+              1 - (embedding <=> $1::vector) AS similarity
+       FROM jobs
+       WHERE embedding IS NOT NULL
+       AND 1 - (embedding <=> $1::vector) > 0.7
+       ORDER BY embedding <=> $1::vector
+       LIMIT 10`,
+      [JSON.stringify(embedding)],
+    );
 
-    return data;
+    return result.rows;
   }
 }

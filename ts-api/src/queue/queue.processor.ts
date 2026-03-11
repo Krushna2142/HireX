@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
-import { SupabaseService } from '../database/database.service';
+import { DatabaseService } from '../database/database.service';
 import { QUEUES } from './queue.constants';
 import IORedis from 'ioredis';
 
@@ -11,11 +11,11 @@ export class QueueProcessor extends WorkerHost {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly supabase: SupabaseService,
+    private readonly db: DatabaseService,
   ) {
     super();
 
-    const redisUrl = this.config.get<string>('REDIS_URL');
+    const redisUrl = this.config.get<string>('redisUrl');
 
     if (!redisUrl) {
       throw new Error('REDIS_URL is not defined');
@@ -31,21 +31,19 @@ export class QueueProcessor extends WorkerHost {
     const { resumeId, content } = job.data;
 
     try {
-      // TODO: Call Python AI API here
+      // TODO: Call Python AI API here for resume analysis
 
-      await this.supabase
-        .getClient()
-        .from('resumes')
-        .update({ status: 'completed' })
-        .eq('id', resumeId);
+      await this.db.query(
+        "UPDATE resumes SET status = 'completed' WHERE id = $1",
+        [resumeId],
+      );
 
       return { success: true };
     } catch (error) {
-      await this.supabase
-        .getClient()
-        .from('resumes')
-        .update({ status: 'failed' })
-        .eq('id', resumeId);
+      await this.db.query(
+        "UPDATE resumes SET status = 'failed' WHERE id = $1",
+        [resumeId],
+      );
 
       throw error;
     }

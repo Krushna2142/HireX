@@ -1,12 +1,20 @@
+/* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
+import { MulterModule } from '@nestjs/platform-express';
 import { ResumesService } from './resumes.service';
 import { ResumesController } from './resumes.controller';
-import { SupabaseService } from '../database/database.service';
-import { QueueModule } from '../queue/queue.module';  // ✅ Add this import
+import { DatabaseModule } from '../database/datbase.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [QueueModule],  // ✅ Import QueueModule to get access to the Bull queue
+  imports: [
+    HttpModule.register({ timeout: 30000 }),
+    MulterModule.register({ limits: { fileSize: 10 * 1024 * 1024 } }),
+    DatabaseModule,
+    AuthModule,
+  ],
   controllers: [ResumesController],
-  providers: [ResumesService, SupabaseService],
+  providers: [ResumesService],
 })
 export class ResumesModule {}
