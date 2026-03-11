@@ -1,16 +1,28 @@
+"""
+JobCrawler Python AI/ML Service.
+NOT autonomous. Called ONLY by ts-api. No DB access. No user auth.
+"""
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import analyze
+from routers import analyze, interview
 
-app = FastAPI()
+app = FastAPI(
+    title="JobCrawler AI Service",
+    description="AI/ML micro-service: resume analysis, ATS scoring, mock interviews",
+    version="2.0.0",
+)
 
 origins = [
+    "http://localhost:3001",
+    "https://job-crawler-fcwr.onrender.com",
     "https://job-crawler-wine.vercel.app",
     "https://job-crawler-krushna2142s-projects.vercel.app",
     "https://job-crawler-git-main-krushna2142s-projects.vercel.app",
-    "https://job-crawler-n4spykvj6-krushna2142s-projects.vercel.app",
-    "https://job-crawler-fcwr.onrender.com",
 ]
 
 app.add_middleware(
@@ -21,13 +33,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# AI/ML Routers only
-app.include_router(analyze.router, prefix="/api")
+app.include_router(analyze.router, prefix="/api")   # /api/analyze/*
+app.include_router(interview.router, prefix="/ai")  # /ai/interview/*
 
-@app.options("/{path:path}", include_in_schema=False)
-def options_handler():
-    return {}
 
 @app.get("/")
 def root():
-    return {"message": "JobCrawler AI Service Running 🚀"}
+    return {"service": "JobCrawler AI/ML", "version": "2.0.0", "status": "running"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}

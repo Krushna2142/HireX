@@ -1,28 +1,57 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable prettier/prettier */
-//C:\Projects\Job-Crawler\ts-api\src\interviews\interviews.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class InterviewsService {
-  constructor(private http: HttpService, private config: ConfigService) {}
+  private readonly pythonUrl: string;
+  private readonly apiKey: string;
 
-  async generateResponse(messages: { role: string; content: string }[]) {
-    const pythonUrl = this.config.get('pythonApiUrl');
-    const apiKey = this.config.get('pythonApiKey');
+  constructor(
+    private readonly http: HttpService,
+    private readonly config: ConfigService,
+  ) {
+    this.pythonUrl = this.config.get<string>('pythonApiUrl') || '';
+    this.apiKey = this.config.get<string>('pythonApiKey') || '';
+  }
 
-    const response = await firstValueFrom(
-      this.http.post(
-        `${pythonUrl}/ai/interview/mock`,
-        { messages },
-        { headers: { 'X-API-KEY': apiKey } },
-      ),
-    );
+  async generateResponse(
+    messages: { role: string; content: string }[],
+    role?: string,
+    difficulty?: string,
+  ) {
+    try {
+      const response = await firstValueFrom(
+        this.http.post(
+          `${this.pythonUrl}/ai/interview/mock`,
+          { messages, role, difficulty },
+          { headers: { 'X-API-KEY': this.apiKey }, timeout: 30000 },
+        ),
+      );
+      return response.data;
+    } catch (error: any) {
+      throw new InternalServerErrorException(
+        `Interview error: ${error?.response?.data?.detail || error.message}`,
+      );
+    }
+  }
 
-    return response.data;
+  async generateScorecard(messages: { role: string; content: string }[]) {
+    try {
+      const response = await firstValueFrom(
+        this.http.post(
+          `${this.pythonUrl}/ai/interview/scorecard`,
+          { messages },
+          { headers: { 'X-API-KEY': this.apiKey }, timeout: 30000 },
+        ),
+      );
+      return response.data;
+    } catch (error: any) {
+      throw new InternalServerErrorException(
+        `Scorecard error: ${error?.response?.data?.detail || error.message}`,
+      );
+    }
   }
 }

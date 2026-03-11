@@ -9,7 +9,7 @@ import { QUEUES } from './queue.constants';
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const redisUrl = config.get<string>('REDIS_URL');
+        const redisUrl = config.get<string>('redisUrl');
 
         if (!redisUrl) {
           throw new Error('REDIS_URL is not defined');
@@ -27,6 +27,6 @@ import { QUEUES } from './queue.constants';
     }),
   ],
   providers: [QueueProcessor],
-  exports: [BullModule],  // ✅ Export BullModule so other modules can use the queue
+  exports: [BullModule],
 })
 export class QueueModule {}

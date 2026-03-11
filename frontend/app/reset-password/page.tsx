@@ -1,96 +1,122 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useAuth } from '@/components/providers/AuthProvider';
+import { resetPassword } from '@/lib/auth';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token') || '';
   const router = useRouter();
-  const { resetPassword } = useAuth();
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
-    setSuccess('');
+    setError(null);
 
-    if (!token) {
-      setError('Missing reset token. Please use the link from your email.');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
 
     if (password !== confirm) {
-      setError('Passwords do not match.');
+      setError('Passwords do not match');
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!token) {
+      setError('Invalid reset link');
       return;
     }
 
     setLoading(true);
+
     try {
-      const msg = await resetPassword(token, password);
-      setSuccess(msg);
-      setTimeout(() => router.push('/signin'), 2000);
+      await resetPassword(token, password);
+      setSuccess(true);
+      setTimeout(() => router.push('/auth/signin'), 3000);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Reset failed');
     } finally {
       setLoading(false);
     }
   }
 
+  if (success) {
+    return (
+      <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg p-4 text-center">
+        <p className="text-green-700 dark:text-green-400">
+          Password reset successful! Redirecting to sign in...
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <main className="page-gradient mx-auto max-w-7xl px-4 py-12 md:px-8">
-      <h1 className="text-3xl font-bold">Reset Password</h1>
-      <p className="mt-2 text-muted-foreground">Enter your new password below.</p>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+          <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+        </div>
+      )}
 
-      {error && <p className="mt-4 text-red-500 text-sm">{error}</p>}
-      {success && <p className="mt-4 text-green-500 text-sm">{success}</p>}
-
-      <form onSubmit={handleSubmit} className="mt-6 max-w-md space-y-4">
-        <input
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          New Password
+        </label>
+        <Input
           type="password"
-          placeholder="New Password (min 6 chars)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-md border border-border bg-background px-4 py-2 text-sm"
+          placeholder="••••••••"
           required
-          minLength={6}
         />
-        <input
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Confirm Password
+        </label>
+        <Input
           type="password"
-          placeholder="Confirm New Password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
-          className="w-full rounded-md border border-border bg-background px-4 py-2 text-sm"
+          placeholder="••••••••"
           required
-          minLength={6}
         />
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? 'Resetting...' : 'Reset Password'}
-        </button>
-      </form>
-    </main>
+      </div>
+
+      <Button type="submit" disabled={loading} className="w-full">
+        {loading ? 'Resetting...' : 'Reset Password'}
+      </Button>
+    </form>
   );
 }
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="p-8">Loading...</div>}>
-      <ResetPasswordForm />
-    </Suspense>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="max-w-md w-full space-y-8 p-8 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
+        <div className="text-center">
+          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Reset Password
+          </h2>
+          <p className="mt-2 text-gray-600 dark:text-gray-400">
+            Enter your new password
+          </p>
+        </div>
+
+        <Suspense fallback={<p>Loading...</p>}>
+          <ResetPasswordForm />
+        </Suspense>
+      </div>
+    </div>
   );
 }

@@ -1,9 +1,4 @@
-//C:\Projects\Job-Crawler\ts-api\src\users\users.controller.ts
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Patch, Body, UseGuards, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -14,7 +9,11 @@ export class UsersController {
 
   @Get('me')
   async getProfile(@Req() req: any) {
-    const uid = req.user.id;
-    return this.usersService.getProfile(uid);
+    return this.usersService.getProfile(req.user.id);
+  }
+
+  @Patch('me')
+  async updateProfile(@Req() req: any, @Body() body: { full_name?: string }) {
+    return this.usersService.updateProfile(req.user.id, body);
   }
 }

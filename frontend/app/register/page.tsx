@@ -3,12 +3,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { login } from '@/lib/auth';
+import { register } from '@/lib/auth';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 
-export default function SignInPage() {
+export default function RegisterPage() {
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +20,20 @@ export default function SignInPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await login(email, password);
+      await register(fullName, email, password);
       await refresh();
       router.push('/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Login failed');
+      setError(err.message || 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -37,10 +44,10 @@ export default function SignInPage() {
       <div className="max-w-md w-full space-y-8 p-8 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
         <div className="text-center">
           <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Sign In
+            Create Account
           </h2>
           <p className="mt-2 text-gray-600 dark:text-gray-400">
-            Welcome back to Job Crawler
+            Join Job Crawler today
           </p>
         </div>
 
@@ -50,6 +57,19 @@ export default function SignInPage() {
               <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
             </div>
           )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Full Name
+            </label>
+            <Input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="John Doe"
+              required
+            />
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -75,25 +95,17 @@ export default function SignInPage() {
               placeholder="••••••••"
               required
             />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Link
-              href="/auth/forgot-password"
-              className="text-sm text-blue-600 hover:text-blue-500"
-            >
-              Forgot password?
-            </Link>
+            <p className="mt-1 text-xs text-gray-500">Minimum 8 characters</p>
           </div>
 
           <Button type="submit" disabled={loading} className="w-full">
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? 'Creating account...' : 'Register'}
           </Button>
 
           <p className="text-center text-sm text-gray-600 dark:text-gray-400">
-            Don&apos;t have an account?{' '}
-            <Link href="/auth/register" className="text-blue-600 hover:text-blue-500 font-medium">
-              Register
+            Already have an account?{' '}
+            <Link href="/auth/signin" className="text-blue-600 hover:text-blue-500 font-medium">
+              Sign In
             </Link>
           </p>
         </form>

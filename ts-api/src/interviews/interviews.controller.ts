@@ -1,17 +1,32 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable prettier/prettier */
-//C:\Projects\Job-Crawler\ts-api\src\interviews\interviews.controller.ts
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { InterviewsService } from './interviews.service';
-import { FirebaseGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('interviews')
-@UseGuards(FirebaseGuard)
+@UseGuards(JwtAuthGuard)
 export class InterviewsController {
   constructor(private readonly interviewsService: InterviewsService) {}
 
   @Post('mock')
-  async mockInterview(@Body() body: { messages: { role: string; content: string }[] }) {
-    return this.interviewsService.generateResponse(body.messages);
+  async mockInterview(
+    @Body() body: {
+      messages: { role: string; content: string }[];
+      role?: string;
+      difficulty?: string;
+    },
+  ) {
+    return this.interviewsService.generateResponse(
+      body.messages,
+      body.role,
+      body.difficulty,
+    );
+  }
+
+  @Post('scorecard')
+  async scorecard(
+    @Body() body: { messages: { role: string; content: string }[] },
+  ) {
+    return this.interviewsService.generateScorecard(body.messages);
   }
 }

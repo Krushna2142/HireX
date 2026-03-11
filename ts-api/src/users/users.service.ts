@@ -1,32 +1,43 @@
-//C:\Projects\Job-Crawler\ts-api\src\users\users.service.ts
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createClient } from '@supabase/supabase-js';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { DatabaseService } from '../database/database.service';
 
 @Injectable()
 export class UsersService {
-  private supabase;
+  constructor(private readonly db: DatabaseService) {}
 
-  constructor(private config: ConfigService) {
-    this.supabase = createClient(
-      this.config.get('supabase.url')!,
-      this.config.get('supabase.anonKey')!,
+  async getProfile(userId: string) {
+    const result = await this.db.query(
+      'SELECT id, full_name, email, created_at FROM users WHERE id = $1',
+      [userId],
     );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundException('User not found');
+    }
+
+    return result.rows[0];
   }
 
-  async getProfile(firebaseUid: string) {
-    const { data, error } = await this.supabase
-      .from('users')
-      .select('*')
-      .eq('firebase_uid', firebaseUid)
-      .single();
+  async updateProfile(userId: string, data: { full_name?: string }) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
 
-    if (error) throw error;
-    return data;
+    if (data.full_name) {
+      fields.push(`full_name = $${idx++}`);
+      values.push(data.full_name);
+    }
+
+    if (fields.length === 0) {
+      return this.getProfile(userId);
+    }
+
+    values.push(userId);
+    const result = await this.db.query(
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} RETURNING id, full_name, email, created_at`,
+      values,
+    );
+
+    return result.rows[0];
   }
 }

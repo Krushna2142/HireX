@@ -1,9 +1,6 @@
-//C:\Projects\Job-Crawler\ts-api\src\jobs\serp.adapter.ts
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import SerpApi from 'google-search-results-nodejs';
-
-// ── Response types ──────────────────────────────────────────────
 
 export interface SerpJobResult {
   job_id: string;
@@ -22,8 +19,6 @@ export interface SerpJobsResponse {
   search_parameters?: Record<string, unknown>;
 }
 
-// ── Normalised output ───────────────────────────────────────────
-
 export interface NormalisedJob {
   id: string;
   title: string;
@@ -34,8 +29,6 @@ export interface NormalisedJob {
   thumbnail: string | null;
   source: 'SerpAPI';
 }
-
-// ── Adapter ─────────────────────────────────────────────────────
 
 @Injectable()
 export class SerpAdapter {
@@ -49,9 +42,6 @@ export class SerpAdapter {
     this.search = new SerpApi.GoogleSearch(apiKey);
   }
 
-  /**
-   * Raw SerpAPI call — returns the full response from Google Jobs engine.
-   */
   async fetchRaw(query: string, location = 'India'): Promise<SerpJobsResponse> {
     const params = {
       engine: 'google_jobs' as const,
@@ -73,9 +63,6 @@ export class SerpAdapter {
     });
   }
 
-  /**
-   * Fetches jobs and returns a normalised, UI-friendly array.
-   */
   async getJobs(query: string, location = 'India'): Promise<NormalisedJob[]> {
     const response = await this.fetchRaw(query, location);
 
