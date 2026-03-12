@@ -2,9 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY . .
+# copy only requirements so pip layer can be cached
+COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
+
+# copy the rest of the app
+COPY . .
 
 EXPOSE 8000
 
