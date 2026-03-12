@@ -3,8 +3,9 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useRef, useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase/client';
+import { useCallback, useRef, useState } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
+import { getToken } from '@/lib/auth';
 
 type Analysis = {
   overall_score: number;
@@ -26,7 +27,7 @@ type Analysis = {
 };
 
 export default function ResumePage() {
-  const [session, setSession] = useState<any>(null);
+  const { user } = useAuth();
   const [status, setStatus] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -37,19 +38,13 @@ export default function ResumePage() {
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => { listener.subscription.unsubscribe(); };
-  }, []);
-
   const handleFile = useCallback(
     async (file: File | null) => {
       setStatus(null);
       setErrorMsg(null);
       setAnalysis(null);
 
-      if (!file || !session) {
+      if (!file || !user) {
         setErrorMsg('You must be logged in.');
         return;
       }
@@ -65,20 +60,13 @@ export default function ResumePage() {
         setUploadProgress(0);
         setStatus('Uploading & analyzing...');
 
-        // 1. Upload to Supabase Storage (for backup/download)
-        const userId = session.user.id;
-        const ext = file.name.split('.').pop();
-        const filePath = `${userId}/${Date.now()}_resume.${ext}`;
-
-        await supabase.storage.from('resumes').upload(filePath, file, { upsert: true });
-
-        // 2. Send file to ts-api → Python AI for real-time analysis
+        // Send file to ts-api → Python AI for real-time analysis
         const formData = new FormData();
         formData.append('file', file);
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_URL}/resumes/upload`, true);
-        xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
+        xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`);
 
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
@@ -114,7 +102,7 @@ export default function ResumePage() {
         setStatus(null);
       }
     },
-    [session, API_URL],
+    [user, API_URL],
   );
 
   const onFileChange = useCallback(
@@ -290,7 +278,7 @@ export default function ResumePage() {
 
         <aside className="panel p-4 text-sm">
           <div className="text-(--text-muted) text-xs">Signed in as</div>
-          <div className="font-medium truncate">{session?.user?.email || 'Not signed in'}</div>
+          <div className="font-medium truncate">{user?.email || 'Not signed in'}</div>
 
           {analysis && (
             <div className="mt-4 space-y-2 text-xs">

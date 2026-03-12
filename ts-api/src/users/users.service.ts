@@ -7,7 +7,7 @@ export class UsersService {
 
   async getProfile(userId: string) {
     const result = await this.db.query(
-      'SELECT id, full_name, email, created_at FROM users WHERE id = $1',
+      'SELECT id, full_name, email, headline, location, bio, created_at FROM users WHERE id = $1',
       [userId],
     );
 
@@ -18,7 +18,7 @@ export class UsersService {
     return result.rows[0];
   }
 
-  async updateProfile(userId: string, data: { full_name?: string }) {
+  async updateProfile(userId: string, data: { full_name?: string; headline?: string; location?: string; bio?: string }) {
     const fields: string[] = [];
     const values: any[] = [];
     let idx = 1;
@@ -27,6 +27,18 @@ export class UsersService {
       fields.push(`full_name = $${idx++}`);
       values.push(data.full_name);
     }
+    if (data.headline !== undefined) {
+      fields.push(`headline = $${idx++}`);
+      values.push(data.headline);
+    }
+    if (data.location !== undefined) {
+      fields.push(`location = $${idx++}`);
+      values.push(data.location);
+    }
+    if (data.bio !== undefined) {
+      fields.push(`bio = $${idx++}`);
+      values.push(data.bio);
+    }
 
     if (fields.length === 0) {
       return this.getProfile(userId);
@@ -34,7 +46,7 @@ export class UsersService {
 
     values.push(userId);
     const result = await this.db.query(
-      `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} RETURNING id, full_name, email, created_at`,
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} RETURNING id, full_name, email, headline, location, bio, created_at`,
       values,
     );
 

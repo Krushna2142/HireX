@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/TextArea';
 import { ArrowUpCircle, MessageSquare } from 'lucide-react';
+import api from '@/lib/axios';
 
 interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
@@ -16,22 +17,22 @@ export default function MockInterview() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  function send() {
+  async function send() {
     if (!input.trim()) return;
-    setTurns(t => [...t, { role: 'user', content: input.trim() }]);
+    const newTurns = [...turns, { role: 'user' as const, content: input.trim() }];
+    setTurns(newTurns);
     setInput('');
     setLoading(true);
-    setTimeout(() => {
-      setTurns(t => [
-        ...t,
-        {
-          role: 'assistant',
-          content:
-            'Here is a generated follow-up question (placeholder). Explain the time complexity of your solution.'
-        }
-      ]);
+    try {
+      const { data } = await api.post('/interviews/mock', {
+        messages: newTurns.filter(t => t.role !== 'system')
+      });
+      setTurns(t => [...t, { role: 'assistant', content: data.reply }]);
+    } catch {
+      setTurns(t => [...t, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   }
 
   return (
