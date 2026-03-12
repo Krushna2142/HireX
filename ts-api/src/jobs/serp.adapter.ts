@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import SerpApi from 'google-search-results-nodejs';
 
@@ -32,17 +32,27 @@ export interface NormalisedJob {
 
 @Injectable()
 export class SerpAdapter {
-  private search: InstanceType<typeof SerpApi.GoogleSearch>;
+  private search: InstanceType<typeof SerpApi.GoogleSearch> | null = null;
+  private readonly logger = new Logger(SerpAdapter.name);
 
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('serpApiKey');
     if (!apiKey) {
-      throw new Error('SerpAdapter: SERPAPI_KEY is not configured');
+      // ✅ WARN instead of throwing — don't crash the whole app
+      this.logger.warn(
+        'SERPAPI_KEY is not configured. Job search will be unavailable until it is set.',
+      );
+    } else {
+      this.search = new SerpApi.GoogleSearch(apiKey);
     }
-    this.search = new SerpApi.GoogleSearch(apiKey);
   }
 
   async fetchRaw(query: string, location = 'India'): Promise<SerpJobsResponse> {
+    if (!this.search) {
+      this.logger.warn('SerpAPI not available — returning empty results');
+      return { jobs_results: [] };
+    }
+
     const params = {
       engine: 'google_jobs' as const,
       q: query,
@@ -52,7 +62,7 @@ export class SerpAdapter {
     };
 
     return new Promise<SerpJobsResponse>((resolve, reject) => {
-      this.search.json(params, (data: SerpJobsResponse) => {
+      this.search!.json(params, (data: SerpJobsResponse) => {
         if (!data) {
           return reject(
             new Error('SerpAdapter: No data returned from SerpAPI'),

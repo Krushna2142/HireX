@@ -20,5 +20,6 @@ export default () => ({
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   pythonApiUrl: process.env.PYTHON_API_URL,
   pythonApiKey: process.env.PYTHON_API_KEY,
+  serpApiKey: process.env.SERPAPI_KEY,   // ← was missing!
   redisUrl: process.env.REDIS_URL,
 });
