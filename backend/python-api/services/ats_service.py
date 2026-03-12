@@ -1,22 +1,28 @@
 # backend/python-api/services/ats_service.py
 """
-ATS Scoring — Gemini AI for real-time analysis.
-Falls back to smart local scoring if no API key.
-ALL REAL-TIME — zero hardcoded scores.
+ATS Scoring — Ollama + local fallback.
+
+Environment variables:
+- OLLAMA_API_URL (default: "http://ollama:11434/api/generate")
+- OLLAMA_API_KEY (optional, for Ollama Cloud)
+- OLLAMA_MODEL (default: "llama2")
 """
 import os
 import re
 import json
-import google.generativeai as genai
+import logging
+import requests
+import asyncio
+from typing import Dict
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-model = None
+logger = logging.getLogger(__name__)
 
-if GEMINI_API_KEY:
+# Configure Ollama endpoint defaults:
+OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://ollama:11434/api/generate")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama2")
 
-    response = model.generate_content(prompt)
-
-# ── Comprehensive Skill Database ────────────────────────────
+# ── Skill DB / Role map / Sections (kept from your original) ──
 SKILLS_DB = [
     "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust",
     "ruby", "php", "swift", "kotlin", "scala", "r", "matlab",
@@ -156,19 +162,56 @@ def score_ats_local(resume_text: str, job_description: str = "") -> dict:
     }
 
 
+async def _call_ollama(prompt: str, model: str = OLLAMA_MODEL, max_tokens: int = 2048) -> str:
+    """
+    Call Ollama (local or cloud). Returns text result or raises Exception.
+    Uses requests in a thread to avoid blocking the event loop.
+    """
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+    }
+    headers = {"Content-Type": "application/json"}
+    if OLLAMA_API_KEY:
+        headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
+
+    def _post():
+        resp = requests.post(OLLAMA_API_URL, json=payload, headers=headers, timeout=120)
+        resp.raise_for_status()
+        return resp
+
+    try:
+        resp = await asyncio.to_thread(_post)
+        try:
+            data = resp.json()
+        except ValueError:
+            return resp.text.strip()
+
+        if isinstance(data, dict):
+            for key in ("text", "content", "result", "output", "generated_text"):
+                if key in data and isinstance(data[key], str):
+                    return data[key].strip()
+            if "choices" in data and isinstance(data["choices"], list) and data["choices"]:
+                ch0 = data["choices"][0]
+                if isinstance(ch0, dict):
+                    for key in ("text", "message", "content"):
+                        if key in ch0 and isinstance(ch0[key], str):
+                            return ch0[key].strip()
+            return json.dumps(data)
+        return str(data)
+    except Exception as exc:
+        logger.exception("Ollama call failed: %s", exc)
+        raise
+
+
 async def score_ats_ai(resume_text: str, job_description: str = "") -> dict:
-    """Gemini-powered real-time ATS scoring. Zero static data."""
-    if not GEMINI_API_KEY:
+    """Ollama-powered ATS scoring. Falls back to local scorer on error or missing config."""
+    # If OLLAMA_API_URL is not set, fallback to local scorer.
+    if not OLLAMA_API_URL:
         return score_ats_local(resume_text, job_description)
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        generation_config=genai.GenerationConfig(temperature=0.2, max_output_tokens=2048),
-    )
-
     jd_block = f"\n\n## Job Description:\n{job_description[:2000]}" if job_description else ""
-
     prompt = f"""You are an expert ATS (Applicant Tracking System) resume analyzer.
 
 Analyze this resume THOROUGHLY and return a JSON object. Base ALL scores on the ACTUAL resume content — never make up data.
@@ -195,28 +238,25 @@ Return ONLY this JSON structure (no markdown fences):
 
 Return ONLY valid JSON.
 """
-
     try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        # Strip markdown code fences if model adds them
+        text = await _call_ollama(prompt)
         if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
+            try:
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            except Exception:
+                text = text.strip("` \n")
         result = json.loads(text)
-
-        # Enrich with local data
         local = score_ats_local(resume_text, job_description)
-        result["section_scores"] = local["section_scores"]
-        result["format_checks"] = local["format_checks"]
-        result["word_count"] = local["word_count"]
-        result["jd_match_score"] = local["jd_match_score"]
-        result["jd_matched_keywords"] = local["jd_matched_keywords"]
-        result["jd_missing_keywords"] = local["jd_missing_keywords"]
+        result["section_scores"] = local.get("section_scores", {})
+        result["format_checks"] = local.get("format_checks", {})
+        result["word_count"] = local.get("word_count", 0)
+        result["jd_match_score"] = local.get("jd_match_score", 0)
+        result["jd_matched_keywords"] = local.get("jd_matched_keywords", [])
+        result["jd_missing_keywords"] = local.get("jd_missing_keywords", [])
         result["ai_powered"] = True
         return result
-
     except Exception:
+        logger.exception("AI scoring failed or returned invalid JSON; falling back to local scorer.")
         fallback = score_ats_local(resume_text, job_description)
         fallback["ai_powered"] = False
         return fallback
