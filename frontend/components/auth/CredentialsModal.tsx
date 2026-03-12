@@ -19,7 +19,6 @@ export default function CredentialsModal({
   const router = useRouter();
   const { register, login, forgotPassword } = useAuth();
 
-  // use the shared AuthMode type so 'forgot' is part of the union
   const [mode, setMode] = useState<AuthMode>('login');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -47,33 +46,42 @@ export default function CredentialsModal({
     setLoading(true);
 
     try {
+      // client-side validation (prevents native validation tooltips)
       if (mode === 'signup') {
-        if (!fullName.trim()) {
-          throw new Error('Full name is required');
-        }
-        await register(fullName, email, password);
+        if (!fullName.trim()) throw new Error('Full name is required.');
+        if (!email.trim()) throw new Error('Email is required.');
+        if (!password) throw new Error('Password is required.');
+        await register(fullName.trim(), email.trim(), password);
+        // on success: reset form, close modal, navigate
+        resetForm();
         onClose();
         router.push('/dashboard');
       } else if (mode === 'login') {
-        await login(email, password);
+        if (!email.trim() || !password) throw new Error('Email and password are required.');
+        await login(email.trim(), password);
+        resetForm();
         onClose();
         router.push('/dashboard');
       } else if (mode === 'forgot') {
-        if (!email) {
-          throw new Error('Enter your email first.');
-        }
-        const msg = await forgotPassword(email);
+        if (!email.trim()) throw new Error('Enter your email first.');
+        const msg = await forgotPassword(email.trim());
         setInfo(msg || 'If the email exists, a reset link has been sent. Check your inbox.');
       }
     } catch (err: any) {
       // handle 409 conflict from register
-      if ((err as any)?.status === 409) {
+      if (err?.status === 409) {
         setError('An account with this email already exists. Please log in.');
         setMode('login');
       } else {
         setError(err?.message || 'Something went wrong');
       }
     } finally {
+      // remove focus to dismiss native tooltips if any and clear loading
+      try {
+        (document.activeElement as HTMLElement | null)?.blur();
+      } catch {
+        /* ignore */
+      }
       setLoading(false);
     }
   }
@@ -96,7 +104,10 @@ export default function CredentialsModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-md"
-        onClick={onClose}
+        onClick={() => {
+          resetForm();
+          onClose();
+        }}
       />
 
       <div className="relative w-full max-w-md mx-4">
@@ -114,11 +125,13 @@ export default function CredentialsModal({
             <p className="text-green-400 text-sm mb-4 text-center">{info}</p>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {/* disable native validation, we validate manually */}
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
             {mode !== 'forgot' && (
               <div className="flex justify-center gap-6 text-sm text-gray-300 mb-2">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
+                    name="authMode"
                     type="radio"
                     checked={mode === 'signup'}
                     onChange={() => { resetForm(); setMode('signup'); }}
@@ -128,6 +141,7 @@ export default function CredentialsModal({
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
+                    name="authMode"
                     type="radio"
                     checked={mode === 'login'}
                     onChange={() => { resetForm(); setMode('login'); }}
@@ -158,7 +172,6 @@ export default function CredentialsModal({
                   placeholder="Your full name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  required={mode === 'signup'}
                 />
               </div>
             )}
@@ -172,7 +185,6 @@ export default function CredentialsModal({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                required
               />
             </div>
 
@@ -187,7 +199,6 @@ export default function CredentialsModal({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    required
                   />
                   <button
                     type="button"
