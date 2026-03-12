@@ -13,7 +13,7 @@ export interface AuthResponse {
   user: User;
 }
 
-// ── Token helpers ─────────────────────────��────────────────────
+// ── Token helpers ─────────────────────────────────────────────────────────────
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -32,8 +32,20 @@ export function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// ── API calls ──────────────────────────────────────────────────
-export async function register(full_name: string, email: string, password: string): Promise<AuthResponse> {
+// ── Helper to build an Error that carries status/body ─────────────────────────
+function buildHttpError(status: number, body: any) {
+  const e = new Error(body?.message || 'Request failed');
+  (e as any).status = status;
+  (e as any).body = body;
+  return e;
+}
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+export async function register(
+  full_name: string,
+  email: string,
+  password: string
+): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,8 +53,13 @@ export async function register(full_name: string, email: string, password: strin
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.message || 'Registration failed');
+    let errBody: any = null;
+    try {
+      errBody = await res.json();
+    } catch {
+      errBody = { message: 'Registration failed' };
+    }
+    throw buildHttpError(res.status, errBody);
   }
 
   const data: AuthResponse = await res.json();
@@ -58,8 +75,13 @@ export async function login(email: string, password: string): Promise<AuthRespon
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.message || 'Login failed');
+    let errBody: any = null;
+    try {
+      errBody = await res.json();
+    } catch {
+      errBody = { message: 'Login failed' };
+    }
+    throw buildHttpError(res.status, errBody);
   }
 
   const data: AuthResponse = await res.json();
@@ -74,10 +96,14 @@ export async function forgotPassword(email: string): Promise<{ message: string }
     body: JSON.stringify({ email }),
   });
 
+  // endpoint intentionally returns a neutral message regardless of existence
   return res.json();
 }
 
-export async function resetPassword(token: string, new_password: string): Promise<{ message: string }> {
+export async function resetPassword(
+  token: string,
+  new_password: string
+): Promise<{ message: string }> {
   const res = await fetch(`${API_URL}/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -85,8 +111,13 @@ export async function resetPassword(token: string, new_password: string): Promis
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.message || 'Reset failed');
+    let errBody: any = null;
+    try {
+      errBody = await res.json();
+    } catch {
+      errBody = { message: 'Reset failed' };
+    }
+    throw buildHttpError(res.status, errBody);
   }
 
   return res.json();
