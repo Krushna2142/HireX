@@ -41,7 +41,7 @@ function ResetPasswordForm() {
     try {
       await resetPassword(token, password);
       setSuccess(true);
-      setTimeout(() => router.push('/auth/signin'), 3000);
+      setTimeout(() => router.push('/'), 3000);
     } catch (err: any) {
       setError(err.message || 'Reset failed');
     } finally {
@@ -53,7 +53,7 @@ function ResetPasswordForm() {
     return (
       <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg p-4 text-center">
         <p className="text-green-700 dark:text-green-400">
-          Password reset successful! Redirecting to sign in...
+          Password reset successful! Redirecting to home...
         </p>
       </div>
     );
