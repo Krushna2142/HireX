@@ -1,5 +1,5 @@
 import os
-
+#backend/python-api/core/config.py
 # ── AI Provider ─────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 

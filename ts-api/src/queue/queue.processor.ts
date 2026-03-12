@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../database/database.service';
 import { QUEUES } from './queue.constants';
 import IORedis from 'ioredis';
-
+// ts-api/src/queue/queue.processor.ts
 @Processor(QUEUES.RESUME_ANALYSIS)
 export class QueueProcessor extends WorkerHost {
   private connection;

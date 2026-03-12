@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-
+// frontend/app/api/mock-interview/route.ts
 type Msg = { role: 'user' | 'assistant'; content: string };
 
 export async function POST(req: Request) {

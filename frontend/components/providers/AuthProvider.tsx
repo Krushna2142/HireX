@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/providers/AuthProvider.tsx
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import {
   User,

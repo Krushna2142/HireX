@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/features/jobs/hooks/useJobs.ts
 import { useQuery } from '@tanstack/react-query';
 
 export type Job = {

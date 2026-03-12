@@ -1,6 +1,6 @@
 import os
 import psycopg2
-
+# backend/python-api/core/database.py
 def get_db_connection():
     """Returns a psycopg2 connection using DATABASE_URL."""
     database_url = os.getenv("DATABASE_URL")

@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/features/jobs/components/JobCard.tsx
 export function JobCard({
   title,
   company,

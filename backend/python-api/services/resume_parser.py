@@ -1,3 +1,4 @@
+# backend/python-api/services/resume_parser.py
 """
 Resume parser — extracts text from PDF and DOCX.
 Real parsing, no static data.

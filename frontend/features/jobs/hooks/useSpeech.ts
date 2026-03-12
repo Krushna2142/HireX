@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+'use client';// frontend/features/jobs/hooks/useSpeech.ts
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 

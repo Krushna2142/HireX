@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/navbar-action.tsx
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import ThemeToggle from '@/components/ThemeToggle';

@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/ui/Avatar.tsx
 import React, { useState, useMemo } from 'react';
 
 export default function Avatar({

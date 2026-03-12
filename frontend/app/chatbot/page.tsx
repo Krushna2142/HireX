@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/app/chatbot/page.tsx
 import { useState } from 'react';
 
 type Message = {

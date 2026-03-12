@@ -2,7 +2,7 @@
 import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { InterviewsService } from './interviews.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-
+// ts-api/src/interviews/interviews.controller.ts
 @Controller('interviews')
 @UseGuards(JwtAuthGuard)
 export class InterviewsController {

@@ -4,7 +4,7 @@ import { HttpModule } from '@nestjs/axios';
 import { InterviewsController } from './interviews.controller';
 import { InterviewsService } from './interviews.service';
 import { AuthModule } from '../auth/auth.module';
-
+// ts-api/src/interviews/interviews.module.ts
 @Module({
   imports: [HttpModule.register({ timeout: 30000 }), AuthModule],
   controllers: [InterviewsController],

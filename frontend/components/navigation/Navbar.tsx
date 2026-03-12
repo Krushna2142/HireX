@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/navigation/Navbar.tsx
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';

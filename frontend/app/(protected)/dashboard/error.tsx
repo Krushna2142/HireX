@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/app/%28protected%29/dashboard/error.tsx
 export default function DashboardError({
   error,
   reset

@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/auth/CredentialsModal.tsx
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';

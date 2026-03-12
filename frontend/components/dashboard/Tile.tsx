@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/dashboard/Tile.tsx
 import Link from 'next/link';
 
 export function Tile({

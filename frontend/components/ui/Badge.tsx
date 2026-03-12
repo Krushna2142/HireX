@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils/cn';
-
+// frontend/components/ui/Badge.tsx
 export function Badge({
   children,
   className

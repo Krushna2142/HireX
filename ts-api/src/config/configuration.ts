@@ -1,3 +1,4 @@
+// ts-api/src/config/configuration.ts
 export default () => ({
   database: {
     host: process.env.DB_HOST || 'localhost',

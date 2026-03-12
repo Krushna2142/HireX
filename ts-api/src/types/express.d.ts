@@ -6,3 +6,4 @@ declare namespace Express {
     };
   }
 }
+//ts-api/src/types/express.d.ts

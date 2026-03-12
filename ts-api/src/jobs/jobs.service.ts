@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { SerpAdapter } from './serp.adapter';
-
+// ts-api/src/jobs/jobs.service.ts
 @Injectable()
 export class JobsService {
   constructor(

@@ -1,4 +1,4 @@
-'use client';
+'use client';// frontend/features/jobs/components/JobSkeleton.tsx
 
 export default function JobSkeleton() {
   return (

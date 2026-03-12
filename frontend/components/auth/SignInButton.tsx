@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/auth/SignInButton.tsx
 import { Loader2, LogOut, LogIn } from 'lucide-react';
 import { useState } from 'react';
 import CredentialsModal from './CredentialsModal';

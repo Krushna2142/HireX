@@ -1,6 +1,6 @@
 'use client';
 import MockInterview from '../../features/jobs/components/MockInterview';
-
+// frontend/app/interview/page.tsx
 export default function InterviewPage() {
   return (
     <div className="space-y-8">

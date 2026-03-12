@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
-
+// frontend/components/chat/VoiceChat.tsx
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Mic, MicOff, Send } from 'lucide-react';
 

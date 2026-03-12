@@ -1,6 +1,6 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const TOKEN_KEY = 'jc_token';
-
+// frontend/lib/auth.ts
 export interface User {
   id: string;
   full_name: string;

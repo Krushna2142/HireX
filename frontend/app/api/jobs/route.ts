@@ -2,7 +2,7 @@
 import SerpApi from "google-search-results-nodejs";
 import { NextRequest } from "next/dist/server/web/spec-extension/request";
 import { NextResponse } from "next/server";
-
+// frontend/app/api/jobs/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

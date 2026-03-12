@@ -7,6 +7,7 @@ export function formatRelativeSafe(iso?: string) {
   } catch {
     return '';
   }
+  //frontend/lib/utils/format.ts
 
   const diffMs = Date.now() - d.getTime();
   const sec = Math.floor(diffMs / 1000);

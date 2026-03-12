@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient } from 'pg';
-
+// ts-api/src/database/database.service.ts
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
   private pool: Pool;

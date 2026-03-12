@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// frontend/app/resume/page.tsx
 'use client';
 export const dynamic = 'force-dynamic';
 

@@ -1,6 +1,6 @@
 'use client';
 export const dynamic = 'force-dynamic';
-
+// frontend/app/%28protected%29/mock-interview/chat/page.tsx
 export default function ChatRoomPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">

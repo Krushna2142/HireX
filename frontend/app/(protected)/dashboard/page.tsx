@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/app/%28protected%29/dashboard/page.tsx
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/components/providers/AuthProvider';

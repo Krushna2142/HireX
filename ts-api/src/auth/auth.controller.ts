@@ -5,7 +5,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-
+// ts-api/src/auth/auth.controller.ts
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import SerpApi from 'google-search-results-nodejs';
-
+// ts-api/src/jobs/serp.adapter.ts
 export interface SerpJobResult {
   job_id: string;
   title: string;

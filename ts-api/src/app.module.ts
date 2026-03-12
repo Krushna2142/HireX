@@ -6,7 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
 import { InterviewsModule } from './interviews/interviews.module';
-
+// ts-api/src/app.module.ts
 @Module({
   imports: [
     ConfigModule.forRoot({

@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/app/%28protected%29/mock-interview/page.tsx
 import { useState } from 'react';
 
 export default function MockInterviewPage() {

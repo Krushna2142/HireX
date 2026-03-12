@@ -6,3 +6,4 @@ export default function LoadingDashboard() {
     </div>
   );
 }
+// frontend/app/%28protected%29/dashboard/loading.tsx

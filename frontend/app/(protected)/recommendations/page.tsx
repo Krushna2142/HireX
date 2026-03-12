@@ -1,3 +1,4 @@
+// frontend/app/%28protected%29/recommendations/page.tsx
 export default function RecommendationsPage() {
   const recs = [
     { role: 'Backend Engineer', match: 92, reason: 'Strong Node + DB experience' },

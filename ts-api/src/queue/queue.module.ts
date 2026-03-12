@@ -3,7 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { QueueProcessor } from './queue.processor';
 import { QUEUES } from './queue.constants';
-
+// ts-api/src/queue/queue.module.ts
 @Module({
   imports: [
     BullModule.forRootAsync({

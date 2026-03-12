@@ -1,3 +1,4 @@
+# backend/python-api/services/ats_service.py
 """
 ATS Scoring — Gemini AI for real-time analysis.
 Falls back to smart local scoring if no API key.
@@ -9,6 +10,11 @@ import json
 import google.generativeai as genai
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+model = None
+
+if GEMINI_API_KEY:
+
+    response = model.generate_content(prompt)
 
 # ── Comprehensive Skill Database ────────────────────────────
 SKILLS_DB = [

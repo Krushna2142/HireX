@@ -4,7 +4,7 @@ export default function JobsPage() {
     { title: 'Fullstack Developer', company: 'Globex', location: 'NYC', salary: '$140k' },
     { title: 'Data Engineer', company: 'Initech', location: 'SF', salary: '$150k' },
   ];
-
+//frontend/app/%28protected%29/jobs/page.tsx
   return (
     <section className="px-4 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-6xl">

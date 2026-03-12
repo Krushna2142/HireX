@@ -6,3 +6,4 @@ export interface Job {
   postedAt?: string;
   skills?: string[];
 }
+// frontend/features/jobs/types/Job.ts

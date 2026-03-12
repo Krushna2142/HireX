@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/TextArea';
 import { ArrowUpCircle, MessageSquare } from 'lucide-react';
-
+// frontend/features/jobs/components/MockInterview.tsx
 interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
   content: string;

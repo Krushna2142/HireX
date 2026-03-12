@@ -1,5 +1,5 @@
 import { IsEmail, IsString, MinLength } from 'class-validator';
-
+// ts-api/src/auth/dto/register.dto.ts
 export class RegisterDto {
   @IsString()
   @MinLength(2)

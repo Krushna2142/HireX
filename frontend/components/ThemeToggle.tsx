@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect */
+// frontend/components/ThemeToggle.tsx
 'use client';
 
 import { useEffect, useState } from 'react';

@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/app/%28protected%29/settings/page.tsx
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/TextArea';
 

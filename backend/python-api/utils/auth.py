@@ -5,7 +5,10 @@ Python-api NEVER talks to users directly.
 import os
 from fastapi import Header, HTTPException
 
-API_KEY = os.getenv("PYTHON_API_KEY", "change-me-in-production")
+API_KEY = os.getenv("PYTHON_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError("PYTHON_API_KEY environment variable not set")
 
 
 async def verify_api_key(x_api_key: str = Header(..., alias="X-API-KEY")):

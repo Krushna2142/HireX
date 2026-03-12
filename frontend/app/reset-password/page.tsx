@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/app/reset-password/page.tsx
 import { useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { resetPassword } from '@/lib/auth';

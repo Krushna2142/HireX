@@ -1,5 +1,5 @@
 'use client';
-
+// frontend/components/recommendations/RecommendationCard.tsx
 export function RecommendationCard({
   title,
   score,

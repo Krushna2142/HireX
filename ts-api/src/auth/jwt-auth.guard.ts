@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-
+// ts-api/src/auth/jwt-auth.guard.ts
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(private readonly authService: AuthService) {}
