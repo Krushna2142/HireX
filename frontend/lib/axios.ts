@@ -23,7 +23,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('jc_token');
-      window.location.href = '/signin';
+      window.location.href = '/auth/signin';
     }
     return Promise.reject(error);
   },

@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/TextArea';
 import { Button } from '@/components/ui/Button';
+import api from '@/lib/axios';
 
 const schema = z.object({
   name: z.string().min(2).max(50),
@@ -17,6 +19,10 @@ const schema = z.object({
 type Values = z.infer<typeof schema>;
 
 export default function SettingsForm() {
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -32,14 +38,36 @@ export default function SettingsForm() {
     }
   });
 
-  function onSubmit(values: Values) {
-    // Placeholder: would call PATCH /api/me
-    return new Promise<void>(resolve =>
-      setTimeout(() => {
-        console.log('Settings saved', values);
-        resolve();
-      }, 800)
-    );
+  useEffect(() => {
+    api.get('/users/me').then((res) => {
+      const profile = res.data;
+      reset({
+        name: profile.full_name || '',
+        headline: profile.headline || '',
+        location: profile.location || '',
+        bio: profile.bio || '',
+      });
+    }).catch(() => {
+      setLoadError('Failed to load profile. Please refresh and try again.');
+    });
+  }, [reset]);
+
+  async function onSubmit(values: Values) {
+    setSaveSuccess(false);
+    setSaveError(null);
+    try {
+      const res = await api.patch('/users/me', {
+        full_name: values.name,
+        headline: values.headline,
+        location: values.location,
+        bio: values.bio,
+      });
+      setSaveSuccess(true);
+      return res.data;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to save profile. Please try again.';
+      setSaveError(message);
+    }
   }
 
   return (
@@ -47,6 +75,10 @@ export default function SettingsForm() {
       onSubmit={handleSubmit(onSubmit)}
       className="space-y-6 rounded-xl border p-6 shadow-sm dark:border-neutral-800"
     >
+      {loadError && (
+        <p className="text-sm text-red-600">{loadError}</p>
+      )}
+
       <div className="space-y-1">
         <label className="text-xs font-medium uppercase tracking-wide opacity-70">Name</label>
         <Input {...register('name')} />
@@ -72,6 +104,13 @@ export default function SettingsForm() {
         <Textarea {...register('bio')} rows={5} placeholder="Short professional summary..." />
         {errors.bio && <p className="text-xs text-red-600">{errors.bio.message}</p>}
       </div>
+
+      {saveSuccess && (
+        <p className="text-sm text-green-600">Profile saved successfully.</p>
+      )}
+      {saveError && (
+        <p className="text-sm text-red-600">{saveError}</p>
+      )}
 
       <div className="flex gap-3">
         <Button type="submit" disabled={isSubmitting}>

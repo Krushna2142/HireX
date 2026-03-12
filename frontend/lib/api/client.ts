@@ -1,4 +1,6 @@
 // lib/api/client.ts
+import { getAuthHeaders } from '@/lib/auth';
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 /**
@@ -6,7 +8,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL;
  */
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...(init?.headers || {}) },
     ...init,
     cache: 'no-store',
   });
@@ -31,7 +33,7 @@ export async function apiGet<T>(
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
         .join('&')
     : '';
-  const resp = await fetch(`${API_BASE}${path}${qs}`, { cache: 'no-store' });
+  const resp = await fetch(`${API_BASE}${path}${qs}`, { headers: { ...getAuthHeaders() }, cache: 'no-store' });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok)
     throw new Error((data && (data.error || data.detail)) || `Request failed: ${resp.status}`);
@@ -42,7 +44,7 @@ export async function apiGet<T>(
  * Makes a POST request with FormData (useful for file uploads)
  */
 export async function apiForm<T>(path: string, form: FormData): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, { method: 'POST', body: form, cache: 'no-store' });
+  const resp = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { ...getAuthHeaders() }, body: form, cache: 'no-store' });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok)
     throw new Error((data && (data.error || data.detail)) || `Request failed: ${resp.status}`);
