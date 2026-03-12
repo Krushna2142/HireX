@@ -187,7 +187,7 @@ export default function CredentialsModal({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    required={mode !== 'forgot'}
+                    required
                   />
                   <button
                     type="button"
