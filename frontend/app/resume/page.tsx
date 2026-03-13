@@ -1,3 +1,4 @@
+"use client ";
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getToken } from '@/lib/auth';
 import React, { useState, useRef, useCallback } from 'react';
