@@ -31,15 +31,20 @@ export default function SignInButton() {
   }
 
   return (
-    <>
-      <button
-        className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        onClick={() => setOpen(true)}
-      >
-        <LogIn className="w-4 h-4 inline mr-2" />
-        Sign In
-      </button>
-      <CredentialsModal open={open} onClose={() => setOpen(false)} />
-    </>
+   <>
+<button
+className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+onClick={() => setOpen(true)}
+>
+<LogIn className="w-4 h-4 inline mr-2" />
+Sign In
+</button>
+
+<CredentialsModal
+open={open}
+onClose={() => setOpen(false)}
+/>
+
+</>
   );
 }
