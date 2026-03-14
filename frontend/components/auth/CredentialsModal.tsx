@@ -37,9 +37,8 @@ async function handleLogin(e:any){
   setLoading(true)
   await login(email,password)
   toast.success("Welcome back 🚀")
-  onClose()
   router.push("/dashboard")
-  
+  onClose()
  }catch(err:any){
   toast.error(err.message || "Login failed")
  }finally{
@@ -59,9 +58,9 @@ async function handleSignup(e:any){
   setLoading(true)
   await register(name,email,password)
   toast.success("Account created 🎉")
-  onClose()
+
   router.push("/dashboard")
- 
+  onClose()
  }catch(err:any){
   toast.error(err.message || "Signup failed")
  }finally{
