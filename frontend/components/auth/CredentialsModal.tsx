@@ -19,14 +19,17 @@ export default function CredentialsModal({ open, onClose }: any) {
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
 
-  if (!open) return null
 
   const strength = zxcvbn(password).score
+  
   useEffect(() => {
     if (user) {
       onClose()
     }
   }, [user])
+
+  if (!open) return null
+  
   function strengthColor() {
     if (strength === 0) return "bg-red-500"
     if (strength === 1) return "bg-orange-500"
