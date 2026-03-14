@@ -1,34 +1,23 @@
-
 'use client'
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/components/providers/AuthProvider"
 import toast from "react-hot-toast"
 import { FcGoogle } from "react-icons/fc"
 import { FaGithub } from "react-icons/fa"
 import zxcvbn from "zxcvbn"
-import { motion, AnimatePresence } from "framer-motion"
 
 export default function CredentialsModal({ open, onClose }: any) {
 
 const router = useRouter()
+const { login, register } = useAuth()
 
-const { login, register, forgotPassword, user } = useAuth()
-
-const [mode,setMode] = useState<"login"|"register"|"forgot">("login")
-
+const [active,setActive] = useState(false)
 const [name,setName] = useState("")
 const [email,setEmail] = useState("")
 const [password,setPassword] = useState("")
 const [loading,setLoading] = useState(false)
-
-useEffect(()=>{
- if(user){
-  onClose()
-  router.replace("/dashboard")
- }
-},[user])
 
 if(!open) return null
 
@@ -44,18 +33,12 @@ function strengthColor(){
 
 async function handleLogin(e:any){
  e.preventDefault()
-
  try{
   setLoading(true)
-
   await login(email,password)
-
   toast.success("Welcome back 🚀")
-
+  router.push("/dashboard")
   onClose()
-
-  router.replace("/dashboard")
-
  }catch(err:any){
   toast.error(err.message || "Login failed")
  }finally{
@@ -67,21 +50,16 @@ async function handleSignup(e:any){
  e.preventDefault()
 
  if(strength < 2){
-  toast.error("Password too weak")
-  return
+   toast.error("Password too weak")
+   return
  }
 
  try{
   setLoading(true)
-
   await register(name,email,password)
-
   toast.success("Account created 🎉")
-
+  router.push("/dashboard")
   onClose()
-
-  router.replace("/dashboard")
-
  }catch(err:any){
   toast.error(err.message || "Signup failed")
  }finally{
@@ -89,68 +67,27 @@ async function handleSignup(e:any){
  }
 }
 
-async function handleForgot(e:any){
- e.preventDefault()
-
- try{
-  setLoading(true)
-
-  await forgotPassword(email)
-
-  toast.success("Reset link sent")
-
-  setMode("login")
-
- }catch(err:any){
-  toast.error(err.message || "Failed")
- }finally{
-  setLoading(false)
- }
-}
-
-function googleLogin(){
- window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/google`
-}
-
-function githubLogin(){
- window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/github`
-}
-
 return(
 
-<AnimatePresence>
+<div className="fixed inset-0 z-50 flex items-center justify-center">
 
-{open &&(
-
-<motion.div
-initial={{opacity:0}}
-animate={{opacity:1}}
-exit={{opacity:0}}
-className="fixed inset-0 z-50 flex items-center justify-center"
->
-
+{/* overlay */}
 <div
 className="absolute inset-0 bg-black/70 backdrop-blur-sm"
 onClick={onClose}
 />
 
-<motion.div
-initial={{scale:0.9,opacity:0}}
-animate={{scale:1,opacity:1}}
-exit={{scale:0.9,opacity:0}}
-transition={{duration:0.25}}
-className="relative w-[900px] max-w-full min-h-[550px] rounded-3xl overflow-hidden shadow-2xl"
->
+<div className="relative w-[900px] max-w-full min-h-[550px] rounded-3xl overflow-hidden shadow-2xl">
 
+{/* glass container */}
 <div className="absolute inset-0 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl"/>
 
-<div className="relative flex h-full">
+{/* SIGN IN */}
 
-{/* LEFT PANEL */}
-
-<div className="w-1/2 flex items-center justify-center p-10">
-
-{mode==="login" &&(
+<div
+className={`absolute top-0 left-0 w-1/2 h-full flex items-center justify-center p-10 transition-all duration-700
+${active ? "translate-x-full opacity-0" : ""}`}
+>
 
 <form onSubmit={handleLogin} className="w-full max-w-sm space-y-4">
 
@@ -161,7 +98,7 @@ type="email"
 placeholder="Email"
 value={email}
 onChange={(e)=>setEmail(e.target.value)}
-className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"
 />
 
 <input
@@ -169,21 +106,22 @@ type="password"
 placeholder="Password"
 value={password}
 onChange={(e)=>setPassword(e.target.value)}
-className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"
 />
 
 <button
 disabled={loading}
-className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white"
+className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-semibold hover:opacity-90"
 >
 {loading ? "Signing in..." : "Sign In"}
 </button>
+
+{/* OAuth */}
 
 <div className="flex gap-3 pt-2">
 
 <button
 type="button"
-onClick={googleLogin}
 className="flex items-center justify-center gap-2 w-full p-2 rounded-lg bg-white text-gray-700"
 >
 <FcGoogle size={20}/> Google
@@ -191,7 +129,6 @@ className="flex items-center justify-center gap-2 w-full p-2 rounded-lg bg-white
 
 <button
 type="button"
-onClick={githubLogin}
 className="flex items-center justify-center gap-2 w-full p-2 rounded-lg bg-black text-white"
 >
 <FaGithub size={18}/> GitHub
@@ -199,23 +136,27 @@ className="flex items-center justify-center gap-2 w-full p-2 rounded-lg bg-black
 
 </div>
 
-<div className="flex justify-end text-sm text-gray-300">
-
+<p className="text-center text-gray-300 text-sm">
+No account?
 <button
 type="button"
-onClick={()=>setMode("forgot")}
-className="hover:underline"
+onClick={()=>setActive(true)}
+className="ml-1 text-purple-300 hover:underline"
 >
-Forgot password?
+Register
 </button>
-
-</div>
+</p>
 
 </form>
 
-)}
+</div>
 
-{mode==="register" &&(
+{/* SIGN UP */}
+
+<div
+className={`absolute top-0 left-0 w-1/2 h-full flex items-center justify-center p-10 transition-all duration-700
+${active ? "translate-x-full opacity-100" : "opacity-0 pointer-events-none"}`}
+>
 
 <form onSubmit={handleSignup} className="w-full max-w-sm space-y-4">
 
@@ -225,7 +166,7 @@ Forgot password?
 placeholder="Full Name"
 value={name}
 onChange={(e)=>setName(e.target.value)}
-className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20"
 />
 
 <input
@@ -233,7 +174,7 @@ type="email"
 placeholder="Email"
 value={email}
 onChange={(e)=>setEmail(e.target.value)}
-className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20"
 />
 
 <input
@@ -241,8 +182,10 @@ type="password"
 placeholder="Password"
 value={password}
 onChange={(e)=>setPassword(e.target.value)}
-className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20"
 />
+
+{/* password strength */}
 
 <div className="w-full h-2 rounded bg-gray-700">
 <div
@@ -253,106 +196,71 @@ style={{width:`${(strength+1)*20}%`}}
 
 <button
 disabled={loading}
-className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white"
+className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-semibold"
 >
 {loading ? "Creating..." : "Create Account"}
 </button>
 
-<p className="text-center text-sm text-gray-300">
-
+<p className="text-center text-gray-300 text-sm">
+Already have account?
 <button
 type="button"
-onClick={()=>setMode("login")}
-className="hover:underline"
+onClick={()=>setActive(false)}
+className="ml-1 text-purple-300 hover:underline"
 >
-Back to login
+Login
 </button>
-
 </p>
 
 </form>
-
-)}
-
-{mode==="forgot" &&(
-
-<form onSubmit={handleForgot} className="w-full max-w-sm space-y-4">
-
-<h1 className="text-3xl font-bold text-white text-center">Reset Password</h1>
-
-<input
-type="email"
-placeholder="Enter email"
-value={email}
-onChange={(e)=>setEmail(e.target.value)}
-className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
-/>
-
-<button
-disabled={loading}
-className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white"
->
-{loading ? "Sending..." : "Send Reset Link"}
-</button>
-
-<p className="text-center text-sm text-gray-300">
-
-<button
-type="button"
-onClick={()=>setMode("login")}
-className="hover:underline"
->
-Back to login
-</button>
-
-</p>
-
-</form>
-
-)}
 
 </div>
 
-{/* RIGHT PANEL */}
+{/* TOGGLE PANEL */}
 
-<div className="w-1/2 bg-gradient-to-br from-indigo-500 to-purple-700 text-white flex flex-col items-center justify-center text-center p-10">
-
-<h1 className="text-4xl font-bold mb-4">Job Crawler</h1>
-
-<p className="text-white/80 mb-6">
-AI powered job matching platform
-</p>
-
-{mode === "login" && (
-<button
-onClick={()=>setMode("register")}
-className="px-6 py-3 rounded-lg border border-white hover:bg-white hover:text-purple-700 transition"
+<div
+className={`absolute top-0 left-1/2 w-1/2 h-full transition-all duration-700
+${active ? "-translate-x-full" : ""}`}
 >
-Create Account
-</button>
-)}
 
-{mode === "register" && (
+<div className="h-full w-full bg-gradient-to-br from-indigo-500 to-purple-700 text-white flex flex-col items-center justify-center text-center p-10">
+
+{!active ?(
+
+<>
+<h1 className="text-4xl font-bold mb-4">Hello Friend!</h1>
+<p className="mb-6 text-white/80">Register to start your journey</p>
+
 <button
-onClick={()=>setMode("login")}
-className="px-6 py-3 rounded-lg border border-white hover:bg-white hover:text-purple-700 transition"
+onClick={()=>setActive(true)}
+className="px-6 py-2 border border-white rounded-lg hover:bg-white/20"
+>
+Sign Up
+</button>
+</>
+
+):(
+
+<>
+<h1 className="text-4xl font-bold mb-4">Welcome Back!</h1>
+<p className="mb-6 text-white/80">Login to continue</p>
+
+<button
+onClick={()=>setActive(false)}
+className="px-6 py-2 border border-white rounded-lg hover:bg-white/20"
 >
 Sign In
 </button>
+</>
+
 )}
 
 </div>
 
 </div>
 
-</motion.div>
+</div>
 
-</motion.div>
-
-)}
-
-</AnimatePresence>
-
+</div>
 )
 }
-
