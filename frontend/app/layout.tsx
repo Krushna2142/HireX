@@ -1,4 +1,4 @@
-'use client';
+
 // frontend/app/layout.tsx
 import './globals.css';
 import { ThemeProvider } from 'next-themes';
