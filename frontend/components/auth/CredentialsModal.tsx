@@ -1,245 +1,266 @@
-'use client';
-// frontend/components/auth/CredentialsModal.tsx
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
-import { useAuth } from '@/components/providers/AuthProvider';
+'use client'
 
-type AuthMode = 'signup' | 'login' | 'forgot';
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/components/providers/AuthProvider"
+import toast from "react-hot-toast"
+import { FcGoogle } from "react-icons/fc"
+import { FaGithub } from "react-icons/fa"
+import zxcvbn from "zxcvbn"
 
-export default function CredentialsModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  const router = useRouter();
-  const { register, login, forgotPassword } = useAuth();
+export default function CredentialsModal({ open, onClose }: any) {
 
-  const [mode, setMode] = useState<AuthMode>('login');
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
+const router = useRouter()
+const { login, register } = useAuth()
 
-  if (!open) return null;
+const [active,setActive] = useState(false)
+const [name,setName] = useState("")
+const [email,setEmail] = useState("")
+const [password,setPassword] = useState("")
+const [loading,setLoading] = useState(false)
 
-  function resetForm() {
-    setError('');
-    setInfo('');
-    setFullName('');
-    setEmail('');
-    setPassword('');
-    setShowPass(false);
-  }
+if(!open) return null
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError('');
-    setInfo('');
-    setLoading(true);
+const strength = zxcvbn(password).score
 
-    try {
-      // client-side validation (prevents native validation tooltips)
-      if (mode === 'signup') {
-        if (!fullName.trim()) throw new Error('Full name is required.');
-        if (!email.trim()) throw new Error('Email is required.');
-        if (!password) throw new Error('Password is required.');
-        await register(fullName.trim(), email.trim(), password);
-        // on success: reset form, close modal, navigate
-        resetForm();
-        onClose();
-        router.push('/dashboard');
-      } else if (mode === 'login') {
-        if (!email.trim() || !password) throw new Error('Email and password are required.');
-        await login(email.trim(), password);
-        resetForm();
-        onClose();
-        router.push('/dashboard');
-      } else if (mode === 'forgot') {
-        if (!email.trim()) throw new Error('Enter your email first.');
-        const msg = await forgotPassword(email.trim());
-        setInfo(msg || 'If the email exists, a reset link has been sent. Check your inbox.');
-      }
-    } catch (err: any) {
-      // handle 409 conflict from register
-      if (err?.status === 409) {
-        setError('An account with this email already exists. Please log in.');
-        setMode('login');
-      } else {
-        setError(err?.message || 'Something went wrong');
-      }
-    } finally {
-      // remove focus to dismiss native tooltips if any and clear loading
-      try {
-        (document.activeElement as HTMLElement | null)?.blur();
-      } catch {
-        /* ignore */
-      }
-      setLoading(false);
-    }
-  }
+function strengthColor(){
+ if(strength===0) return "bg-red-500"
+ if(strength===1) return "bg-orange-500"
+ if(strength===2) return "bg-yellow-500"
+ if(strength===3) return "bg-green-400"
+ return "bg-green-600"
+}
 
-  function switchToForgot() {
-    setError('');
-    setInfo('');
-    setPassword('');
-    setMode('forgot');
-  }
+async function handleLogin(e:any){
+ e.preventDefault()
+ try{
+  setLoading(true)
+  await login(email,password)
+  toast.success("Welcome back 🚀")
+  router.push("/dashboard")
+  onClose()
+ }catch(err:any){
+  toast.error(err.message || "Login failed")
+ }finally{
+  setLoading(false)
+ }
+}
 
-  function switchToLogin() {
-    setError('');
-    setInfo('');
-    setPassword('');
-    setMode('login');
-  }
+async function handleSignup(e:any){
+ e.preventDefault()
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-md"
-        onClick={() => {
-          resetForm();
-          onClose();
-        }}
-      />
+ if(strength < 2){
+   toast.error("Password too weak")
+   return
+ }
 
-      <div className="relative w-full max-w-md mx-4">
-        <div className="bg-[#0f172a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl">
-          {/* Title */}
-          <h2 className="text-2xl font-semibold text-white mb-6 text-center">
-            {mode === 'signup' ? 'Create Account' : mode === 'login' ? 'Login' : 'Forgot Password'}
-          </h2>
+ try{
+  setLoading(true)
+  await register(name,email,password)
+  toast.success("Account created 🎉")
+  router.push("/dashboard")
+  onClose()
+ }catch(err:any){
+  toast.error(err.message || "Signup failed")
+ }finally{
+  setLoading(false)
+ }
+}
 
-          {error && (
-            <p className="text-red-400 text-sm mb-4 text-center">{error}</p>
-          )}
+return(
 
-          {info && (
-            <p className="text-green-400 text-sm mb-4 text-center">{info}</p>
-          )}
+<div className="fixed inset-0 z-50 flex items-center justify-center">
 
-          {/* disable native validation, we validate manually */}
-          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-            {mode !== 'forgot' && (
-              <div className="flex justify-center gap-6 text-sm text-gray-300 mb-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    name="authMode"
-                    type="radio"
-                    checked={mode === 'signup'}
-                    onChange={() => { resetForm(); setMode('signup'); }}
-                    className="accent-blue-500"
-                  />
-                  New
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    name="authMode"
-                    type="radio"
-                    checked={mode === 'login'}
-                    onChange={() => { resetForm(); setMode('login'); }}
-                    className="accent-blue-500"
-                  />
-                  Existing
-                </label>
-              </div>
-            )}
+{/* overlay */}
+<div
+className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+onClick={onClose}
+/>
 
-            {mode === 'forgot' && (
-              <button
-                type="button"
-                onClick={switchToLogin}
-                className="flex items-center gap-1 text-sm text-blue-400 hover:underline mb-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                Back to Login
-              </button>
-            )}
+<div className="relative w-[900px] max-w-full min-h-[550px] rounded-3xl overflow-hidden shadow-2xl">
 
-            {mode === 'signup' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Full name
-                </label>
-                <Input
-                  placeholder="Your full name"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                />
-              </div>
-            )}
+{/* glass container */}
+<div className="absolute inset-0 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl"/>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">
-                Email
-              </label>
-              <Input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
+{/* SIGN IN */}
 
-            {mode !== 'forgot' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Password
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    type={showPass ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPass((s) => !s)}
-                    className="px-3 py-2 bg-gray-800 text-sm rounded"
-                    aria-label={showPass ? 'Hide password' : 'Show password'}
-                  >
-                    {showPass ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-              </div>
-            )}
+<div
+className={`absolute top-0 left-0 w-1/2 h-full flex items-center justify-center p-10 transition-all duration-700
+${active ? "translate-x-full opacity-0" : ""}`}
+>
 
-            <div className="flex items-center justify-between">
-              {mode !== 'signup' && mode !== 'forgot' && (
-                <button
-                  type="button"
-                  onClick={switchToForgot}
-                  className="text-sm text-blue-400 hover:underline"
-                >
-                  Forgot password?
-                </button>
-              )}
-              <div />
-            </div>
+<form onSubmit={handleLogin} className="w-full max-w-sm space-y-4">
 
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? (mode === 'login' ? 'Signing in...' : mode === 'signup' ? 'Creating account...' : 'Sending...') :
-                mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create account' : 'Send reset link'}
-            </Button>
+<h1 className="text-3xl font-bold text-white text-center">Sign In</h1>
 
-            <p className="text-center text-sm text-gray-300 mt-2">
-              {mode === 'signup' ? (
-                <>Already have an account? <button type="button" onClick={() => setMode('login')} className="text-blue-400 hover:underline ml-1">Sign in</button></>
-              ) : mode === 'login' ? (
-                <>Don't have an account? <button type="button" onClick={() => setMode('signup')} className="text-blue-400 hover:underline ml-1">Register</button></>
-              ) : null}
-            </p>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
+<input
+type="email"
+placeholder="Email"
+value={email}
+onChange={(e)=>setEmail(e.target.value)}
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"
+/>
+
+<input
+type="password"
+placeholder="Password"
+value={password}
+onChange={(e)=>setPassword(e.target.value)}
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-purple-400"
+/>
+
+<button
+disabled={loading}
+className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-semibold hover:opacity-90"
+>
+{loading ? "Signing in..." : "Sign In"}
+</button>
+
+{/* OAuth */}
+
+<div className="flex gap-3 pt-2">
+
+<button
+type="button"
+className="flex items-center justify-center gap-2 w-full p-2 rounded-lg bg-white text-gray-700"
+>
+<FcGoogle size={20}/> Google
+</button>
+
+<button
+type="button"
+className="flex items-center justify-center gap-2 w-full p-2 rounded-lg bg-black text-white"
+>
+<FaGithub size={18}/> GitHub
+</button>
+
+</div>
+
+<p className="text-center text-gray-300 text-sm">
+No account?
+<button
+type="button"
+onClick={()=>setActive(true)}
+className="ml-1 text-purple-300 hover:underline"
+>
+Register
+</button>
+</p>
+
+</form>
+
+</div>
+
+{/* SIGN UP */}
+
+<div
+className={`absolute top-0 left-0 w-1/2 h-full flex items-center justify-center p-10 transition-all duration-700
+${active ? "translate-x-full opacity-100" : "opacity-0 pointer-events-none"}`}
+>
+
+<form onSubmit={handleSignup} className="w-full max-w-sm space-y-4">
+
+<h1 className="text-3xl font-bold text-white text-center">Create Account</h1>
+
+<input
+placeholder="Full Name"
+value={name}
+onChange={(e)=>setName(e.target.value)}
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20"
+/>
+
+<input
+type="email"
+placeholder="Email"
+value={email}
+onChange={(e)=>setEmail(e.target.value)}
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20"
+/>
+
+<input
+type="password"
+placeholder="Password"
+value={password}
+onChange={(e)=>setPassword(e.target.value)}
+className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/20"
+/>
+
+{/* password strength */}
+
+<div className="w-full h-2 rounded bg-gray-700">
+<div
+className={`h-2 rounded ${strengthColor()}`}
+style={{width:`${(strength+1)*20}%`}}
+/>
+</div>
+
+<button
+disabled={loading}
+className="w-full py-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-500 text-white font-semibold"
+>
+{loading ? "Creating..." : "Create Account"}
+</button>
+
+<p className="text-center text-gray-300 text-sm">
+Already have account?
+<button
+type="button"
+onClick={()=>setActive(false)}
+className="ml-1 text-purple-300 hover:underline"
+>
+Login
+</button>
+</p>
+
+</form>
+
+</div>
+
+{/* TOGGLE PANEL */}
+
+<div
+className={`absolute top-0 left-1/2 w-1/2 h-full transition-all duration-700
+${active ? "-translate-x-full" : ""}`}
+>
+
+<div className="h-full w-full bg-gradient-to-br from-indigo-500 to-purple-700 text-white flex flex-col items-center justify-center text-center p-10">
+
+{!active ?(
+
+<>
+<h1 className="text-4xl font-bold mb-4">Hello Friend!</h1>
+<p className="mb-6 text-white/80">Register to start your journey</p>
+
+<button
+onClick={()=>setActive(true)}
+className="px-6 py-2 border border-white rounded-lg hover:bg-white/20"
+>
+Sign Up
+</button>
+</>
+
+):(
+
+<>
+<h1 className="text-4xl font-bold mb-4">Welcome Back!</h1>
+<p className="mb-6 text-white/80">Login to continue</p>
+
+<button
+onClick={()=>setActive(false)}
+className="px-6 py-2 border border-white rounded-lg hover:bg-white/20"
+>
+Sign In
+</button>
+</>
+
+)}
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+)
 }

@@ -4,6 +4,7 @@ import { ThemeProvider } from 'next-themes';
 import Navbar from '../components/navigation/Navbar';
 import { AuthProvider } from '../components/providers/AuthProvider';
 import ReactQueryProvider from './_providers/ReactQueryProvider';
+import { Toaster } from 'react-hot-toast'; // ✅ ADD THIS
 
 export const metadata = {
   title: 'JobCrawler',
@@ -18,12 +19,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="icon" href="/favicon.ico" type="image/x-icon" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
+
       <body className="font-sans antialiased bg-background text-foreground">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange storageKey="ji-theme">
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+          storageKey="ji-theme"
+        >
           <ReactQueryProvider>
             <AuthProvider>
               <Navbar />
+
               {children}
+
+              {/* ✅ ADD THIS ONLY */}
+              <Toaster position="top-right" />
             </AuthProvider>
           </ReactQueryProvider>
         </ThemeProvider>
