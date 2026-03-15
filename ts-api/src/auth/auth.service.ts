@@ -1,4 +1,3 @@
-// ts-api/src/auth/auth.service.ts
 import {
   Injectable,
   BadRequestException,
@@ -29,7 +28,8 @@ export class AuthService {
   ) {
     this.jwtSecret = this.config.getOrThrow<string>('jwt.secret');
     this.jwtExpiresIn = this.config.get<string>('jwt.expiresIn') || '7d';
-    this.frontendUrl = this.config.get<string>('frontendUrl') || 'http://localhost:3000';
+    this.frontendUrl =
+      this.config.get<string>('frontendUrl') || 'http://localhost:3000';
 
     const smtpUser = this.config.get<string>('smtp.user');
     const smtpPass = this.config.get<string>('smtp.pass');
@@ -39,10 +39,7 @@ export class AuthService {
         host: this.config.get<string>('smtp.host'),
         port: this.config.get<number>('smtp.port'),
         secure: false,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
+        auth: { user: smtpUser, pass: smtpPass },
       });
     }
   }
@@ -54,7 +51,6 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    // Check if email already exists
     const existing = await this.db.query(
       'SELECT id FROM users WHERE email = $1',
       [dto.email.toLowerCase()],
@@ -65,7 +61,6 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
-
     const result = await this.db.query(
       `INSERT INTO users (full_name, email, password_hash, created_at)
        VALUES ($1, $2, $3, NOW())
@@ -74,10 +69,8 @@ export class AuthService {
     );
 
     const user = result.rows[0];
-    const token = this.signToken(user.id, user.email);
-
     return {
-      token,
+      token: this.signToken(user.id, user.email),
       user: {
         id: user.id,
         full_name: user.full_name,
@@ -100,18 +93,16 @@ export class AuthService {
     const user = result.rows[0];
 
     if (!user.password_hash) {
-      throw new UnauthorizedException('No password set for this account. Please reset your password.');
+      throw new UnauthorizedException(
+        'No password set for this account. Please reset your password.',
+      );
     }
 
     const valid = await bcrypt.compare(dto.password, user.password_hash);
-    if (!valid) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    const token = this.signToken(user.id, user.email);
+    if (!valid) throw new UnauthorizedException('Invalid email or password');
 
     return {
-      token,
+      token: this.signToken(user.id, user.email),
       user: {
         id: user.id,
         full_name: user.full_name,
@@ -127,23 +118,22 @@ export class AuthService {
       [dto.email.toLowerCase()],
     );
 
-    // Always return success to prevent email enumeration
+    // Prevent email enumeration — always return the same response
     if (result.rows.length === 0) {
       return { message: 'If the email exists, a reset link has been sent.' };
     }
 
     const user = result.rows[0];
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const expiry = new Date(Date.now() + 60 * 60 * 1000);
 
     await this.db.query(
       'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3',
       [resetToken, expiry, user.id],
     );
 
-    const resetUrl = `${this.frontendUrl}/reset-password?token=${resetToken}`;
-
     if (this.transporter) {
+      const resetUrl = `${this.frontendUrl}/reset-password?token=${resetToken}`;
       await this.transporter.sendMail({
         from: `"Job Crawler" <${this.config.get<string>('smtp.user')}>`,
         to: user.email,
@@ -200,11 +190,6 @@ export class AuthService {
     return result.rows[0];
   }
 
-  verifyToken(token: string): any {
-    try {
-      return jwt.verify(token, this.jwtSecret);
-    } catch {
-      throw new UnauthorizedException('Invalid or expired token');
-    }
-  }
+  // ✅ REMOVED: verifyToken() — JWT verification is now self-contained
+  // in JwtAuthGuard via jwt.verify() directly. No service dependency needed.
 }

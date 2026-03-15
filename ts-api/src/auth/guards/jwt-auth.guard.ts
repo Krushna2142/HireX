@@ -1,27 +1,55 @@
-// src/auth/guards/jwt-auth.guard.ts
-import { ExecutionContext, Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AuthGuard } from '@nestjs/passport';
+import * as jwt from 'jsonwebtoken';
+import { ConfigService } from '@nestjs/config';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorators';
-import { AuthService } from '../auth.service';
 
 @Injectable()
-export class JwtAuthGuard extends AuthGuard('jwt') {
+export class JwtAuthGuard implements CanActivate {
+  private jwtSecret: string;
+
   constructor(
-    private reflector: Reflector,
-    private authService: AuthService,  // keep if your guard uses it
+    private readonly config: ConfigService,
+    private readonly reflector: Reflector,
   ) {
-    super();
+    this.jwtSecret =
+      this.config.get<string>('jwt.secret') || 'supersecretkey';
   }
 
-  canActivate(context: ExecutionContext) {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Honor @Public() decorator — bypass auth for public routes
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
+    if (isPublic) return true;
 
-    if (isPublic) return true; // ✅ bypass auth for @Public() routes
+    const request = context.switchToHttp().getRequest();
+    const authHeader = request.headers['authorization'];
 
-    return super.canActivate(context);
+    if (!authHeader) {
+      throw new UnauthorizedException('Missing Authorization header');
+    }
+
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) {
+      throw new UnauthorizedException('Missing token');
+    }
+
+    try {
+      const payload = jwt.verify(token, this.jwtSecret) as {
+        sub: string;
+        email: string;
+      };
+      request.user = { id: payload.sub, email: payload.email };
+      return true;
+    } catch {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
   }
 }

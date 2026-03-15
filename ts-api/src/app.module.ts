@@ -7,18 +7,18 @@ import { AuthModule } from './auth/auth.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
 import { InterviewsModule } from './interviews/interviews.module';
-import { PrismaModule } from './../prisma/prisma.module';
-import { JwtAuthGuard } from './auth/guards/jwt-auth.guard'; // ✅ adjust path if different
+import { PrismaModule } from '../prisma/prisma.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true,
+      isGlobal: true,        // ✅ ConfigService available everywhere including APP_GUARD
       load: [configuration],
     }),
-    PrismaModule,    // ✅ before everything — global @prisma dependency
+    PrismaModule,
     DatabaseModule,
-    AuthModule,      // ✅ must be before feature modules so guard can resolve AuthService
+    AuthModule,
     ResumesModule,
     JobsModule,
     InterviewsModule,
@@ -26,7 +26,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard'; // ✅ adjust path 
   providers: [
     {
       provide: APP_GUARD,
-      useClass: JwtAuthGuard, // ✅ enforces auth globally — no per-module wiring needed
+      useClass: JwtAuthGuard, // ✅ Only needs ConfigService + Reflector — both globally available
     },
   ],
 })
