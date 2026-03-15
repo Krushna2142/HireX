@@ -20,6 +20,8 @@ RUN npm run build
 # ✅ Verify against the ACTUAL output path
 RUN test -f dist/src/main.js || (echo "ERROR: dist/src/main.js not found" && exit 1)
 
+
+
 # ─────────────────────────────────────────────────────
 # Stage 2: PRODUCTION
 # ─────────────────────────────────────────────────────
@@ -39,4 +41,5 @@ COPY --from=builder /app/prisma ./prisma
 EXPOSE 3000
 
 # ✅ Point to the actual path
+
 CMD ["node", "dist/src/main.js"]
