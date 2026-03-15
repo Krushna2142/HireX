@@ -1,7 +1,20 @@
-import { createClient } from '@supabase/supabase-js'
-//ts-api/lib/supabase.ts
-// is this file needed or can we just put this in the service file? I guess it makes sense to have a single place for the client config
-export const supabase = createClient(
- process.env.SUPABASE_URL!,
- process.env.SUPABASE_SERVICE_KEY!
-)
+// src/lib/supabase.ts
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+let client: SupabaseClient | null = null;
+
+export function getSupabaseClient(): SupabaseClient {
+  if (!client) {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_ANON_KEY;
+
+    if (!url || !key) {
+      throw new Error(
+        'Missing Supabase config. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.'
+      );
+    }
+
+    client = createClient(url, key);
+  }
+  return client;
+}

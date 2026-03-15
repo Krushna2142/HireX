@@ -3,15 +3,15 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
 }
 
 model Resume {
-  id          String   @id @default(uuid())
-  userId      String
-  fileName    String
-  fileUrl     String
-  parsedText  String?
-  status      String
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  userId     String
+  fileName   String
+  fileUrl    String
+  parsedText String?
+  status     String
+  createdAt  DateTime @default(now())
 }

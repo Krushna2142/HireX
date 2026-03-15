@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { supabase } from '../lib/supabase';
+import { getSupabaseClient } from '../lib/supabase';
 
 @Injectable()
 export class ResumesService {
@@ -10,7 +10,7 @@ export class ResumesService {
     const fileName = `${Date.now()}-${file.originalname}`;
 
     // Upload to Supabase Storage
-    const { error } = await supabase.storage
+    const { error } = await getSupabaseClient().storage
       .from('resume-files')
       .upload(fileName, file.buffer);
 
