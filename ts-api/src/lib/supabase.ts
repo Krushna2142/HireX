@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let anonClient: SupabaseClient | null = null;

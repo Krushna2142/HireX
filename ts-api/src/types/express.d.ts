@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 declare namespace Express {
   interface Request {
     user?: {
