@@ -1,19 +1,22 @@
 FROM node:20-alpine
-#ts-api/Dockerfile
+
 WORKDIR /app
 
-# Install dependencies
+# Copy package files and install dependencies first
 COPY package*.json ./
 RUN npm install
 
-# Copy source
+# Copy the rest of the source code (including prisma folder and schema)
 COPY . .
 
-# Build
+# PRISMA: Generate the client (this step is critical!)
+RUN npx prisma generate
+
+# Optional: If you want migration in container, add:
+# RUN npx prisma migrate deploy
+
+# Build the application
 RUN npm run build
 
-# Expose port
-EXPOSE 3001
-
-# Start
-CMD ["npm", "run", "start:prod"]
+EXPOSE 3000
+CMD ["node", "dist/main.js"]
