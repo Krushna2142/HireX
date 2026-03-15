@@ -17,10 +17,15 @@ export class ResumesController {
   constructor(private readonly service: ResumesService) {}
 
   @Post('upload-raw')
-  @UseInterceptors(FileInterceptor('file'))
-  async uploadRaw(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    const userId = req.user.id;
-    return this.service.saveRawResume(file, userId);
-  }
+@UseInterceptors(FileInterceptor('file'))
+async uploadRaw(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
+
+ console.log("Uploading file:", file?.originalname)
+
+ if (!file) throw new BadRequestException('No file uploaded')
+
+ const userId = req.user.id
+
+ return this.service.saveRawResume(file, userId)
+}
 }
