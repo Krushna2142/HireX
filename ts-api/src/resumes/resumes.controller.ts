@@ -9,6 +9,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ResumesService } from './resumes.service';
 
+// Explicit allowlist — no substring matching ambiguity
+const ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/msword', // .doc
+];
+
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
 @Controller('resumes')
 export class ResumesController {
   constructor(private readonly service: ResumesService) {}
@@ -23,13 +32,13 @@ export class ResumesController {
       throw new BadRequestException('No file uploaded');
     }
 
-    if (!file.mimetype.includes('pdf') && !file.mimetype.includes('word')) {
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       throw new BadRequestException(
-        'Only PDF and Word documents are accepted',
+        `Unsupported file type: ${file.mimetype}. Only PDF and Word documents are accepted.`,
       );
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > MAX_FILE_SIZE) {
       throw new BadRequestException('File size must not exceed 5MB');
     }
 
