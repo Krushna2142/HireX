@@ -27,7 +27,7 @@ export interface NormalisedJob {
   description: string;
   url: string | null;
   thumbnail: string | null;
-  source: 'SerpAPI';
+  source: 'SERPAPI';
 }
 
 @Injectable()
@@ -36,7 +36,7 @@ export class SerpAdapter {
   private readonly logger = new Logger(SerpAdapter.name);
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = this.config.get<string>('serpApiKey');
+    const apiKey = `${process.env.SERPAPI || this.config.get<string>('serpApiKey')}`;
     if (!apiKey) {
       // ✅ WARN instead of throwing — don't crash the whole app
       this.logger.warn(
@@ -84,7 +84,7 @@ export class SerpAdapter {
       description: job.description,
       url: job.related_links?.[0]?.link ?? null,
       thumbnail: job.thumbnail ?? null,
-      source: 'SerpAPI' as const,
+      source: 'SERPAPI' as const,
     }));
   }
 }

@@ -7,7 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
 import { InterviewsModule } from './interviews/interviews.module';
-import { PrismaModule } from 'prisma/prisma.module';
+import { PrismaModule } from './../prisma/prisma.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard'; // ✅ adjust path if different
 
 @Module({
