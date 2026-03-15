@@ -1,10 +1,18 @@
-import ResumeUpload from '@/features/resume/components/ResumeUpload';
+'use client';
+
+// ❌ Wrong — component doesn't exist at this path
+// import ResumeUpload from '@/features/resume/components/ResumeUpload';
+
+// ✅ Option 1 — redirect to the existing resume page
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 export default function AnalyzePage() {
-  return (
-    <main className="max-w-4xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Resume Analysis</h1>
-      <ResumeUpload />
-    </main>
-  );
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace('/resumes');
+  }, [router]);
+
+  return null;
 }
