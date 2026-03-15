@@ -1,42 +1,36 @@
-import { Injectable } from '@nestjs/common'
-import { PrismaService } from '../prisma/prisma.service'
-import { supabase } from '../lib/supabase'
-import * as pdf from 'pdf-parse'
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { supabase } from '../lib/supabase';
 
 @Injectable()
 export class ResumesService {
+  constructor(private prisma: PrismaService) {}
 
- constructor(private prisma: PrismaService) {}
+  async saveRawResume(file: Express.Multer.File, userId: string) {
+    const fileName = `${Date.now()}-${file.originalname}`;
 
- async saveRawResume(file: Express.Multer.File, userId: string) {
+    // Upload to Supabase Storage
+    const { error } = await supabase.storage
+      .from('resume-files')
+      .upload(fileName, file.buffer);
 
-  const fileName = `${Date.now()}-${file.originalname}`
+    if (error) {
+      throw new Error(error.message);
+    }
 
-  // Upload to Supabase Storage
-  const { error } = await supabase.storage
-   .from('resume-files')
-   .upload(fileName, file.buffer)
+    const fileUrl =
+      `${process.env.SUPABASE_URL}/storage/v1/object/public/resume-files/${fileName}`;
 
-  if (error) {
-   throw new Error(error.message)
+    // Save resume metadata in DB (no parsedText!)
+    const resume = await this.prisma.resume.create({
+      data: {
+        userId,
+        fileName,
+        fileUrl,
+        status: 'uploaded',
+      },
+    });
+
+    return resume;
   }
-
-  const fileUrl =
-   `${process.env.SUPABASE_URL}/storage/v1/object/public/resume-files/${fileName}`
-
-  // Parse Resume
-  const parsed = await pdf(file.buffer)
-
-  const resume = await this.prisma.resume.create({
-   data:{
-    userId,
-    fileName,
-    fileUrl,
-    parsedText: parsed.text,
-    status:'uploaded'
-   }
-  })
-
-  return resume
- }
 }
