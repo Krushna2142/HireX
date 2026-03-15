@@ -3,15 +3,19 @@ datasource db {
 }
 
 generator client {
-  provider        = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 model Resume {
-  id         String   @id @default(uuid())
-  userId     String
-  fileName   String
-  fileUrl    String
-  parsedText String?
-  status     String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  fileName  String?  @map("file_name")
+  rawFile   String?  @map("raw_file")
+  content   String?
+  status    String?
+  analysis  Json?
+  fileBytes Bytes?   @map("file_bytes")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("resumes")  // ✅ maps to lowercase "resumes" table, not "Resume"
 }
