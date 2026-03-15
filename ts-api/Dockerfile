@@ -1,22 +1,20 @@
 FROM node:20-alpine
-
 WORKDIR /app
 
-# Copy package files and install dependencies first
+# Install dependencies
 COPY package*.json ./
 RUN npm install
 
-# Copy the rest of the source code (including prisma folder and schema)
+# Copy all source files, including prisma/ folder
 COPY . .
 
-# PRISMA: Generate the client (this step is critical!)
+# Generate Prisma Client after source is copied!
 RUN npx prisma generate
 
-# Optional: If you want migration in container, add:
-# RUN npx prisma migrate deploy
-
-# Build the application
+# Build NestJS app
 RUN npm run build
 
-EXPOSE 3000
-CMD ["node", "dist/main.js"]
+EXPOSE 3001
+
+# Start production server
+CMD ["npm", "run", "start:prod"]
