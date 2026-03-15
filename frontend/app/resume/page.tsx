@@ -7,8 +7,7 @@ import React, { useState, useCallback } from 'react';
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function ResumeUploadPage() {
-
-  const { user } = useAuth();
+  const { user } = useAuth(); // ← typo fixed
 
   const [status, setStatus] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -16,7 +15,6 @@ export default function ResumeUploadPage() {
 
   const handleFile = useCallback(
     async (file: File | null) => {
-
       setErrorMsg('');
       setStatus('');
 
@@ -43,7 +41,6 @@ export default function ResumeUploadPage() {
       }
 
       try {
-
         setUploading(true);
         setStatus('Uploading resume...');
 
@@ -68,25 +65,18 @@ export default function ResumeUploadPage() {
         }
 
         setStatus('✅ Resume uploaded successfully');
-
       } catch (err: any) {
-
         console.error(err);
         setErrorMsg(err.message || 'Upload failed');
-
       } finally {
-
         setUploading(false);
-
       }
-
     },
     [user]
   );
 
   return (
     <div className="p-6 space-y-4">
-
       <h1 className="text-xl font-semibold">Upload Resume</h1>
 
       <input
@@ -98,11 +88,8 @@ export default function ResumeUploadPage() {
       />
 
       {uploading && <div className="text-blue-600">Uploading...</div>}
-
       {status && <div className="text-green-600">{status}</div>}
-
       {errorMsg && <div className="text-red-600">{errorMsg}</div>}
-
     </div>
   );
 }
