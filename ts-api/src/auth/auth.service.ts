@@ -1,7 +1,7 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable prettier/prettier */
 import {
   Injectable,
   BadRequestException,
@@ -22,9 +22,9 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 @Injectable()
 export class AuthService {
   private transporter: nodemailer.Transporter;
-  private jwtSecret: string;
-  private jwtExpiresIn: string;
-  private frontendUrl: string;
+  private readonly jwtSecret: string;
+  private readonly jwtExpiresIn: string;
+  private readonly frontendUrl: string;
 
   constructor(
     private readonly db: DatabaseService,
@@ -48,8 +48,8 @@ export class AuthService {
     }
   }
 
-  private signToken(userId: string, email: string): string {
-    return jwt.sign({ sub: userId, email }, this.jwtSecret, {
+  private signToken(userId: string, email: string, role: string): string {
+    return jwt.sign({ sub: userId, email, role }, this.jwtSecret, {
       expiresIn: this.jwtExpiresIn,
     } as jwt.SignOptions);
   }
@@ -65,20 +65,23 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
+
     const result = await this.db.query(
-      `INSERT INTO users (full_name, email, password_hash, created_at)
-       VALUES ($1, $2, $3, NOW())
-       RETURNING id, full_name, email, created_at`,
-      [dto.full_name, dto.email.toLowerCase(), passwordHash],
+      `INSERT INTO users (full_name, email, password_hash, role, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING id, full_name, email, role, created_at`,
+      [dto.full_name, dto.email.toLowerCase(), passwordHash, dto.role],
     );
 
     const user = result.rows[0];
+
     return {
-      token: this.signToken(user.id, user.email),
+      token: this.signToken(user.id, user.email, user.role),
       user: {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
+        role: user.role,
         created_at: user.created_at,
       },
     };
@@ -86,7 +89,8 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const result = await this.db.query(
-      'SELECT id, full_name, email, password_hash, created_at FROM users WHERE email = $1',
+      `SELECT id, full_name, email, password_hash, role, created_at
+       FROM users WHERE email = $1`,
       [dto.email.toLowerCase()],
     );
 
@@ -103,14 +107,17 @@ export class AuthService {
     }
 
     const valid = await bcrypt.compare(dto.password, user.password_hash);
-    if (!valid) throw new UnauthorizedException('Invalid email or password');
+    if (!valid) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
 
     return {
-      token: this.signToken(user.id, user.email),
+      token: this.signToken(user.id, user.email, user.role),
       user: {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
+        role: user.role,
         created_at: user.created_at,
       },
     };
@@ -122,7 +129,6 @@ export class AuthService {
       [dto.email.toLowerCase()],
     );
 
-    // Prevent email enumeration — always return the same response
     if (result.rows.length === 0) {
       return { message: 'If the email exists, a reset link has been sent.' };
     }
@@ -143,14 +149,14 @@ export class AuthService {
         to: user.email,
         subject: 'Password Reset — Job Crawler',
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
-            <h2 style="color: #1e293b;">Reset Your Password</h2>
-            <p>You requested a password reset. Click the button below to set a new password:</p>
-            <a href="${resetUrl}" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; border-radius: 8px; text-decoration: none; font-weight: 600;">
+          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;">
+            <h2 style="color:#1e293b;">Reset Your Password</h2>
+            <p>Click the button below to set a new password:</p>
+            <a href="${resetUrl}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-weight:600;">
               Reset Password
             </a>
-            <p style="margin-top: 16px; color: #64748b; font-size: 14px;">
-              This link expires in 1 hour. If you didn't request this, ignore this email.
+            <p style="margin-top:16px;color:#64748b;font-size:14px;">
+              This link expires in 1 hour.
             </p>
           </div>
         `,
@@ -162,7 +168,7 @@ export class AuthService {
 
   async resetPassword(dto: ResetPasswordDto) {
     const result = await this.db.query(
-      'SELECT id, email FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
+      'SELECT id FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
       [dto.token],
     );
 
@@ -183,7 +189,7 @@ export class AuthService {
 
   async getMe(userId: string) {
     const result = await this.db.query(
-      'SELECT id, full_name, email, created_at FROM users WHERE id = $1',
+      'SELECT id, full_name, email, role, created_at FROM users WHERE id = $1',
       [userId],
     );
 
@@ -193,7 +199,4 @@ export class AuthService {
 
     return result.rows[0];
   }
-
-  // ✅ REMOVED: verifyToken() — JWT verification is now self-contained
-  // in JwtAuthGuard via jwt.verify() directly. No service dependency needed.
 }

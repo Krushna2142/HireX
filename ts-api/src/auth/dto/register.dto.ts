@@ -1,14 +1,18 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
-// ts-api/src/auth/dto/register.dto.ts
+/* eslint-disable prettier/prettier */
+// src/auth/dto/register.dto.ts
+import { IsEmail, IsIn, IsNotEmpty, IsString, MinLength } from 'class-validator';
+
 export class RegisterDto {
   @IsString()
-  @MinLength(2)
+  @IsNotEmpty()
   full_name: string;
 
   @IsEmail()
   email: string;
 
-  @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password: string;
+
+  @IsIn(['candidate', 'recruiter'])  // ✅ validated at controller level
+  role: 'candidate' | 'recruiter';
 }

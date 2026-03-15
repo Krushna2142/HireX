@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
@@ -11,33 +10,30 @@ import { DatabaseModule } from './database/datbase.module';
 import { AuthModule } from './auth/auth.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
-import { InterviewsModule } from './interviews/interviews.module';
-import { PrismaModule } from '../prisma/prisma.module';
-import { OllamaModule } from './ollama/ollama.module';
-import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AlertsModule } from './alerts/alerts.module';
+import { CandidatesModule } from './candidates/candidates.module';
+import { RecruitersModule } from './recruiters/recruiters.module';
+import { InterviewsModule } from './interviews/interviews.module';
+import { RecommendationsModule } from './recommendations/recommendatyions.module';
+import { OllamaModule } from './ollama/ollama.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      load: [configuration],
-    }),
+    ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
 
-    // ── BullMQ reads redis config parsed from REDIS_URL or individual vars
     BullModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
+      imports:  [ConfigModule],
+      inject:   [ConfigService],
       useFactory: (config: ConfigService) => {
         const redis = config.get('redis');
         return {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           connection: {
             host:     redis.host,
             port:     redis.port,
             password: redis.password,
-            ...(redis.tls && {
-              tls: { rejectUnauthorized: false },
-            }),
+            ...(redis.tls && { tls: { rejectUnauthorized: false } }),
           },
         };
       },
@@ -46,16 +42,17 @@ import { AlertsModule } from './alerts/alerts.module';
     PrismaModule,
     DatabaseModule,
     OllamaModule,
+    AlertsModule,
     AuthModule,
     ResumesModule,
     JobsModule,
+    CandidatesModule,
+    RecruitersModule,
     InterviewsModule,
+    RecommendationsModule,
   ],
   providers: [
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule {}

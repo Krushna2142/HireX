@@ -5,3 +5,16 @@
 venv/
 __pycache__/
 *.pyc
+# Backend
+ts-api/.env
+ts-api/.env.*
+ts-api/prisma.config.ts
+
+# Frontend
+frontend/.env.local
+frontend/.env.production
+frontend/.env.*.local
+
+# Both
+*.env
+.env

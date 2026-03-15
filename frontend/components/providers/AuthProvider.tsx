@@ -1,36 +1,44 @@
 'use client';
-// frontend/components/providers/AuthProvider.tsx
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import {
   User,
+  UserRole,
   AuthResponse,
   getMe,
   logout as authLogout,
   register as authRegister,
   login as authLogin,
   forgotPassword as authForgotPassword,
+  roleRedirectPath,
 } from '@/lib/auth';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  isAuthenticated: boolean;
   refresh: () => Promise<void>;
   logout: () => void;
-  register: (fullName: string, email: string, password: string) => Promise<AuthResponse>;
+  register: (
+    fullName: string,
+    email: string,
+    password: string,
+    role: UserRole,
+  ) => Promise<AuthResponse>;
   login: (email: string, password: string) => Promise<AuthResponse>;
   forgotPassword: (email: string) => Promise<string>;
-  isAuthenticated: boolean;
+  redirectPath: string | null;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
+  isAuthenticated: false,
   refresh: async () => {},
   logout: () => {},
   register: async () => { throw new Error('Not initialized'); },
   login: async () => { throw new Error('Not initialized'); },
   forgotPassword: async () => { throw new Error('Not initialized'); },
-  isAuthenticated: false,
+  redirectPath: null,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -48,22 +56,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  useEffect(() => {
-    refresh();
-  }, []);
+  useEffect(() => { refresh(); }, []);
 
   const logout = () => {
     setUser(null);
     authLogout();
   };
 
-  const register = async (fullName: string, email: string, password: string) => {
-    const data = await authRegister(fullName, email, password);
+  const register = async (
+    fullName: string,
+    email: string,
+    password: string,
+    role: UserRole,
+  ): Promise<AuthResponse> => {
+    const data = await authRegister(fullName, email, password, role);
     setUser(data.user);
     return data;
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<AuthResponse> => {
     const data = await authLogin(email, password);
     setUser(data.user);
     return data;
@@ -75,18 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        refresh,
-        logout,
-        register,
-        login,
-        forgotPassword,
-        isAuthenticated: !!user,
-      }}
-    >
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      isAuthenticated: !!user,
+      refresh,
+      logout,
+      register,
+      login,
+      forgotPassword,
+      redirectPath: user ? roleRedirectPath(user.role) : null,
+    }}>
       {children}
     </AuthContext.Provider>
   );

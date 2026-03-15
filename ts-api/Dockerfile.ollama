@@ -1,28 +1,10 @@
 FROM ollama/ollama:latest
 
-# Install curl for healthcheck + wait logic
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Pre-pull model during build using a proper wait loop
-# The serve process must be fully ready before pull can succeed
-RUN /bin/bash -c '\
-  ollama serve & \
-  SERVER_PID=$! && \
-  echo "Waiting for Ollama server to start..." && \
-  for i in $(seq 1 30); do \
-    if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then \
-      echo "Ollama server ready after ${i}s"; \
-      break; \
-    fi; \
-    echo "Attempt $i — server not ready yet, retrying in 1s..."; \
-    sleep 1; \
-  done && \
-  echo "Pulling llama3.2:3b model..." && \
-  ollama pull llama3.2:3b && \
-  echo "Model pull complete" && \
-  kill $SERVER_PID && \
-  wait $SERVER_PID 2>/dev/null || true \
-'
+# Copy entrypoint script
+COPY ollama-entrypoint.sh /ollama-entrypoint.sh
+RUN chmod +x /ollama-entrypoint.sh
 
 EXPOSE 11434
 
@@ -33,4 +15,8 @@ HEALTHCHECK \
   --retries=5 \
   CMD curl -f http://localhost:11434/api/tags || exit 1
 
-CMD ["ollama", "serve"]
+# Override the base image entrypoint entirely
+# The base image sets ENTRYPOINT ["ollama"] which intercepts CMD
+# We bypass it completely with our own script
+ENTRYPOINT []
+CMD ["/bin/bash", "/ollama-entrypoint.sh"]

@@ -1,12 +1,18 @@
+/* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { JobsService } from './jobs.service';
 import { JobsController } from './jobs.controller';
-import { SerpAdapter } from './serp.adapter';
-import { AuthModule } from '../auth/auth.module';
-// ts-api/src/jobs/jobs.module.ts
+
 @Module({
-  imports: [AuthModule],
+  imports: [
+    HttpModule.register({
+      timeout: 15_000,
+      maxRedirects: 3,
+    }),
+  ],
   controllers: [JobsController],
-  providers: [JobsService, SerpAdapter],
+  providers: [JobsService],
+  exports: [JobsService],
 })
 export class JobsModule {}
