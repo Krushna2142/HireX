@@ -1,83 +1,109 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import toast from 'react-hot-toast';
 import { FcGoogle } from 'react-icons/fc';
 import { FaGithub } from 'react-icons/fa';
 import zxcvbn from 'zxcvbn';
+import { UserRole, roleRedirectPath } from '@/lib/auth';
 
-type Role = 'candidate' | 'recruiter';
-type Panel = 'login' | 'register';
+// ─────────────────────────────────────────────────────────────────────────────
+// Role configuration
+// ─────────────────────────────────────────────────────────────────────────────
 
-const ROLE_CONFIG: Record<Role, {
-  label: string;
-  icon: string;
+const ROLES: Record<UserRole, {
+  label:       string;
+  icon:        string;
   description: string;
-  color: string;
-  bg: string;
-  border: string;
+  accent:      string;
+  bg:          string;
+  border:      string;
+  gradient:    string;
 }> = {
   candidate: {
-    label: 'Job Seeker',
-    icon: '🎯',
-    description: 'Find jobs, upload resume, get AI-matched',
-    color: '#38BDF8',
-    bg: 'rgba(56,189,248,0.08)',
-    border: 'rgba(56,189,248,0.35)',
+    label:       'Job Seeker',
+    icon:        '🎯',
+    description: 'Upload resume, get AI-matched to jobs, track applications',
+    accent:      '#38BDF8',
+    bg:          'rgba(56,189,248,0.08)',
+    border:      'rgba(56,189,248,0.35)',
+    gradient:    'linear-gradient(135deg, #0369A1, #0EA5E9)',
   },
   recruiter: {
-    label: 'Recruiter',
-    icon: '🏢',
-    description: 'Post roles, search candidates, manage pipeline',
-    color: '#F472B6',
-    bg: 'rgba(244,114,182,0.08)',
-    border: 'rgba(244,114,182,0.35)',
+    label:       'Recruiter',
+    icon:        '🏢',
+    description: 'Post roles, search candidates, manage hiring pipeline',
+    accent:      '#F472B6',
+    bg:          'rgba(244,114,182,0.08)',
+    border:      'rgba(244,114,182,0.35)',
+    gradient:    'linear-gradient(135deg, #9D174D, #EC4899)',
   },
 };
 
-function roleRedirectPath(role: Role) {
-  return role === 'recruiter' ? '/recruiter/dashboard' : '/dashboard';
-}
+const STRENGTH_META = [
+  { color: '#EF4444', label: 'Very weak',   bg: 'rgba(239,68,68,0.2)'   },
+  { color: '#F97316', label: 'Weak',         bg: 'rgba(249,115,22,0.2)'  },
+  { color: '#EAB308', label: 'Fair',         bg: 'rgba(234,179,8,0.2)'   },
+  { color: '#22C55E', label: 'Strong',       bg: 'rgba(34,197,94,0.2)'   },
+  { color: '#16A34A', label: 'Very strong',  bg: 'rgba(22,163,74,0.2)'   },
+];
 
-export default function CredentialsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const router = useRouter();
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function CredentialsModal({
+  open,
+  onClose,
+}: {
+  open:    boolean;
+  onClose: () => void;
+}) {
+  const router               = useRouter();
   const { login, register, user } = useAuth();
+  const overlayRef           = useRef<HTMLDivElement>(null);
 
-  const [panel, setPanel] = useState<Panel>('login');
-  const [role, setRole] = useState<Role>('candidate');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [panel,    setPanel]    = useState<'login' | 'register'>('login');
+  const [role,     setRole]     = useState<UserRole>('candidate');
+  const [name,     setName]     = useState('');
+  const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading,  setLoading]  = useState(false);
 
-  const strength = zxcvbn(password).score;
+  const strength     = zxcvbn(password).score;
+  const strengthMeta = STRENGTH_META[strength];
+  const activeRole   = ROLES[role];
 
+  // Redirect if already authenticated
   useEffect(() => {
     if (user) {
       onClose();
       router.push(roleRedirectPath(user.role));
     }
-  }, [user]);
+  }, [user, onClose, router]);
+
+  // Close on overlay click
+  function handleOverlayClick(e: React.MouseEvent) {
+    if (e.target === overlayRef.current) onClose();
+  }
+
+  // Reset form state when switching panels
+  function switchPanel(target: 'login' | 'register') {
+    setPassword('');
+    setPanel(target);
+  }
 
   if (!open) return null;
 
-  function strengthColor() {
-    const map = ['bg-red-500', 'bg-orange-500', 'bg-yellow-400', 'bg-green-400', 'bg-green-600'];
-    return map[strength] ?? 'bg-gray-600';
-  }
-
-  function strengthLabel() {
-    const map = ['Very weak', 'Weak', 'Fair', 'Strong', 'Very strong'];
-    return map[strength] ?? '';
-  }
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+    setLoading(true);
     try {
-      setLoading(true);
       const { user: u } = await login(email, password);
       toast.success(`Welcome back, ${u.full_name.split(' ')[0]} 🚀`);
       router.push(roleRedirectPath(u.role));
@@ -91,11 +117,14 @@ export default function CredentialsModal({ open, onClose }: { open: boolean; onC
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
-    if (strength < 2) return toast.error('Password is too weak');
+    if (strength < 2) {
+      toast.error('Password is too weak — aim for "Fair" or better');
+      return;
+    }
+    setLoading(true);
     try {
-      setLoading(true);
       await register(name, email, password, role);
-      toast.success('Account created 🎉');
+      toast.success(`${ROLES[role].label} account created 🎉`);
       router.push(roleRedirectPath(role));
       onClose();
     } catch (err: any) {
@@ -105,194 +134,525 @@ export default function CredentialsModal({ open, onClose }: { open: boolean; onC
     }
   }
 
-  const inputClass = [
-    'w-full px-4 py-3 rounded-xl text-white placeholder-white/40',
-    'bg-white/10 border border-white/15',
-    'focus:outline-none focus:ring-2 focus:ring-purple-400/60',
-    'text-sm transition-all',
-  ].join(' ');
+  // ── Shared input style ──────────────────────────────────────────────────────
+
+  const inputStyle: React.CSSProperties = {
+    width:        '100%',
+    padding:      '11px 14px',
+    background:   'rgba(255,255,255,0.07)',
+    border:       '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '10px',
+    color:        '#F1F5F9',
+    fontSize:     '13px',
+    outline:      'none',
+    transition:   'border-color 0.15s, box-shadow 0.15s',
+    boxSizing:    'border-box',
+  };
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
+    <>
+      <style>{`
+        .cred-input:focus {
+          border-color: rgba(139,92,246,0.6) !important;
+          box-shadow: 0 0 0 3px rgba(139,92,246,0.12) !important;
+        }
+        .cred-input::placeholder { color: rgba(255,255,255,0.25); }
+        .cred-overlay {
+          animation: fadeIn 0.2s ease;
+        }
+        .cred-modal {
+          animation: scaleIn 0.25s cubic-bezier(0.34,1.2,0.64,1);
+        }
+        @keyframes fadeIn  { from { opacity:0; } to { opacity:1; } }
+        @keyframes scaleIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+        .cred-btn-google:hover { background: rgba(255,255,255,0.95) !important; }
+        .cred-btn-github:hover { background: rgba(255,255,255,0.1) !important; }
+        .cred-link { color: #A78BFA; cursor: pointer; text-decoration: none; }
+        .cred-link:hover { text-decoration: underline; }
+      `}</style>
+
+      {/* ── Backdrop ─────────────────────────────────────────────────────── */}
       <div
-        className="absolute inset-0 bg-black/75 backdrop-blur-md"
-        onClick={onClose}
-      />
+        ref={overlayRef}
+        className="cred-overlay"
+        onClick={handleOverlayClick}
+        style={{
+          position:       'fixed',
+          inset:           0,
+          zIndex:          100,
+          background:     'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(8px)',
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+          padding:        '1rem',
+        }}
+      >
+        {/* ── Modal shell ────────────────────────────────────────────────── */}
+        <div
+          className="cred-modal"
+          style={{
+            width:        '100%',
+            maxWidth:     '880px',
+            borderRadius: '24px',
+            overflow:     'hidden',
+            boxShadow:    '0 32px 80px rgba(0,0,0,0.6)',
+            border:       '1px solid rgba(255,255,255,0.08)',
+            // Flex row — left form panel + right decorative panel
+            display:      'flex',
+            minHeight:    '560px',
+            background:   '#0B0F1A',
+          }}
+        >
+          {/* ── LEFT: Form panel ─────────────────────────────────────────── */}
+          <div style={{
+            flex:           1,
+            minWidth:       0,
+            padding:        '2.5rem',
+            display:        'flex',
+            flexDirection:  'column',
+            justifyContent: 'center',
+            overflowY:      'auto',
+          }}>
 
-      {/* Modal */}
-      <div className="relative w-full max-w-[900px] min-h-[560px] rounded-3xl overflow-hidden shadow-2xl">
-        {/* Glass base */}
-        <div className="absolute inset-0 bg-[#0B0F1A]/90 backdrop-blur-2xl border border-white/10 rounded-3xl" />
-
-        {/* Subtle top glow */}
-        <div className="absolute top-0 left-1/4 right-1/4 h-px bg-gradient-to-r from-transparent via-purple-500/50 to-transparent" />
-
-        {/* Content wrapper */}
-        <div className="relative flex h-full min-h-[560px]">
-
-          {/* ── LEFT PANEL ── */}
-          <div className={`w-1/2 flex items-center justify-center p-10 transition-all duration-500 ${panel === 'register' ? 'opacity-0 pointer-events-none -translate-x-4' : ''}`}>
+            {/* ── LOGIN FORM ─────────────────────────────────────────────── */}
             {panel === 'login' && (
-              <form onSubmit={handleLogin} className="w-full max-w-sm">
-                <h2 className="text-2xl font-bold text-white mb-1">Welcome back</h2>
-                <p className="text-sm text-white/40 mb-7">Sign in to your account</p>
+              <form onSubmit={handleLogin} style={{ maxWidth: '360px', margin: '0 auto', width: '100%' }}>
 
-                <div className="space-y-3">
-                  <input type="email" placeholder="Email address" value={email}
-                    onChange={e => setEmail(e.target.value)} className={inputClass} required />
-                  <input type="password" placeholder="Password" value={password}
-                    onChange={e => setPassword(e.target.value)} className={inputClass} required />
+                {/* Header */}
+                <div style={{ marginBottom: '1.75rem' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#F1F5F9', margin: '0 0 6px' }}>
+                    Welcome back
+                  </h2>
+                  <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>
+                    Sign in to your account
+                  </p>
                 </div>
 
-                <button type="submit" disabled={loading}
-                  className="mt-5 w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-all">
+                {/* Fields */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                  <input
+                    className="cred-input"
+                    type="email"
+                    placeholder="Email address"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    style={inputStyle}
+                    required
+                  />
+                  <input
+                    className="cred-input"
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    style={inputStyle}
+                    required
+                  />
+                </div>
+
+                {/* Submit */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    width:        '100%',
+                    padding:      '12px',
+                    background:   'linear-gradient(135deg, #6D28D9, #7C3AED)',
+                    border:       'none',
+                    borderRadius: '10px',
+                    color:        '#fff',
+                    fontSize:     '14px',
+                    fontWeight:    600,
+                    cursor:       loading ? 'not-allowed' : 'pointer',
+                    opacity:      loading ? 0.6 : 1,
+                    transition:   'opacity 0.15s, transform 0.15s',
+                    marginBottom: '12px',
+                  }}
+                  onMouseEnter={e => { if (!loading) (e.currentTarget.style.transform = 'translateY(-1px)'); }}
+                  onMouseLeave={e => { (e.currentTarget.style.transform = 'translateY(0)'); }}
+                >
                   {loading ? 'Signing in…' : 'Sign In →'}
                 </button>
 
-                <div className="flex gap-2 mt-3">
-                  <button type="button"
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white text-gray-700 text-sm font-medium hover:bg-white/90">
-                    <FcGoogle size={18} /> Google
+                {/* OAuth */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                  <button
+                    type="button"
+                    className="cred-btn-google"
+                    style={{
+                      flex:           1,
+                      display:        'flex',
+                      alignItems:     'center',
+                      justifyContent: 'center',
+                      gap:            '8px',
+                      padding:        '10px',
+                      background:     '#fff',
+                      border:         'none',
+                      borderRadius:   '10px',
+                      color:          '#374151',
+                      fontSize:       '13px',
+                      fontWeight:      500,
+                      cursor:         'pointer',
+                      transition:     'background 0.15s',
+                    }}
+                  >
+                    <FcGoogle size={17} /> Google
                   </button>
-                  <button type="button"
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white text-sm hover:bg-white/15">
+                  <button
+                    type="button"
+                    className="cred-btn-github"
+                    style={{
+                      flex:           1,
+                      display:        'flex',
+                      alignItems:     'center',
+                      justifyContent: 'center',
+                      gap:            '8px',
+                      padding:        '10px',
+                      background:     'rgba(255,255,255,0.06)',
+                      border:         '1px solid rgba(255,255,255,0.12)',
+                      borderRadius:   '10px',
+                      color:          '#F1F5F9',
+                      fontSize:       '13px',
+                      fontWeight:      500,
+                      cursor:         'pointer',
+                      transition:     'background 0.15s',
+                    }}
+                  >
                     <FaGithub size={16} /> GitHub
                   </button>
                 </div>
 
-                <p className="text-center text-white/40 text-xs mt-5">
+                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', textAlign: 'center', margin: 0 }}>
                   No account?{' '}
-                  <button type="button" onClick={() => setPanel('register')}
-                    className="text-purple-400 hover:underline">Create one</button>
+                  <span className="cred-link" onClick={() => switchPanel('register')}>
+                    Create one
+                  </span>
                 </p>
               </form>
             )}
-          </div>
 
-          {/* ── RIGHT PANEL (register) ── */}
-          <div className={`absolute inset-0 flex items-center justify-center p-10 transition-all duration-500 ${panel === 'register' ? 'opacity-100' : 'opacity-0 pointer-events-none translate-x-4'}`}>
+            {/* ── REGISTER FORM ──────────────────────────────────────────── */}
             {panel === 'register' && (
-              <form onSubmit={handleSignup} className="w-full max-w-lg">
-                <h2 className="text-2xl font-bold text-white mb-1">Create account</h2>
-                <p className="text-sm text-white/40 mb-6">Choose your role to get started</p>
+              <form onSubmit={handleSignup} style={{ maxWidth: '420px', margin: '0 auto', width: '100%' }}>
 
-                {/* ── ROLE SELECTOR — the key addition ── */}
-                <div className="grid grid-cols-2 gap-3 mb-6">
-                  {(Object.entries(ROLE_CONFIG) as [Role, typeof ROLE_CONFIG[Role]][]).map(([key, cfg]) => {
-                    const isSelected = role === key;
+                {/* Header */}
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#F1F5F9', margin: '0 0 6px' }}>
+                    Create account
+                  </h2>
+                  <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.4)', margin: 0 }}>
+                    Choose your role to get started
+                  </p>
+                </div>
+
+                {/* ── Role selector ─────────────────────────────────────── */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '1.25rem' }}>
+                  {(Object.entries(ROLES) as [UserRole, typeof ROLES[UserRole]][]).map(([key, cfg]) => {
+                    const selected = role === key;
                     return (
                       <button
                         key={key}
                         type="button"
                         onClick={() => setRole(key)}
                         style={{
-                          background: isSelected ? cfg.bg : 'rgba(255,255,255,0.04)',
-                          borderColor: isSelected ? cfg.border : 'rgba(255,255,255,0.1)',
-                          boxShadow: isSelected ? `0 0 20px ${cfg.color}22` : 'none',
+                          padding:      '14px',
+                          borderRadius: '14px',
+                          border:       selected
+                            ? `2px solid ${cfg.border}`
+                            : '2px solid rgba(255,255,255,0.08)',
+                          background:   selected ? cfg.bg : 'rgba(255,255,255,0.03)',
+                          textAlign:    'left',
+                          cursor:       'pointer',
+                          transition:   'all 0.2s ease',
+                          position:     'relative',
+                          boxShadow:    selected ? `0 0 20px ${cfg.accent}18` : 'none',
                         }}
-                        className="relative p-4 rounded-2xl border-2 text-left transition-all duration-200 hover:border-white/20"
                       >
-                        {isSelected && (
-                          <div className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center"
-                            style={{ background: cfg.color }}>
+                        {/* Checkmark */}
+                        {selected && (
+                          <div style={{
+                            position:       'absolute',
+                            top:            '10px',
+                            right:          '10px',
+                            width:          '20px',
+                            height:         '20px',
+                            borderRadius:   '50%',
+                            background:      cfg.accent,
+                            display:        'flex',
+                            alignItems:     'center',
+                            justifyContent: 'center',
+                          }}>
                             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                               <path d="M2 5l2 2 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           </div>
                         )}
-                        <div className="text-2xl mb-2">{cfg.icon}</div>
-                        <div className="text-sm font-600 text-white mb-1" style={{ fontWeight: 600 }}>{cfg.label}</div>
-                        <div className="text-xs text-white/40 leading-relaxed">{cfg.description}</div>
+                        <div style={{ fontSize: '22px', marginBottom: '8px' }}>{cfg.icon}</div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#F1F5F9', marginBottom: '4px' }}>
+                          {cfg.label}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>
+                          {cfg.description}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
 
                 {/* Form fields */}
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <input placeholder="Full name" value={name}
-                    onChange={e => setName(e.target.value)} className={inputClass} required />
-                  <input type="email" placeholder="Email address" value={email}
-                    onChange={e => setEmail(e.target.value)} className={inputClass} required />
-                </div>
-                <div className="mb-2">
-                  <input type="password" placeholder="Create a password" value={password}
-                    onChange={e => setPassword(e.target.value)} className={`${inputClass} w-full`} required />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <input
+                    className="cred-input"
+                    placeholder="Full name"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    style={inputStyle}
+                    required
+                  />
+                  <input
+                    className="cred-input"
+                    type="email"
+                    placeholder="Email address"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    style={inputStyle}
+                    required
+                  />
                 </div>
 
-                {/* Password strength indicator */}
+                <input
+                  className="cred-input"
+                  type="password"
+                  placeholder="Create a password (min 8 characters)"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  style={{ ...inputStyle, marginBottom: '8px' }}
+                  required
+                />
+
+                {/* Password strength meter */}
                 {password.length > 0 && (
-                  <div className="mb-4">
-                    <div className="flex gap-1 mb-1">
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
                       {[0, 1, 2, 3, 4].map(i => (
-                        <div key={i} className={`h-1 flex-1 rounded-full transition-all duration-300 ${i <= strength ? strengthColor() : 'bg-white/10'}`} />
+                        <div
+                          key={i}
+                          style={{
+                            flex:         1,
+                            height:       '3px',
+                            borderRadius: '99px',
+                            background:   i <= strength
+                              ? strengthMeta.color
+                              : 'rgba(255,255,255,0.08)',
+                            transition:   'background 0.3s',
+                          }}
+                        />
                       ))}
                     </div>
-                    <p className="text-xs text-white/30">{strengthLabel()}</p>
+                    <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', margin: 0 }}>
+                      {strengthMeta.label}
+                    </p>
                   </div>
                 )}
 
                 {/* Role confirmation banner */}
-                <div className="mb-4 px-4 py-2.5 rounded-xl flex items-center gap-2"
-                  style={{ background: ROLE_CONFIG[role].bg, border: `1px solid ${ROLE_CONFIG[role].border}` }}>
-                  <span className="text-base">{ROLE_CONFIG[role].icon}</span>
-                  <span className="text-xs" style={{ color: ROLE_CONFIG[role].color }}>
-                    Registering as <strong>{ROLE_CONFIG[role].label}</strong> —{' '}
-                    {role === 'recruiter' ? 'access recruiter dashboard & candidate search' : 'access job matches & resume analysis'}
-                  </span>
+                <div
+                  style={{
+                    display:      'flex',
+                    alignItems:   'center',
+                    gap:          '10px',
+                    padding:      '10px 12px',
+                    borderRadius: '10px',
+                    background:    activeRole.bg,
+                    border:       `1px solid ${activeRole.border}`,
+                    marginBottom: '14px',
+                  }}
+                >
+                  <span style={{ fontSize: '16px', flexShrink: 0 }}>{activeRole.icon}</span>
+                  <p style={{ fontSize: '11px', color: activeRole.accent, margin: 0, lineHeight: 1.4 }}>
+                    Registering as <strong>{activeRole.label}</strong> —{' '}
+                    {role === 'recruiter'
+                      ? 'access recruiter dashboard & candidate search'
+                      : 'access job matches, resume analysis & application tracking'}
+                  </p>
                 </div>
 
-                <button type="submit" disabled={loading}
-                  className="w-full py-3 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-50"
-                  style={{ background: `linear-gradient(135deg, ${ROLE_CONFIG[role].color}cc, ${ROLE_CONFIG[role].color})` }}>
-                  {loading ? 'Creating account…' : `Create ${ROLE_CONFIG[role].label} Account →`}
+                {/* Submit */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    width:        '100%',
+                    padding:      '12px',
+                    background:    activeRole.gradient,
+                    border:       'none',
+                    borderRadius: '10px',
+                    color:        '#fff',
+                    fontSize:     '14px',
+                    fontWeight:    600,
+                    cursor:       loading ? 'not-allowed' : 'pointer',
+                    opacity:      loading ? 0.6 : 1,
+                    transition:   'opacity 0.15s',
+                    marginBottom: '12px',
+                  }}
+                >
+                  {loading ? 'Creating account…' : `Create ${activeRole.label} Account →`}
                 </button>
 
-                <p className="text-center text-white/40 text-xs mt-4">
+                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', textAlign: 'center', margin: 0 }}>
                   Already have an account?{' '}
-                  <button type="button" onClick={() => setPanel('login')}
-                    className="text-purple-400 hover:underline">Sign in</button>
+                  <span className="cred-link" onClick={() => switchPanel('login')}>
+                    Sign in
+                  </span>
                 </p>
               </form>
             )}
           </div>
 
-          {/* ── SIDE PANEL (decorative) ── */}
-          <div className={`absolute top-0 bottom-0 w-1/2 transition-all duration-500 pointer-events-none
-            ${panel === 'login' ? 'left-1/2' : 'left-0'}`}>
-            <div className="h-full w-full flex flex-col items-center justify-center text-center p-12"
-              style={{ background: 'linear-gradient(135deg, #312E81 0%, #6D28D9 50%, #7C3AED 100%)' }}>
-              {panel === 'login' ? (
-                <>
-                  <div className="text-5xl mb-4">👋</div>
-                  <h3 className="text-2xl font-bold text-white mb-3">New here?</h3>
-                  <p className="text-white/60 text-sm leading-relaxed mb-6">
-                    Join as a job seeker or recruiter and unlock AI-powered career tools
-                  </p>
-                  <button onClick={() => setPanel('register')}
-                    className="pointer-events-auto px-6 py-2.5 rounded-xl border border-white/30 text-white text-sm hover:bg-white/10 transition-all">
-                    Create Account
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="text-5xl mb-4">✨</div>
-                  <h3 className="text-2xl font-bold text-white mb-3">Welcome back!</h3>
-                  <p className="text-white/60 text-sm leading-relaxed mb-6">
-                    Sign in to continue where you left off
-                  </p>
-                  <button onClick={() => setPanel('login')}
-                    className="pointer-events-auto px-6 py-2.5 rounded-xl border border-white/30 text-white text-sm hover:bg-white/10 transition-all">
-                    Sign In
-                  </button>
-                </>
-              )}
+          {/* ── RIGHT: Decorative panel ───────────────────────────────────── */}
+          {/* Fixed-width, always visible — content changes based on active panel */}
+          <div
+            style={{
+              width:          '340px',
+              flexShrink:      0,
+              background:     panel === 'login'
+                ? 'linear-gradient(145deg, #312E81 0%, #5B21B6 50%, #7C3AED 100%)'
+                : 'linear-gradient(145deg, #1E1B4B 0%, #3730A3 50%, #4F46E5 100%)',
+              display:        'flex',
+              flexDirection:  'column',
+              alignItems:     'center',
+              justifyContent: 'center',
+              textAlign:      'center',
+              padding:        '2.5rem',
+              transition:     'background 0.5s ease',
+              position:       'relative',
+              overflow:       'hidden',
+            }}
+          >
+            {/* Background glow */}
+            <div style={{
+              position:   'absolute',
+              top:        '-60px',
+              right:      '-60px',
+              width:      '200px',
+              height:     '200px',
+              borderRadius:'50%',
+              background: 'rgba(255,255,255,0.05)',
+              pointerEvents:'none',
+            }} />
+            <div style={{
+              position:   'absolute',
+              bottom:     '-40px',
+              left:       '-40px',
+              width:      '160px',
+              height:     '160px',
+              borderRadius:'50%',
+              background: 'rgba(255,255,255,0.04)',
+              pointerEvents:'none',
+            }} />
+
+            {/* Content */}
+            {panel === 'login' ? (
+              <>
+                <div style={{ fontSize: '52px', marginBottom: '20px', lineHeight: 1 }}>✨</div>
+                <h3 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', margin: '0 0 12px' }}>
+                  New here?
+                </h3>
+                <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.65)', lineHeight: 1.6, margin: '0 0 28px' }}>
+                  Join as a job seeker or recruiter and unlock AI-powered career tools
+                </p>
+                <button
+                  onClick={() => switchPanel('register')}
+                  style={{
+                    padding:      '11px 28px',
+                    background:   'transparent',
+                    border:       '1.5px solid rgba(255,255,255,0.4)',
+                    borderRadius: '10px',
+                    color:        '#fff',
+                    fontSize:     '13px',
+                    fontWeight:    600,
+                    cursor:       'pointer',
+                    transition:   'all 0.2s',
+                    backdropFilter:'blur(4px)',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget.style.background = 'rgba(255,255,255,0.12)');
+                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.7)');
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget.style.background = 'transparent');
+                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)');
+                  }}
+                >
+                  Create Account
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: '52px', marginBottom: '20px', lineHeight: 1 }}>👋</div>
+                <h3 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', margin: '0 0 12px' }}>
+                  Welcome back!
+                </h3>
+                <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.65)', lineHeight: 1.6, margin: '0 0 28px' }}>
+                  Sign in to continue where you left off
+                </p>
+                <button
+                  onClick={() => switchPanel('login')}
+                  style={{
+                    padding:      '11px 28px',
+                    background:   'transparent',
+                    border:       '1.5px solid rgba(255,255,255,0.4)',
+                    borderRadius: '10px',
+                    color:        '#fff',
+                    fontSize:     '13px',
+                    fontWeight:    600,
+                    cursor:       'pointer',
+                    transition:   'all 0.2s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget.style.background = 'rgba(255,255,255,0.12)');
+                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.7)');
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget.style.background = 'transparent');
+                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)');
+                  }}
+                >
+                  Sign In
+                </button>
+              </>
+            )}
+
+            {/* Feature bullets */}
+            <div style={{ marginTop: '40px', width: '100%' }}>
+              {[
+                { icon: '🤖', text: 'AI-powered job matching' },
+                { icon: '📄', text: 'Resume analysis & scoring' },
+                { icon: '⚡', text: 'Real-time alerts' },
+              ].map(item => (
+                <div
+                  key={item.text}
+                  style={{
+                    display:     'flex',
+                    alignItems:  'center',
+                    gap:         '10px',
+                    padding:     '8px 0',
+                    borderBottom:'1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <span style={{ fontSize: '16px' }}>{item.icon}</span>
+                  <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
+                    {item.text}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
-
         </div>
       </div>
-    </div>
+    </>
   );
 }
