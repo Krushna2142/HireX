@@ -17,4 +17,5 @@ RUN npm run build
 EXPOSE 3001
 
 # Start production server
+
 CMD ["npm", "run", "start:prod"]
