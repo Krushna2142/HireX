@@ -1,10 +1,17 @@
-FROM node:20-alpine
+# --- Build Stage ---
+FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 COPY . .
-RUN npx prisma generate
-RUN npm run build
-RUN ls -lh dist   # <--- Add this
-EXPOSE 3001
-CMD ["npm", "run", "start:prod"]
+RUN npm run build          # ← compiles TypeScript to /app/dist
+
+# --- Production Stage ---
+FROM node:20-alpine AS production
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production   # only prod deps, no devDependencies
+COPY --from=builder /app/dist ./dist   
+# ← copy compiled output
+
+CMD ["node", "dist/main.js"]
