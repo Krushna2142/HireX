@@ -8,7 +8,7 @@ import {
   BadRequestException
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ResumesService } from './resumes.service';
 
 @Controller('resumes')

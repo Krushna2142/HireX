@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Param, UseGuards } from '@nestjs/common';
 import { JobsService } from './jobs.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 // ts-api/src/jobs/jobs.controller.ts
 @Controller('jobs')
 export class JobsController {
