@@ -1,16 +1,17 @@
+// frontend/app/resume/page.tsx
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react/no-unescaped-entities */
 'use client';
 
 import { useAuth } from '@/components/providers/AuthProvider';
-import { getToken } from '@/lib/auth';
 import React, { useState, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { uploadResume, pollResumeStatus, ResumeStatus } from '../../lib/resumes';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const ALLOWED_EXTENSIONS = /\.(pdf|docx|doc)$/i;
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
-type UploadState = 'idle' | 'uploading' | 'success' | 'error';
+type UploadState = 'idle' | 'uploading' | 'analyzing' | 'success' | 'error';
 
 interface FileInfo {
   name: string;
@@ -23,6 +24,14 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// Analysis status label map
+const STATUS_LABELS: Record<ResumeStatus, string> = {
+  uploaded:   'Queued for analysis…',
+  processing: 'AI is parsing your resume…',
+  analyzed:   'Analysis complete!',
+  failed:     'Analysis failed',
+};
 
 function FileIcon({ type }: { type: string }) {
   const isPdf = type.includes('pdf');
@@ -46,17 +55,20 @@ function FileIcon({ type }: { type: string }) {
 
 export default function ResumeUploadPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [analysisStatus, setAnalysisStatus] = useState<ResumeStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback(
     async (file: File | null) => {
       setErrorMsg('');
       setFileInfo(null);
+      setAnalysisStatus(null);
 
       if (!file) return;
       if (!user) return setErrorMsg('You must be logged in to upload a resume.');
@@ -64,46 +76,44 @@ export default function ResumeUploadPage() {
         return setErrorMsg('Only PDF or DOCX files are supported.');
       if (file.size > MAX_SIZE_BYTES)
         return setErrorMsg('File must be under 5MB.');
-      if (!API_URL) return setErrorMsg('API URL is not configured.');
 
       setFileInfo({ name: file.name, size: file.size, type: file.type });
       setUploadState('uploading');
       setProgress(0);
 
-      // Animate progress bar
+      // Simulate upload progress bar
       const interval = setInterval(() => {
         setProgress((p) => (p < 85 ? p + Math.random() * 15 : p));
       }, 200);
 
       try {
-        const token = await getToken();
-        if (!token) throw new Error('Authentication token missing. Please log in again.');
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const resp = await fetch(`${API_URL}/resumes/upload-raw`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-
+        // ── Stage 1: Upload file ──────────────────────────────
+        const resume = await uploadResume(file);
         clearInterval(interval);
-
-        if (!resp.ok) {
-          const data = await resp.json().catch(() => ({ message: 'Upload failed' }));
-          throw new Error(data.message || `Upload failed with status ${resp.status}`);
-        }
-
         setProgress(100);
-        setTimeout(() => setUploadState('success'), 300);
+
+        // ── Stage 2: Poll for analysis completion ─────────────
+        setUploadState('analyzing');
+        setAnalysisStatus('uploaded');
+
+        await pollResumeStatus(
+          resume.id,
+          (status: any) => setAnalysisStatus(status),
+        );
+
+        // ── Stage 3: Navigate to analysis result ──────────────
+        setUploadState('success');
+        setTimeout(() => {
+          router.push(`/resume/${resume.id}/analysis`);
+        }, 1000);
+
       } catch (err: any) {
         clearInterval(interval);
         setErrorMsg(err.message || 'Upload failed. Please try again.');
         setUploadState('error');
       }
     },
-    [user],
+    [user, router],
   );
 
   const handleDrop = useCallback(
@@ -120,375 +130,71 @@ export default function ResumeUploadPage() {
     setErrorMsg('');
     setFileInfo(null);
     setProgress(0);
+    setAnalysisStatus(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
     <>
       <style>{`
+        /* ── all your existing styles unchanged ── */
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
-
-        .ru-root {
-          font-family: 'DM Sans', sans-serif;
-          min-height: 100vh;
-          background: #0A0A0F;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 2rem;
-        }
-
-        .ru-card {
-          width: 100%;
-          max-width: 560px;
-          background: #111118;
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 20px;
-          padding: 2.5rem;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .ru-card::before {
-          content: '';
-          position: absolute;
-          top: -1px; left: 20%; right: 20%;
-          height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(168,85,247,0.6), transparent);
-        }
-
-        .ru-ambient {
-          position: absolute;
-          top: -80px; right: -80px;
-          width: 280px; height: 280px;
-          background: radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 70%);
-          pointer-events: none;
-        }
-
-        .ru-label {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: rgba(124,58,237,0.12);
-          border: 1px solid rgba(124,58,237,0.25);
-          border-radius: 20px;
-          padding: 4px 12px;
-          font-size: 12px;
-          font-family: 'DM Mono', monospace;
-          color: #A78BFA;
-          letter-spacing: 0.04em;
-          margin-bottom: 1.5rem;
-        }
-
-        .ru-label-dot {
-          width: 6px; height: 6px;
-          border-radius: 50%;
-          background: #A78BFA;
-          animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-
-        .ru-title {
-          font-size: 26px;
-          font-weight: 600;
-          color: #F1F0FF;
-          letter-spacing: -0.03em;
-          line-height: 1.25;
-          margin: 0 0 0.5rem;
-        }
-
-        .ru-subtitle {
-          font-size: 14px;
-          color: rgba(255,255,255,0.38);
-          margin: 0 0 2rem;
-          line-height: 1.6;
-        }
-
-        .ru-dropzone {
-          border: 1.5px dashed rgba(255,255,255,0.1);
-          border-radius: 16px;
-          padding: 2.5rem 2rem;
-          text-align: center;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          background: rgba(255,255,255,0.02);
-          position: relative;
-        }
-
-        .ru-dropzone:hover, .ru-dropzone.drag {
-          border-color: rgba(124,58,237,0.5);
-          background: rgba(124,58,237,0.04);
-        }
-
-        .ru-dropzone.drag {
-          transform: scale(1.01);
-        }
-
-        .ru-icon-wrap {
-          width: 56px; height: 56px;
-          border-radius: 14px;
-          background: rgba(124,58,237,0.1);
-          border: 1px solid rgba(124,58,237,0.2);
-          display: flex; align-items: center; justify-content: center;
-          margin: 0 auto 1rem;
-        }
-
-        .ru-drop-title {
-          font-size: 15px;
-          font-weight: 500;
-          color: #E2E0FF;
-          margin-bottom: 6px;
-        }
-
-        .ru-drop-sub {
-          font-size: 13px;
-          color: rgba(255,255,255,0.3);
-        }
-
-        .ru-drop-sub span {
-          color: #A78BFA;
-          font-weight: 500;
-        }
-
-        .ru-constraints {
-          display: flex;
-          gap: 8px;
-          justify-content: center;
-          margin-top: 1.25rem;
-        }
-
-        .ru-pill {
-          font-size: 11px;
-          font-family: 'DM Mono', monospace;
-          color: rgba(255,255,255,0.3);
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 20px;
-          padding: 3px 10px;
-          letter-spacing: 0.04em;
-        }
-
-        .ru-file-preview {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 12px;
-          padding: 14px 16px;
-          margin-top: 1.25rem;
-        }
-
+        .ru-root { font-family: 'DM Sans', sans-serif; min-height: 100vh; background: #0A0A0F; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+        .ru-card { width: 100%; max-width: 560px; background: #111118; border: 1px solid rgba(255,255,255,0.07); border-radius: 20px; padding: 2.5rem; position: relative; overflow: hidden; }
+        .ru-card::before { content: ''; position: absolute; top: -1px; left: 20%; right: 20%; height: 1px; background: linear-gradient(90deg, transparent, rgba(168,85,247,0.6), transparent); }
+        .ru-ambient { position: absolute; top: -80px; right: -80px; width: 280px; height: 280px; background: radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 70%); pointer-events: none; }
+        .ru-label { display: inline-flex; align-items: center; gap: 6px; background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.25); border-radius: 20px; padding: 4px 12px; font-size: 12px; font-family: 'DM Mono', monospace; color: #A78BFA; letter-spacing: 0.04em; margin-bottom: 1.5rem; }
+        .ru-label-dot { width: 6px; height: 6px; border-radius: 50%; background: #A78BFA; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .ru-title { font-size: 26px; font-weight: 600; color: #F1F0FF; letter-spacing: -0.03em; line-height: 1.25; margin: 0 0 0.5rem; }
+        .ru-subtitle { font-size: 14px; color: rgba(255,255,255,0.38); margin: 0 0 2rem; line-height: 1.6; }
+        .ru-dropzone { border: 1.5px dashed rgba(255,255,255,0.1); border-radius: 16px; padding: 2.5rem 2rem; text-align: center; cursor: pointer; transition: all 0.2s ease; background: rgba(255,255,255,0.02); position: relative; }
+        .ru-dropzone:hover, .ru-dropzone.drag { border-color: rgba(124,58,237,0.5); background: rgba(124,58,237,0.04); }
+        .ru-dropzone.drag { transform: scale(1.01); }
+        .ru-icon-wrap { width: 56px; height: 56px; border-radius: 14px; background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.2); display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; }
+        .ru-drop-title { font-size: 15px; font-weight: 500; color: #E2E0FF; margin-bottom: 6px; }
+        .ru-drop-sub { font-size: 13px; color: rgba(255,255,255,0.3); }
+        .ru-drop-sub span { color: #A78BFA; font-weight: 500; }
+        .ru-constraints { display: flex; gap: 8px; justify-content: center; margin-top: 1.25rem; }
+        .ru-pill { font-size: 11px; font-family: 'DM Mono', monospace; color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 20px; padding: 3px 10px; letter-spacing: 0.04em; }
+        .ru-file-preview { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 14px 16px; margin-top: 1.25rem; }
         .ru-file-info { flex: 1; min-width: 0; }
-
-        .ru-file-name {
-          font-size: 13px;
-          font-weight: 500;
-          color: #E2E0FF;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          margin-bottom: 3px;
-        }
-
-        .ru-file-size {
-          font-size: 12px;
-          color: rgba(255,255,255,0.3);
-          font-family: 'DM Mono', monospace;
-        }
-
-        .ru-progress-wrap {
-          margin-top: 16px;
-        }
-
-        .ru-progress-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 8px;
-        }
-
-        .ru-progress-label {
-          font-size: 12px;
-          color: rgba(255,255,255,0.4);
-        }
-
-        .ru-progress-pct {
-          font-size: 12px;
-          font-family: 'DM Mono', monospace;
-          color: #A78BFA;
-        }
-
-        .ru-bar-track {
-          height: 4px;
-          background: rgba(255,255,255,0.06);
-          border-radius: 99px;
-          overflow: hidden;
-        }
-
-        .ru-bar-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #7C3AED, #A78BFA);
-          border-radius: 99px;
-          transition: width 0.3s ease;
-        }
-
-        .ru-success {
-          text-align: center;
-          padding: 1.5rem 0;
-        }
-
-        .ru-success-icon {
-          width: 56px; height: 56px;
-          border-radius: 50%;
-          background: rgba(16,185,129,0.1);
-          border: 1px solid rgba(16,185,129,0.25);
-          display: flex; align-items: center; justify-content: center;
-          margin: 0 auto 1rem;
-        }
-
-        .ru-success-title {
-          font-size: 16px;
-          font-weight: 600;
-          color: #6EE7B7;
-          margin-bottom: 6px;
-        }
-
-        .ru-success-sub {
-          font-size: 13px;
-          color: rgba(255,255,255,0.3);
-          margin-bottom: 1.5rem;
-        }
-
-        .ru-error-box {
-          display: flex;
-          gap: 10px;
-          align-items: flex-start;
-          background: rgba(239,68,68,0.06);
-          border: 1px solid rgba(239,68,68,0.2);
-          border-radius: 12px;
-          padding: 12px 14px;
-          margin-top: 1rem;
-        }
-
-        .ru-error-icon {
-          width: 18px; height: 18px;
-          flex-shrink: 0;
-          margin-top: 1px;
-        }
-
-        .ru-error-text {
-          font-size: 13px;
-          color: #FCA5A5;
-          line-height: 1.5;
-        }
-
-        .ru-btn {
-          width: 100%;
-          padding: 13px;
-          border-radius: 12px;
-          font-family: 'DM Sans', sans-serif;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.15s ease;
-          border: none;
-          display: flex; align-items: center; justify-content: center; gap: 8px;
-        }
-
-        .ru-btn-primary {
-          background: linear-gradient(135deg, #7C3AED, #6D28D9);
-          color: #fff;
-          box-shadow: 0 0 0 1px rgba(124,58,237,0.3), 0 4px 20px rgba(124,58,237,0.2);
-          margin-top: 1.25rem;
-        }
-
-        .ru-btn-primary:hover:not(:disabled) {
-          background: linear-gradient(135deg, #8B5CF6, #7C3AED);
-          box-shadow: 0 0 0 1px rgba(124,58,237,0.5), 0 8px 24px rgba(124,58,237,0.3);
-          transform: translateY(-1px);
-        }
-
-        .ru-btn-primary:active:not(:disabled) { transform: translateY(0); }
-
-        .ru-btn-primary:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .ru-btn-ghost {
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
-          color: rgba(255,255,255,0.5);
-          margin-top: 0.75rem;
-        }
-
-        .ru-btn-ghost:hover {
-          background: rgba(255,255,255,0.07);
-          color: rgba(255,255,255,0.7);
-        }
-
-        .ru-divider {
-          height: 1px;
-          background: rgba(255,255,255,0.06);
-          margin: 2rem 0 1.25rem;
-        }
-
-        .ru-formats {
-          display: flex;
-          gap: 10px;
-        }
-
-        .ru-format-item {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          background: rgba(255,255,255,0.02);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 10px;
-          padding: 10px 12px;
-        }
-
-        .ru-format-label {
-          font-size: 12px;
-          color: rgba(255,255,255,0.35);
-          line-height: 1.4;
-        }
-
-        .ru-format-name {
-          font-size: 13px;
-          font-weight: 500;
-          color: rgba(255,255,255,0.7);
-        }
-
-        .ru-spinner {
-          width: 16px; height: 16px;
-          border: 2px solid rgba(255,255,255,0.2);
-          border-top-color: #fff;
-          border-radius: 50%;
-          animation: spin 0.7s linear infinite;
-        }
-
+        .ru-file-name { font-size: 13px; font-weight: 500; color: #E2E0FF; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; }
+        .ru-file-size { font-size: 12px; color: rgba(255,255,255,0.3); font-family: 'DM Mono', monospace; }
+        .ru-progress-wrap { margin-top: 16px; }
+        .ru-progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .ru-progress-label { font-size: 12px; color: rgba(255,255,255,0.4); }
+        .ru-progress-pct { font-size: 12px; font-family: 'DM Mono', monospace; color: #A78BFA; }
+        .ru-bar-track { height: 4px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; }
+        .ru-bar-fill { height: 100%; background: linear-gradient(90deg, #7C3AED, #A78BFA); border-radius: 99px; transition: width 0.3s ease; }
+        .ru-success { text-align: center; padding: 1.5rem 0; }
+        .ru-success-icon { width: 56px; height: 56px; border-radius: 50%; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; }
+        .ru-success-title { font-size: 16px; font-weight: 600; color: #6EE7B7; margin-bottom: 6px; }
+        .ru-success-sub { font-size: 13px; color: rgba(255,255,255,0.3); margin-bottom: 1.5rem; }
+        .ru-analyzing { text-align: center; padding: 2rem 0; }
+        .ru-analyzing-icon { width: 56px; height: 56px; border-radius: 50%; background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.25); display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; }
+        .ru-analyzing-title { font-size: 16px; font-weight: 600; color: #A78BFA; margin-bottom: 6px; }
+        .ru-analyzing-sub { font-size: 13px; color: rgba(255,255,255,0.3); }
+        .ru-error-box { display: flex; gap: 10px; align-items: flex-start; background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.2); border-radius: 12px; padding: 12px 14px; margin-top: 1rem; }
+        .ru-error-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+        .ru-error-text { font-size: 13px; color: #FCA5A5; line-height: 1.5; }
+        .ru-btn { width: 100%; padding: 13px; border-radius: 12px; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; border: none; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .ru-btn-primary { background: linear-gradient(135deg, #7C3AED, #6D28D9); color: #fff; box-shadow: 0 0 0 1px rgba(124,58,237,0.3), 0 4px 20px rgba(124,58,237,0.2); margin-top: 1.25rem; }
+        .ru-btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #8B5CF6, #7C3AED); transform: translateY(-1px); }
+        .ru-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ru-btn-ghost { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.5); margin-top: 0.75rem; }
+        .ru-btn-ghost:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7); }
+        .ru-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 2rem 0 1.25rem; }
+        .ru-formats { display: flex; gap: 10px; }
+        .ru-format-item { flex: 1; display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 10px 12px; }
+        .ru-format-label { font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.4; }
+        .ru-format-name { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.7); }
+        .ru-spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+        .ru-spinner-lg { width: 24px; height: 24px; border: 2px solid rgba(167,139,250,0.2); border-top-color: #A78BFA; border-radius: 50%; animation: spin 0.9s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .ru-animate { animation: fadeIn 0.3s ease forwards; }
-
-        @keyframes checkPop {
-          0% { transform: scale(0.5); opacity: 0; }
-          70% { transform: scale(1.15); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-
+        @keyframes checkPop { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
         .ru-check-animate { animation: checkPop 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards; }
       `}</style>
 
@@ -506,6 +212,24 @@ export default function ResumeUploadPage() {
             Drop your file below and we'll parse, analyze, and match you to relevant jobs automatically.
           </p>
 
+          {/* ── ANALYZING STATE — new ── */}
+          {uploadState === 'analyzing' && fileInfo && (
+            <div className="ru-analyzing ru-animate">
+              <div className="ru-analyzing-icon">
+                <div className="ru-spinner-lg" />
+              </div>
+              <div className="ru-analyzing-title">
+                {analysisStatus ? STATUS_LABELS[analysisStatus] : 'Processing…'}
+              </div>
+              <div className="ru-analyzing-sub">
+                {fileInfo.name} · {formatBytes(fileInfo.size)}
+              </div>
+              <div className="ru-analyzing-sub" style={{ marginTop: '0.5rem', fontSize: '12px' }}>
+                This takes 30–90 seconds. Don't close this tab.
+              </div>
+            </div>
+          )}
+
           {/* ── SUCCESS STATE ── */}
           {uploadState === 'success' && fileInfo && (
             <div className="ru-success ru-animate">
@@ -514,16 +238,13 @@ export default function ResumeUploadPage() {
                   <path d="M5 13l4 4L19 7" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
-              <div className="ru-success-title">Resume uploaded</div>
-              <div className="ru-success-sub">{fileInfo.name} · {formatBytes(fileInfo.size)}</div>
-              <button className="ru-btn ru-btn-primary" onClick={reset}>
-                Upload another
-              </button>
+              <div className="ru-success-title">Analysis complete</div>
+              <div className="ru-success-sub">Redirecting to your results…</div>
             </div>
           )}
 
           {/* ── UPLOAD / IDLE / ERROR STATE ── */}
-          {uploadState !== 'success' && (
+          {uploadState !== 'success' && uploadState !== 'analyzing' && (
             <>
               <div
                 className={`ru-dropzone${isDragging ? ' drag' : ''}`}
@@ -563,7 +284,7 @@ export default function ResumeUploadPage() {
                 </div>
               </div>
 
-              {/* File preview + progress */}
+              {/* File preview + upload progress */}
               {fileInfo && uploadState === 'uploading' && (
                 <div className="ru-animate">
                   <div className="ru-file-preview">
@@ -573,7 +294,6 @@ export default function ResumeUploadPage() {
                       <div className="ru-file-size">{formatBytes(fileInfo.size)}</div>
                     </div>
                   </div>
-
                   <div className="ru-progress-wrap">
                     <div className="ru-progress-header">
                       <span className="ru-progress-label">Uploading to secure storage…</span>

@@ -1,14 +1,28 @@
 FROM ollama/ollama:latest
 
-# Install curl for healthcheck
+# Install curl for healthcheck + wait logic
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Pre-pull model during build so container starts ready
-# This avoids cold-start inference delays
-RUN ollama serve & \
-    sleep 10 && \
-    ollama pull llama3.2:3b && \
-    pkill ollama || true
+# Pre-pull model during build using a proper wait loop
+# The serve process must be fully ready before pull can succeed
+RUN /bin/bash -c '\
+  ollama serve & \
+  SERVER_PID=$! && \
+  echo "Waiting for Ollama server to start..." && \
+  for i in $(seq 1 30); do \
+    if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then \
+      echo "Ollama server ready after ${i}s"; \
+      break; \
+    fi; \
+    echo "Attempt $i — server not ready yet, retrying in 1s..."; \
+    sleep 1; \
+  done && \
+  echo "Pulling llama3.2:3b model..." && \
+  ollama pull llama3.2:3b && \
+  echo "Model pull complete" && \
+  kill $SERVER_PID && \
+  wait $SERVER_PID 2>/dev/null || true \
+'
 
 EXPOSE 11434
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable prettier/prettier */
@@ -14,7 +15,7 @@ import { InterviewsModule } from './interviews/interviews.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OllamaModule } from './ollama/ollama.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
-
+import { AlertsModule } from './alerts/alerts.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
