@@ -1,22 +1,24 @@
 /* eslint-disable prettier/prettier */
-import { Module } from '@nestjs/common';
-import { HttpModule } from '@nestjs/axios';
+// src/interviews/interviews.module.ts
+
+import { Module }        from '@nestjs/common';
+import { HttpModule }    from '@nestjs/axios';
 import { InterviewsController } from './interviews.controller';
-import { InterviewsService } from './interviews.service';
-import { AuthModule } from '../auth/auth.module';
+import { InterviewsService }    from './interviews.service';
+import { AuthModule }    from '../auth/auth.module';
+import { OllamaModule }  from '../ollama/ollama.module';   // ← provides LlmService
 import { DatabaseModule } from '../database/datbase.module';
-import { OllamaModule } from '../ollama/ollama.module';
-import { PrismaModule } from '../../prisma/prisma.module';
+import { PrismaModule }  from '../../prisma/prisma.module';
 
 @Module({
   imports: [
-    HttpModule.register({ timeout: 30000 }),
+    HttpModule.register({ timeout: 30_000 }),
     AuthModule,
+    OllamaModule,     // ← provides LlmService via exports
     DatabaseModule,
     PrismaModule,
-    OllamaModule,
   ],
   controllers: [InterviewsController],
-  providers: [InterviewsService],
+  providers:   [InterviewsService],
 })
 export class InterviewsModule {}

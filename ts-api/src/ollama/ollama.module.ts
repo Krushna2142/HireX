@@ -1,11 +1,12 @@
 /* eslint-disable prettier/prettier */
 // src/ollama/ollama.module.ts
-import { Global, Module } from '@nestjs/common';
-import { OllamaService } from './ollama.service';
+import { Module }     from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
+import { LlmService } from './Llm.service';
 
-@Global()
 @Module({
-  providers: [OllamaService],
-  exports: [OllamaService],
+  imports:   [HttpModule],
+  providers: [LlmService],
+  exports:   [LlmService],
 })
 export class OllamaModule {}

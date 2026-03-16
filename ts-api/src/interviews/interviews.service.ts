@@ -2,32 +2,40 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
+// src/interviews/interviews.service.ts
+
 import {
-  Injectable, Logger, NotFoundException,
+  Injectable,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService }   from '../../prisma/prisma.service';
 import { DatabaseService } from '../database/database.service';
-import { LlmService } from '../ollama/ollama.service';
+import { LlmService }      from '../ollama/Llm.service';   // ← was OllamaService
+
+// ── Domain interfaces ─────────────────────────────────────────────────────────
 
 interface GeneratedQuestion {
-  question: string;
-  category: string;
-  difficulty: string;
+  question:    string;
+  category:    string;
+  difficulty:  string;
   idealAnswer: string;
 }
 
 interface QuestionSet {
-  questions: GeneratedQuestion[];
-  jobTitle: string;
+  questions:   GeneratedQuestion[];
+  jobTitle:    string;
   sessionType: string;
 }
 
 interface AnswerEvaluation {
-  score: number;
-  feedback: string;
-  strengths: string[];
+  score:        number;
+  feedback:     string;
+  strengths:    string[];
   improvements: string[];
 }
+
+// ── System prompts ────────────────────────────────────────────────────────────
 
 const QUESTION_SYSTEM_PROMPT = `
 You are a senior technical interviewer at a top tech company.
@@ -42,7 +50,7 @@ Schema:
       "question": string,
       "category": "technical|behavioral|system_design|coding",
       "difficulty": "easy|medium|hard",
-      "idealAnswer": string  // 2-3 sentence benchmark answer
+      "idealAnswer": string
     }
   ]
 }
@@ -62,10 +70,10 @@ Return ONLY valid JSON — no preamble, no markdown fences.
 
 Schema:
 {
-  "score": number,           // 0-100
-  "feedback": string,        // 2-3 sentences of overall feedback
-  "strengths": string[],     // 1-3 things done well
-  "improvements": string[]   // 1-3 specific improvements
+  "score": number,
+  "feedback": string,
+  "strengths": string[],
+  "improvements": string[]
 }
 
 Scoring rubric:
@@ -76,28 +84,30 @@ Scoring rubric:
 - 0-29:   Unsatisfactory, fundamental misunderstanding
 `.trim();
 
+// ── Service ───────────────────────────────────────────────────────────────────
+
 @Injectable()
 export class InterviewsService {
   private readonly logger = new Logger(InterviewsService.name);
 
   constructor(
-    private readonly db: DatabaseService,
+    private readonly db:    DatabaseService,
     private readonly prisma: PrismaService,
-    private readonly ollama: LlmService,
+    private readonly llm:   LlmService,   // ← was OllamaService
   ) {}
 
-  // ── Start a new interview session ─────────────────────────────────────────
+  // ── Start interview session ───────────────────────────────────────────────
 
   async startSession(
     candidateId: string,
-    jobTitle: string,
-    company: string,
+    jobTitle:    string,
+    company:     string,
     sessionType: string,
-    jobId?: string,
+    jobId?:      string,
   ) {
-    this.logger.log(`Starting ${sessionType} interview for: ${jobTitle}`);
+    this.logger.log(`Starting ${sessionType} session for: ${jobTitle} at ${company}`);
 
-    // Fetch candidate's resume analysis for context
+    // Fetch candidate context for tailored question generation
     const { rows: analysisRows } = await this.db.query(
       `SELECT ra.skills, ra.work_experience, ra.experience_level, ra.experience_years
        FROM resume_analyses ra
@@ -111,61 +121,59 @@ export class InterviewsService {
     );
 
     const candidateContext = analysisRows[0]
-      ? `Experience Level: ${analysisRows[0].experience_level}
-         Years: ${analysisRows[0].experience_years}
-         Skills: ${JSON.stringify(analysisRows[0].skills).slice(0, 500)}`
+      ? `Experience Level: ${analysisRows[0].experience_level}\n` +
+        `Years: ${analysisRows[0].experience_years}\n` +
+        `Skills: ${JSON.stringify(analysisRows[0].skills).slice(0, 500)}`
       : 'No resume on file — generate general questions for the role';
 
-    // Generate questions via Ollama
-    const questionSet = await this.ollama.extractJsonWithRetry<QuestionSet>(
+    // Generate questions via Groq
+    const questionSet = await this.llm.extractJsonWithRetry<QuestionSet>(
       QUESTION_SYSTEM_PROMPT,
       `Role: ${jobTitle}
        Company: ${company || 'a tech company'}
        Interview Type: ${sessionType}
        Candidate Background: ${candidateContext}
-       
+
        Generate 5 targeted interview questions.`,
-      2,
     );
 
-    // Create session in DB
+    // Persist session
     const { rows: sessionRows } = await this.db.query(
       `INSERT INTO interview_sessions
          (candidate_id, job_id, job_title, company, session_type, total_questions)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [
-        candidateId, jobId, jobTitle, company,
-        sessionType, questionSet.questions.length,
-      ],
+      [candidateId, jobId, jobTitle, company, sessionType, questionSet.questions.length],
     );
 
     const session = sessionRows[0];
 
-    // Insert questions
-    const questionInserts = questionSet.questions.map((q, i) =>
-      this.db.query(
-        `INSERT INTO interview_questions
-           (session_id, question_number, question, category, difficulty, ideal_answer)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [session.id, i + 1, q.question, q.category, q.difficulty, q.idealAnswer],
+    // Persist questions in parallel
+    const questionResults = await Promise.all(
+      questionSet.questions.map((q, i) =>
+        this.db.query(
+          `INSERT INTO interview_questions
+             (session_id, question_number, question, category, difficulty, ideal_answer)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [session.id, i + 1, q.question, q.category, q.difficulty, q.idealAnswer],
+        ),
       ),
     );
 
-    const questionResults = await Promise.all(questionInserts);
     const questions = questionResults.map(r => r.rows[0]);
 
-    this.logger.log(`Session created: ${session.id} with ${questions.length} questions`);
+    this.logger.log(`Session ${session.id} created with ${questions.length} questions`);
 
     return {
       session,
+      // idealAnswer deliberately excluded — revealed only after candidate answers
       questions: questions.map(q => ({
         id:             q.id,
         questionNumber: q.question_number,
         question:       q.question,
         category:       q.category,
         difficulty:     q.difficulty,
-        // Don't expose idealAnswer to candidate — only shown after answering
       })),
     };
   }
@@ -173,12 +181,11 @@ export class InterviewsService {
   // ── Submit answer for evaluation ──────────────────────────────────────────
 
   async submitAnswer(
-    questionId: string,
-    candidateId: string,
-    answer: string,
-    timeTakenSecs: number,
+    questionId:     string,
+    candidateId:    string,
+    answer:         string,
+    timeTakenSecs:  number,
   ) {
-    // Verify question belongs to candidate's session
     const { rows } = await this.db.query(
       `SELECT q.*, s.candidate_id
        FROM interview_questions q
@@ -193,25 +200,23 @@ export class InterviewsService {
 
     const question = rows[0];
 
-    // Evaluate via Ollama
-    const evaluation = await this.ollama.extractJsonWithRetry<AnswerEvaluation>(
+    // Evaluate via Groq
+    const evaluation = await this.llm.extractJsonWithRetry<AnswerEvaluation>(
       EVALUATION_SYSTEM_PROMPT,
       `Question: ${question.question}
        Ideal Answer Benchmark: ${question.ideal_answer}
        Candidate's Answer: ${answer}
-       
+
        Evaluate the candidate's answer objectively.`,
-      2,
     );
 
-    // Persist evaluation
     const { rows: updated } = await this.db.query(
       `UPDATE interview_questions
-       SET user_answer = $1,
-           score = $2,
-           feedback = $3,
+       SET user_answer     = $1,
+           score           = $2,
+           feedback        = $3,
            time_taken_secs = $4,
-           answered_at = NOW()
+           answered_at     = NOW()
        WHERE id = $5
        RETURNING *`,
       [answer, evaluation.score, evaluation.feedback, timeTakenSecs, questionId],
@@ -220,11 +225,11 @@ export class InterviewsService {
     return {
       ...updated[0],
       evaluation,
-      idealAnswer: question.ideal_answer,  // now safe to reveal
+      idealAnswer: question.ideal_answer,   // safe to reveal post-answer
     };
   }
 
-  // ── Complete session + generate report ────────────────────────────────────
+  // ── Complete session ──────────────────────────────────────────────────────
 
   async completeSession(sessionId: string, candidateId: string) {
     const { rows: questions } = await this.db.query(
@@ -241,16 +246,15 @@ export class InterviewsService {
     const totalScore    = questions
       .filter(q => q.score !== null)
       .reduce((sum, q) => sum + q.score, 0);
-    const avgScore = answeredCount > 0
+    const avgScore      = answeredCount > 0
       ? Math.round(totalScore / answeredCount)
       : 0;
 
-    // Update session as completed
     const { rows: session } = await this.db.query(
       `UPDATE interview_sessions
-       SET status = 'completed',
+       SET status        = 'completed',
            overall_score = $1,
-           completed_at = NOW()
+           completed_at  = NOW()
        WHERE id = $2
        RETURNING *`,
       [avgScore, sessionId],
@@ -264,23 +268,23 @@ export class InterviewsService {
         answered:       answeredCount,
         averageScore:   avgScore,
         scoreBreakdown: {
-          excellent:  questions.filter(q => q.score >= 90).length,
-          good:       questions.filter(q => q.score >= 70 && q.score < 90).length,
-          adequate:   questions.filter(q => q.score >= 50 && q.score < 70).length,
-          needsWork:  questions.filter(q => q.score < 50).length,
+          excellent: questions.filter(q => q.score >= 90).length,
+          good:      questions.filter(q => q.score >= 70 && q.score < 90).length,
+          adequate:  questions.filter(q => q.score >= 50 && q.score < 70).length,
+          needsWork: questions.filter(q => q.score !== null && q.score < 50).length,
         },
         byCategory: this.aggregateByCategory(questions),
       },
     };
   }
 
-  // ── Get candidate's session history ──────────────────────────────────────
+  // ── Session history ───────────────────────────────────────────────────────
 
   async getSessionHistory(candidateId: string) {
     const { rows } = await this.db.query(
       `SELECT s.*,
-         COUNT(q.id)                                 AS total_questions,
-         COUNT(q.id) FILTER (WHERE q.answered_at IS NOT NULL) AS answered
+         COUNT(q.id)                                              AS total_questions,
+         COUNT(q.id) FILTER (WHERE q.answered_at IS NOT NULL)    AS answered
        FROM interview_sessions s
        LEFT JOIN interview_questions q ON q.session_id = s.id
        WHERE s.candidate_id = $1
@@ -292,7 +296,7 @@ export class InterviewsService {
     return rows;
   }
 
-  // ── Get session detail ────────────────────────────────────────────────────
+  // ── Session detail ────────────────────────────────────────────────────────
 
   async getSession(sessionId: string, candidateId: string) {
     const { rows: sessions } = await this.db.query(

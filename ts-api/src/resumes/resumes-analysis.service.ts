@@ -7,7 +7,7 @@
 /* eslint-disable prettier/prettier */
 // src/resumes/resume-analysis.service.ts
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { LlmService} from '../ollama/ollama.service';
+import { LlmService} from '../ollama/Llm.service';
 import { PrismaService } from '../../prisma/prisma.service';
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
