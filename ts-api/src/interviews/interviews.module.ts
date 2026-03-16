@@ -4,9 +4,18 @@ import { HttpModule } from '@nestjs/axios';
 import { InterviewsController } from './interviews.controller';
 import { InterviewsService } from './interviews.service';
 import { AuthModule } from '../auth/auth.module';
-// ts-api/src/interviews/interviews.module.ts
+import { DatabaseModule } from '../database/datbase.module';
+import { OllamaModule } from '../ollama/ollama.module';
+import { PrismaModule } from '../../prisma/prisma.module';
+
 @Module({
-  imports: [HttpModule.register({ timeout: 30000 }), AuthModule],
+  imports: [
+    HttpModule.register({ timeout: 30000 }),
+    AuthModule,
+    DatabaseModule,
+    PrismaModule,
+    OllamaModule,
+  ],
   controllers: [InterviewsController],
   providers: [InterviewsService],
 })

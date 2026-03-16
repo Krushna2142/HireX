@@ -1,4 +1,4 @@
-// frontend/lib/api/resumes.ts
+// frontend/lib/resumes.ts
 import { getToken } from '@/lib/auth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
