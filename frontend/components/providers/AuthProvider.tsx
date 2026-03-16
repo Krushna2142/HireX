@@ -1,24 +1,43 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-// frontend/components/providers/AuthProvider.tsx
 'use client';
 
 import {
-  createContext, useContext, useEffect,
-  useState, useCallback, ReactNode,
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { getMe, login as loginFn, register as registerFn,
-         removeToken, roleRedirectPath, User, UserRole, AuthResponse } from '@/lib/auth';
+import {
+  getMe,
+  login as apiLogin,
+  register as apiRegister,
+  removeToken,
+  roleRedirectPath,
+} from '@/lib/auth';
+import type { User, UserRole, AuthResponse } from '@/lib/auth';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Context
+// Context contract
+//
+// Deliberately minimal — only what consumers actually need.
+// No `isAuthenticated` (derive from `!!user`), no `refresh` (call getMe),
+// no `setUser` (internal concern). This prevents consumers from depending
+// on implementation details that change between iterations.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface AuthContextValue {
+export interface AuthContextValue {
   user:     User | null;
   loading:  boolean;
   login:    (email: string, password: string) => Promise<AuthResponse>;
-  register: (name: string, email: string, password: string, role: UserRole) => Promise<void>;
+  register: (
+    fullName: string,
+    email:    string,
+    password: string,
+    role:     UserRole,
+  ) => Promise<AuthResponse>;
   logout:   () => void;
 }
 
@@ -26,16 +45,29 @@ const AuthContext = createContext<AuthContextValue>({
   user:     null,
   loading:  true,
   login:    async () => { throw new Error('AuthProvider not mounted'); },
-  register: async () => {},
+  register: async () => { throw new Error('AuthProvider not mounted'); },
   logout:   () => {},
 });
 
-export function useAuth() {
+export function useAuth(): AuthContextValue {
   return useContext(AuthContext);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Provider
+// AuthProvider
+//
+// Architectural principles enforced here:
+//
+// 1. NEVER gate children on loading state — the provider's responsibility
+//    is to resolve and expose auth state, not to control rendering.
+//    Pages receive `loading: true` and decide their own loading UX.
+//
+// 2. Token resolution happens once on mount via getMe(). Subsequent
+//    auth state changes happen synchronously via setUser() in login/logout.
+//
+// 3. All auth side effects (redirect after login/register) are the
+//    caller's responsibility, not the provider's. The provider only
+//    manages state — consumers drive navigation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -43,57 +75,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router                = useRouter();
 
-  // Resolve auth state on mount — never blocks children
+  // ── Resolve persisted session on mount ─────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
+
     getMe()
-      .then(u   => setUser(u))
-      .catch(()  => setUser(null))
-      .finally(() => setLoading(false));
+      .then(u => { if (!cancelled) setUser(u); })
+      .catch(() => { if (!cancelled) setUser(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    // Cleanup prevents state updates on unmounted component
+    return () => { cancelled = true; };
   }, []);
 
+  // ── Login ───────────────────────────────────────────────────────────────────
   const login = useCallback(
     async (email: string, password: string): Promise<AuthResponse> => {
-      const res = await loginFn(email, password);
+      const res = await apiLogin(email, password);
       setUser(res.user);
       return res;
     },
     [],
   );
 
+  // ── Register ────────────────────────────────────────────────────────────────
   const register = useCallback(
-    async (name: string, email: string, password: string, role: UserRole) => {
-      const res = await registerFn(name, email, password, role);
+    async (
+      fullName: string,
+      email:    string,
+      password: string,
+      role:     UserRole,
+    ): Promise<AuthResponse> => {
+      const res = await apiRegister(fullName, email, password, role);
       setUser(res.user);
-      router.replace(roleRedirectPath(role));
+      return res;
     },
-    [router],
+    [],
   );
 
+  // ── Logout ──────────────────────────────────────────────────────────────────
   const logout = useCallback(() => {
     removeToken();
     setUser(null);
     router.replace('/');
   }, [router]);
 
-  // ✅ CRITICAL: Always render children — never block on loading state
-  // Pages receive `loading: true` and handle their own loading UI
-  // The AuthProvider's job is to provide context, NOT to gate rendering
+  // ── Memoized context value — prevents unnecessary consumer re-renders ───────
+  const value = useMemo<AuthContextValue>(
+    () => ({ user, loading, login, register, logout }),
+    [user, loading, login, register, logout],
+  );
+
+  // ✅ Always render children — never block on loading state
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
 }
-/*
-
----
-
-## Why This Is The Correct Architecture
-```
-❌ Wrong pattern — AuthProvider gates children:
-   AuthProvider (loading=true) → returns null → page never renders → blank screen
-
-✅ Correct pattern — AuthProvider always renders children:
-   AuthProvider (loading=true) → renders children with loading=true
-   page.tsx receives loading=true → shows its own spinner or content
-   loading resolves → page.tsx reacts and updates accordingly */
