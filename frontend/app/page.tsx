@@ -1,26 +1,43 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-/* eslint-disable react/no-unescaped-entities */
-// frontend/app/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import CredentialsModal from '@/components/auth/CredentialsModal';
 import { roleRedirectPath } from '@/lib/auth';
 
-export default function LandingPage() {
-  const { user, loading }   = useAuth();
-  const searchParams        = useSearchParams();
-  const router              = useRouter();
-  const [modalOpen, setModalOpen] = useState(false);
+// ─────────────────────────────────────────────────────────────────────────────
+// SearchParamsHandler
+// Isolated into its own component so useSearchParams() is scoped to a
+// subtree that can be wrapped in <Suspense>. This is a Next.js 16
+// requirement — any component calling useSearchParams() during SSR/SSG
+// must have a Suspense ancestor, otherwise static generation fails.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // Auto-open modal if redirected from protected route
+function SearchParamsHandler({
+  onAuthParam,
+}: {
+  onAuthParam: () => void;
+}) {
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     if (searchParams.get('auth') === 'login') {
-      setModalOpen(true);
+      onAuthParam();
     }
-  }, [searchParams]);
+  }, [searchParams, onAuthParam]);
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Landing Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function LandingPage() {
+  const { user, loading } = useAuth();
+  const router            = useRouter();
+  const [modalOpen, setModalOpen] = useState(false);
 
   // Redirect authenticated users straight to dashboard
   useEffect(() => {
@@ -30,7 +47,7 @@ export default function LandingPage() {
   }, [user, loading, router]);
 
   if (loading) return null;
-  if (user)    return null; // avoid flash before redirect
+  if (user)    return null;
 
   return (
     <>
@@ -38,44 +55,60 @@ export default function LandingPage() {
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #070B14; }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .hero-title  { animation: fadeUp 0.6s ease forwards; }
+        .hero-sub    { animation: fadeUp 0.6s 0.1s ease both; }
+        .hero-ctas   { animation: fadeUp 0.6s 0.2s ease both; }
+        .hero-pills  { animation: fadeUp 0.6s 0.35s ease both; }
       `}</style>
 
+      {/* 
+        SearchParamsHandler is wrapped in Suspense — this is the architectural
+        pattern required by Next.js 16 for useSearchParams() in static pages.
+        The null fallback means zero visible impact on the landing page.
+      */}
+      <Suspense fallback={null}>
+        <SearchParamsHandler onAuthParam={() => setModalOpen(true)} />
+      </Suspense>
+
       <div style={{
-        fontFamily:  "'Sora', sans-serif",
-        background:  '#070B14',
-        minHeight:   '100vh',
-        color:       '#E2E8F0',
-        overflow:    'hidden',
+        fontFamily: "'Sora', sans-serif",
+        background: '#070B14',
+        minHeight:  '100vh',
+        color:      '#E2E8F0',
+        overflow:   'hidden',
       }}>
 
-        {/* ── Ambient background ─────────────────────────────────────── */}
-        <div style={{
-          position:  'fixed',
-          inset:      0,
-          zIndex:     0,
-          pointerEvents: 'none',
-        }}>
+        {/* ── Ambient background glows ──────────────────────────────── */}
+        <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
           <div style={{
-            position:  'absolute',
-            top:       '-20%',
-            left:      '-10%',
-            width:     '600px',
-            height:    '600px',
+            position:     'absolute',
+            top:          '-20%',
+            left:         '-10%',
+            width:        '600px',
+            height:       '600px',
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(56,189,248,0.06) 0%, transparent 70%)',
+            background:   'radial-gradient(circle, rgba(56,189,248,0.07) 0%, transparent 70%)',
           }} />
           <div style={{
-            position:  'absolute',
-            bottom:    '-20%',
-            right:     '-10%',
-            width:     '500px',
-            height:    '500px',
+            position:     'absolute',
+            bottom:       '-20%',
+            right:        '-10%',
+            width:        '500px',
+            height:       '500px',
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(124,58,237,0.06) 0%, transparent 70%)',
+            background:   'radial-gradient(circle, rgba(124,58,237,0.07) 0%, transparent 70%)',
           }} />
         </div>
 
-        {/* ── Minimal header — NO NAV, just logo + CTA ───────────────── */}
+        {/* ── Header — logo + auth CTAs only, no nav ─────────────────── */}
         <header style={{
           position:       'relative',
           zIndex:          10,
@@ -155,21 +188,24 @@ export default function LandingPage() {
           textAlign:      'center',
         }}>
 
-          {/* Badge */}
-          <div style={{
-            display:       'inline-flex',
-            alignItems:    'center',
-            gap:           '8px',
-            padding:       '6px 14px',
-            background:    'rgba(56,189,248,0.08)',
-            border:        '1px solid rgba(56,189,248,0.2)',
-            borderRadius:  '20px',
-            fontSize:      '12px',
-            color:         '#38BDF8',
-            marginBottom:  '2rem',
-            fontWeight:     500,
-            letterSpacing: '0.04em',
-          }}>
+          {/* AI badge */}
+          <div
+            className="hero-title"
+            style={{
+              display:      'inline-flex',
+              alignItems:   'center',
+              gap:          '8px',
+              padding:      '6px 14px',
+              background:   'rgba(56,189,248,0.08)',
+              border:       '1px solid rgba(56,189,248,0.2)',
+              borderRadius: '20px',
+              fontSize:     '12px',
+              color:        '#38BDF8',
+              marginBottom: '2rem',
+              fontWeight:    500,
+              letterSpacing:'0.04em',
+            }}
+          >
             <span style={{
               width:        '6px',
               height:       '6px',
@@ -182,40 +218,49 @@ export default function LandingPage() {
           </div>
 
           {/* Headline */}
-          <h1 style={{
-            fontSize:      'clamp(2.5rem, 6vw, 4.5rem)',
-            fontWeight:     800,
-            lineHeight:     1.1,
-            letterSpacing: '-0.03em',
-            color:         '#F1F5F9',
-            marginBottom:  '1.25rem',
-            maxWidth:      '900px',
-          }}>
+          <h1
+            className="hero-title"
+            style={{
+              fontSize:      'clamp(2.5rem, 6vw, 4.5rem)',
+              fontWeight:     800,
+              lineHeight:     1.1,
+              letterSpacing: '-0.03em',
+              color:         '#F1F5F9',
+              marginBottom:  '1.25rem',
+              maxWidth:      '900px',
+            }}
+          >
             Land Your Dream Job
             <br />
             <span style={{
-              background:            'linear-gradient(135deg, #38BDF8, #818CF8)',
-              WebkitBackgroundClip:  'text',
-              WebkitTextFillColor:   'transparent',
+              background:           'linear-gradient(135deg, #38BDF8, #818CF8)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor:  'transparent',
             }}>
               With AI Precision
             </span>
           </h1>
 
-          {/* Subheadline */}
-          <p style={{
-            fontSize:     'clamp(1rem, 2vw, 1.2rem)',
-            color:        'rgba(255,255,255,0.45)',
-            lineHeight:    1.7,
-            maxWidth:     '580px',
-            marginBottom: '2.5rem',
-          }}>
+          {/* Sub */}
+          <p
+            className="hero-sub"
+            style={{
+              fontSize:     'clamp(1rem, 2vw, 1.2rem)',
+              color:        'rgba(255,255,255,0.45)',
+              lineHeight:    1.7,
+              maxWidth:     '580px',
+              marginBottom: '2.5rem',
+            }}
+          >
             Upload your resume, get AI-matched to thousands of jobs,
-            and track every application — all in one place.
+            and track every application — all in one intelligent platform.
           </p>
 
-          {/* CTA buttons */}
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          {/* CTAs */}
+          <div
+            className="hero-ctas"
+            style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}
+          >
             <button
               onClick={() => setModalOpen(true)}
               style={{
@@ -264,33 +309,32 @@ export default function LandingPage() {
                 (e.currentTarget.style.color = 'rgba(255,255,255,0.7)');
               }}
             >
-              I'm a Recruiter
+              I&apos;m a Recruiter
             </button>
           </div>
 
-          {/* Social proof */}
-          <p style={{
-            fontSize:   '12px',
-            color:      'rgba(255,255,255,0.2)',
-            marginTop:  '1.5rem',
-          }}>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.2)', marginTop: '1.25rem' }}>
             No credit card required · Free to get started
           </p>
 
           {/* Feature pills */}
-          <div style={{
-            display:       'flex',
-            gap:           '10px',
-            flexWrap:      'wrap',
-            justifyContent:'center',
-            marginTop:     '4rem',
-          }}>
+          <div
+            className="hero-pills"
+            style={{
+              display:        'flex',
+              gap:            '10px',
+              flexWrap:       'wrap',
+              justifyContent: 'center',
+              marginTop:      '4rem',
+            }}
+          >
             {[
-              { icon: '🤖', label: 'AI Resume Analysis' },
-              { icon: '🎯', label: 'Smart Job Matching'  },
-              { icon: '⚡', label: 'Real-Time Alerts'    },
-              { icon: '🎤', label: 'Mock Interviews'     },
-              { icon: '📊', label: 'Application Tracking'},
+              { icon: '🤖', label: 'AI Resume Analysis'   },
+              { icon: '🎯', label: 'Smart Job Matching'    },
+              { icon: '⚡', label: 'Real-Time Alerts'      },
+              { icon: '🎤', label: 'Mock Interviews'       },
+              { icon: '📊', label: 'Application Tracking'  },
+              { icon: '🏢', label: 'Recruiter Dashboard'   },
             ].map(f => (
               <div
                 key={f.label}
@@ -304,6 +348,15 @@ export default function LandingPage() {
                   borderRadius: '20px',
                   fontSize:     '12px',
                   color:        'rgba(255,255,255,0.5)',
+                  transition:   'all 0.2s',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget.style.background = 'rgba(255,255,255,0.06)');
+                  (e.currentTarget.style.color = 'rgba(255,255,255,0.8)');
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget.style.background = 'rgba(255,255,255,0.03)');
+                  (e.currentTarget.style.color = 'rgba(255,255,255,0.5)');
                 }}
               >
                 <span>{f.icon}</span>
@@ -318,13 +371,6 @@ export default function LandingPage() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
       />
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.4; }
-        }
-      `}</style>
     </>
   );
 }
