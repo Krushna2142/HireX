@@ -4,7 +4,7 @@ import { ThemeProvider } from 'next-themes';
 import { AuthProvider } from '../components/providers/AuthProvider';
 import ReactQueryProvider from './_providers/ReactQueryProvider';
 import { Toaster } from 'react-hot-toast';
-
+import { Sidebar } from '@/app/_components/shared/Sidebar'
 export const metadata = {
   title: 'JobCrawler',
   description: 'AI Job Assistant • Jobs • Recommendations • Resume • Mock Interview • Chatbot • Dashboard',
