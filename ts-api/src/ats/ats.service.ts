@@ -1,3 +1,5 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // src/ats/ats.service.ts
 
 import { Injectable, InternalServerErrorException } from '@nestjs/common';

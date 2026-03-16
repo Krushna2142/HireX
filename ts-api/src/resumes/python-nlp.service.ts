@@ -1,17 +1,19 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable prettier/prettier */
 // src/resumes/python-nlp.service.ts
 //
-// HTTP client for the deployed Python spaCy NLP API.
-// URL: https://job-crawler-fpat.onrender.com
+// HTTP client for the Python spaCy NLP API deployed on Render.
 //
-// Why spaCy over Groq for resume parsing:
-//   ✅ Deterministic — same input always produces same output
-//   ✅ Purpose-built NER — trained on entity extraction tasks
-//   ✅ Your infrastructure — no per-request API cost
-//   ✅ No hallucination risk — rule-based + ML, not generative
-//   ✅ Faster — no LLM inference overhead
+// Responsibilities:
+//   - POST raw resume text to Python /analyse endpoint
+//   - Handle timeouts, retries, and error normalisation
+//   - Health check on startup to surface config problems early
+//
+// Environment variables:
+//   PYTHON_NLP_API_URL — base URL of deployed Python service
+//                        e.g. https://job-crawler-nlp.onrender.com
+//   PYTHON_NLP_API_KEY — optional Bearer token if API is protected
 
 import {
   Injectable,
@@ -24,10 +26,8 @@ import { HttpService }   from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError }    from 'axios';
 
-// ── Response shape from Python spaCy API ─────────────────────────────────────
-// These match the FastAPI response model from your Python service.
-// If your Python API returns different field names, update the
-// mapping in ResumeAnalysisService, not here.
+// ── Response shape from Python API ───────────────────────────────────────────
+// Must match AnalyseResponse in python/app/models/schemas.py exactly.
 
 export interface NlpPersonalInfo {
   name:      string | null;
@@ -95,60 +95,66 @@ export interface NlpAnalysisResult {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// Render free tier cold starts can take 30-60s — generous timeout
-const REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 60_000;  // spaCy on cold start can be slow
 const MAX_RETRIES        = 2;
-const RETRY_DELAY_MS     = 3_000;
+const RETRY_DELAY_MS     = 2_000;
+
+// ── Service ───────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class PythonNlpService implements OnModuleInit {
   private readonly logger  = new Logger(PythonNlpService.name);
   private readonly baseUrl: string;
+  private readonly apiKey:  string | null;
 
   constructor(
     private readonly config:      ConfigService,
     private readonly httpService: HttpService,
   ) {
-    // Fallback to your deployed Render URL if env var not set
     this.baseUrl = (
-      this.config.get<string>('PYTHON_NLP_API_URL') ||
-      'https://job-crawler-fpat.onrender.com'
+      this.config.get<string>('PYTHON_NLP_API_URL') ?? 'http://localhost:8001'
     ).replace(/\/$/, '');   // strip trailing slash
+
+    this.apiKey = this.config.get<string>('PYTHON_NLP_API_KEY') ?? null;
   }
 
   // ── Startup health check ──────────────────────────────────────────────────
-  // Render free tier spins down after inactivity. The health check
-  // wakes the service on NestJS startup so the first resume analysis
-  // doesn't time out waiting for a cold start.
+  // Validates the Python API is reachable before the first resume upload.
+  // Logs a warning but does NOT crash the app — Render cold starts mean
+  // the Python service may not be ready the instant NestJS boots.
 
   async onModuleInit(): Promise<void> {
-    this.logger.log(`[nlp] Pinging Python NLP service at ${this.baseUrl}`);
+    this.logger.log(`[nlp] Connecting to Python NLP API at: ${this.baseUrl}`);
+
     try {
-      await firstValueFrom(
+      const { data } = await firstValueFrom(
         this.httpService.get(`${this.baseUrl}/health`, {
-          timeout: 10_000,
+          headers: this.buildHeaders(),
+          timeout: 8_000,
         }),
       );
-      this.logger.log(`✅ Python spaCy NLP service is reachable at ${this.baseUrl}`);
+
+      this.logger.log(
+        `✅ Python NLP API reachable — ` +
+        `model_loaded: ${data.model_loaded} | ` +
+        `startup_time: ${data.startup_time ?? 'N/A'}`,
+      );
     } catch {
       this.logger.warn(
-        `⚠️  Python NLP service not reachable at ${this.baseUrl}\n` +
-        `   This is expected on first deploy (Render cold start).\n` +
-        `   Resume analysis will retry automatically when the service wakes.\n` +
-        `   Set PYTHON_NLP_API_URL in your environment if the URL has changed.`,
+        `⚠️  Python NLP API not reachable at ${this.baseUrl}\n` +
+        `   Resume analysis will fail until the service is available.\n` +
+        `   Check: PYTHON_NLP_API_URL environment variable on Render.\n` +
+        `   Expected: GET ${this.baseUrl}/health → { status: "ok" }`,
       );
     }
   }
 
-  // ── Primary method: POST /analyse ─────────────────────────────────────────
-  // Sends raw resume text to the Python spaCy API.
-  // Returns structured NLP extraction result.
+  // ── Primary method: analyse resume text ──────────────────────────────────
+  // Sends raw text to POST /analyse and returns structured extraction.
+  // Retries on network errors and 5xx responses.
+  // Does NOT retry on 4xx — bad request won't improve with retries.
 
-  async analyseResume(rawText: string): Promise<NlpAnalysisResult> {
-    this.logger.log(
-      `[nlp] Sending ${rawText.length} chars to spaCy API at ${this.baseUrl}/analyse`,
-    );
-
+  async analyseText(rawText: string): Promise<NlpAnalysisResult> {
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
@@ -160,60 +166,65 @@ export class PythonNlpService implements OnModuleInit {
             `${this.baseUrl}/analyse`,
             { text: rawText },
             {
-              headers: { 'Content-Type': 'application/json' },
-              timeout: REQUEST_TIMEOUT_MS,
+              headers: this.buildHeaders(),
+              timeout: DEFAULT_TIMEOUT_MS,
             },
           ),
         );
 
-        const elapsedMs = Date.now() - startMs;
+        const elapsed = Date.now() - startMs;
         this.logger.log(
-          `[nlp] ✅ spaCy analysis complete in ${elapsedMs}ms — ` +
-          `${data.skills?.length ?? 0} skills, ` +
-          `${data.workExperience?.length ?? 0} roles, ` +
-          `${data.education?.length ?? 0} education entries`,
+          `[nlp] Analysis complete in ${elapsed}ms — ` +
+          `${data.skills?.length ?? 0} skills | ` +
+          `${data.workExperience?.length ?? 0} roles | ` +
+          `level: ${data.experienceLevel}`,
         );
 
         return data;
 
       } catch (err) {
-        lastError    = err as Error;
-        const axErr  = err as AxiosError;
-        const status = axErr?.response?.status;
-        const detail = (axErr?.response?.data as any)?.detail;
+        lastError      = err as Error;
+        const axiosErr = err as AxiosError;
+        const status   = axiosErr?.response?.status;
+        const detail   = (axiosErr?.response?.data as any)?.detail ?? lastError.message;
 
-        // 4xx = our problem (bad input) — don't retry
+        // Hard 4xx failure — bad request, no point retrying
         if (status && status >= 400 && status < 500) {
-          this.logger.error(
-            `[nlp] Client error ${status}: ${detail ?? lastError.message}`,
-          );
+          this.logger.error(`[nlp] Client error ${status}: ${detail}`);
           throw new InternalServerErrorException(
-            `NLP API rejected the request (${status}): ${detail ?? lastError.message}`,
+            `NLP API rejected request (${status}): ${detail}`,
           );
         }
 
-        // Network / 5xx — retry with backoff
-        const backoffMs = RETRY_DELAY_MS * attempt;
         this.logger.warn(
           `[nlp] Attempt ${attempt}/${MAX_RETRIES + 1} failed: ${lastError.message}` +
-          (attempt <= MAX_RETRIES
-            ? ` — retrying in ${backoffMs}ms (Render may be cold-starting)`
-            : ' — no more retries'),
+          (attempt <= MAX_RETRIES ? ` — retrying in ${RETRY_DELAY_MS * attempt}ms` : ''),
         );
 
         if (attempt <= MAX_RETRIES) {
-          await this.sleep(backoffMs);
+          await this.sleep(RETRY_DELAY_MS * attempt);  // 2s → 4s backoff
         }
       }
     }
 
     throw new InternalServerErrorException(
-      `Python spaCy NLP service failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message}. ` +
-      `Check that ${this.baseUrl} is running.`,
+      `Python NLP API failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message}`,
     );
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    return headers;
+  }
+
   private sleep(ms: number): Promise<void> {
-    return new Promise(r => setTimeout(r, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

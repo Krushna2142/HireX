@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient } from 'pg';

@@ -1,119 +1,266 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters", "partialIndexes"]
+}
+
 datasource db {
   provider = "postgresql"
 }
 
-generator client {
-  provider = "prisma-client-js"
-}
-
 model Resume {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  fileName  String?  @map("file_name")
-  rawFile   String?  @map("raw_file")
-  content   String?  @map("content")   // ✅ nullable — populated after parsing
-  status    String?
-  analysis  Json?
-  fileBytes Bytes?   @map("file_bytes")
-  createdAt DateTime @default(now()) @map("created_at")
+  id             String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId         String                 @map("user_id") @db.Uuid
+  content        String?                @map("content")
+  embedding      Unsupported("vector")?
+  status         String?                @default("processing")
+  createdAt      DateTime?              @default(now()) @map("created_at") @db.Timestamptz(6)
+  fileName       String?                @map("file_name")
+  analysis       Json?
+  rawFile        String?                @map("raw_file")
+  fileBytes      Bytes?                 @map("file_bytes")
+  applications   applications[]
+  resumeAnalysis ResumeAnalysis?
+  users          users                  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@index([userId], map: "idx_resumes_user_id")
   @@map("resumes")
 }
+
 model ResumeAnalysis {
-  id               String    @id @default(uuid())
-  resumeId         String    @unique @map("resume_id")
-  rawText          String    @map("raw_text")
-  personalInfo     Json      @map("personal_info")
-  workExperience   Json      @map("work_experience")
-  education        Json
-  skills           Json
-  certifications   Json
-  projects         Json
-  languages        Json
-  experienceYears  Float     @map("experience_years")
-  experienceLevel  String    @map("experience_level")
-  topSkills        String[]  @map("top_skills")
-  industryTags     String[]  @map("industry_tags")
-  trajectory       String?
-  status           String    @default("pending")
-  processedAt      DateTime? @map("processed_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resumeId        String    @unique @map("resume_id") @db.Uuid
+  rawText         String    @map("raw_text")
+  personalInfo    Json      @default("{}") @map("personal_info")
+  workExperience  Json      @default("[]") @map("work_experience")
+  education       Json      @default("[]")
+  skills          Json      @default("[]")
+  certifications  Json      @default("[]")
+  projects        Json      @default("[]")
+  languages       Json      @default("[]")
+  experienceYears Float     @default(0) @map("experience_years")
+  experienceLevel String    @default("junior") @map("experience_level")
+  topSkills       String[]  @default([]) @map("top_skills")
+  industryTags    String[]  @default([]) @map("industry_tags")
+  trajectory      String?
+  status          String    @default("pending")
+  processedAt     DateTime? @map("processed_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  resume          Resume    @relation(fields: [resumeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@map("resume_analyses")
 }
 
 model CandidateProfile {
-  id                  String    @id @default(uuid())
-  userId              String    @unique @map("user_id")
-  headline            String?
-  bio                 String?
-  photoUrl            String?   @map("photo_url")
-  location            String?
-  phone               String?
-  availability        String    @default("immediate")
-  targetRoles         String[]  @map("target_roles")
-  targetIndustries    String[]  @map("target_industries")
-  employmentTypes     String[]  @map("employment_types")
-  workMode            String?   @map("work_mode")
-  salaryMin           Int?      @map("salary_min")
-  salaryMax           Int?      @map("salary_max")
-  salaryCurrency      String    @default("USD") @map("salary_currency")
-  salaryNegotiable    Boolean   @default(true) @map("salary_negotiable")
-  willingToRelocate   Boolean   @default(false) @map("willing_to_relocate")
-  preferredLocations  String[]  @map("preferred_locations")
-  currentTitle        String?   @map("current_title")
-  currentCompany      String?   @map("current_company")
-  experienceYears     Float?    @map("experience_years")
-  experienceLevel     String?   @map("experience_level")
-  topSkills           String[]  @map("top_skills")
-  activeResumeId      String?   @map("active_resume_id")
-  isVisible           Boolean   @default(true) @map("is_visible")
-  profileCompletion   Int       @default(0) @map("profile_completion")
-  lastActiveAt        DateTime  @default(now()) @map("last_active_at")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  headline           String?
+  bio                String?
+  photoUrl           String?  @map("photo_url")
+  location           String?
+  phone              String?
+  availability       String   @default("immediate")
+  targetRoles        String[] @default([]) @map("target_roles")
+  targetIndustries   String[] @default([]) @map("target_industries")
+  employmentTypes    String[] @default([]) @map("employment_types")
+  workMode           String?  @map("work_mode")
+  salaryMin          Int?     @map("salary_min")
+  salaryMax          Int?     @map("salary_max")
+  salaryCurrency     String   @default("USD") @map("salary_currency")
+  salaryNegotiable   Boolean  @default(true) @map("salary_negotiable")
+  willingToRelocate  Boolean  @default(false) @map("willing_to_relocate")
+  preferredLocations String[] @default([]) @map("preferred_locations")
+  currentTitle       String?  @map("current_title")
+  currentCompany     String?  @map("current_company")
+  experienceYears    Float?   @map("experience_years")
+  experienceLevel    String?  @map("experience_level")
+  topSkills          String[] @default([]) @map("top_skills")
+  activeResumeId     String?  @map("active_resume_id") @db.Uuid
+  isVisible          Boolean  @default(true) @map("is_visible")
+  profileCompletion  Int      @default(0) @map("profile_completion")
+  lastActiveAt       DateTime @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("candidate_profiles")
 }
 
 model RecruiterProfile {
-  id                  String    @id @default(uuid())
-  userId              String    @unique @map("user_id")
-  title               String?
-  photoUrl            String?   @map("photo_url")
-  phone               String?
-  linkedinUrl         String?   @map("linkedin_url")
-  isVerified          Boolean   @default(false) @map("is_verified")
-  companyName         String?   @map("company_name")
-  companySize         String?   @map("company_size")
-  companyIndustry     String[]  @map("company_industry")
-  companyWebsite      String?   @map("company_website")
-  companyLogoUrl      String?   @map("company_logo_url")
-  companyDescription  String?   @map("company_description")
-  companyLocation     String?   @map("company_location")
-  hiringRoles         String[]  @map("hiring_roles")
-  typicalStack        String[]  @map("typical_stack")
-  hiringVolume        String?   @map("hiring_volume")
-  openToRemote        Boolean   @default(true) @map("open_to_remote")
-  subscriptionTier    String    @default("free") @map("subscription_tier")
-  monthlyViewLimit    Int       @default(50) @map("monthly_view_limit")
-  viewsUsedThisMonth  Int       @default(0) @map("views_used_this_month")
-  profileCompletion   Int       @default(0) @map("profile_completion")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  title              String?
+  photoUrl           String?  @map("photo_url")
+  phone              String?
+  linkedinUrl        String?  @map("linkedin_url")
+  isVerified         Boolean  @default(false) @map("is_verified")
+  companyName        String?  @map("company_name")
+  companySize        String?  @map("company_size")
+  companyIndustry    String[] @default([]) @map("company_industry")
+  companyWebsite     String?  @map("company_website")
+  companyLogoUrl     String?  @map("company_logo_url")
+  companyDescription String?  @map("company_description")
+  companyLocation    String?  @map("company_location")
+  hiringRoles        String[] @default([]) @map("hiring_roles")
+  typicalStack       String[] @default([]) @map("typical_stack")
+  hiringVolume       String?  @map("hiring_volume")
+  openToRemote       Boolean  @default(true) @map("open_to_remote")
+  subscriptionTier   String   @default("free") @map("subscription_tier")
+  monthlyViewLimit   Int      @default(50) @map("monthly_view_limit")
+  viewsUsedThisMonth Int      @default(0) @map("views_used_this_month")
+  profileCompletion  Int      @default(0) @map("profile_completion")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("recruiter_profiles")
 }
-/*
 
-## Implementation Order
-```
-1. npx prisma db push          ← create new tables
-2. OllamaModule + OllamaService
-3. ResumeAnalysisService (text extraction + inference)
-4. ResumesProcessor (BullMQ worker)
-5. Wire BullMQ into ResumesModule
-6. Test locally: ollama pull llama3.1:8b → npm start → POST /resumes/upload-raw
-7. Deploy Ollama as separate Render service
-8. Set OLLAMA_BASE_URL in Render environment
-*/
+model Job {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recruiterId        String               @map("recruiter_id") @db.Uuid
+  title              String
+  description        String
+  company            String
+  location           String?
+  work_mode          String?              @default("hybrid")
+  employment_type    String?              @default("full_time")
+  salary_min         Int?
+  salary_max         Int?
+  salary_currency    String?              @default("INR")
+  required_skills    String[]             @default([])
+  experience_min     Float?               @default(0)
+  experience_max     Float?
+  industry           String?
+  status             String?              @default("active")
+  applicant_count    Int?                 @default(0)
+  createdAt          DateTime?            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime?            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  source             String               @default("internal") @db.VarChar(20)
+  external_id        String?              @unique @db.VarChar(255)
+  applyUrl           String?              @map("apply_url")
+  expiresAt          DateTime?            @map("expires_at") @db.Timestamptz(6)
+  sync_batch         String?              @db.VarChar(50)
+  applications       applications[]
+  recruiter          users                @relation(fields: [recruiterId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expiresAt], map: "idx_jobs_expires_at")
+  @@index([external_id], map: "idx_jobs_external_id")
+  @@index([recruiterId], map: "idx_jobs_recruiter")
+  @@index([recruiterId], map: "idx_jobs_recruiter_id")
+  @@index([required_skills], map: "idx_jobs_skills", type: Gin)
+  @@index([source], map: "idx_jobs_source")
+  @@index([status], map: "idx_jobs_status")
+  @@index([status, createdAt(sort: Desc)], map: "idx_jobs_status_created")
+  @@index([status, source], map: "idx_jobs_status_src")
+  @@map("jobs")
+}
+
+model JobApplication {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId       String    @map("job_id") @db.Uuid
+  candidateId String    @map("candidate_id")
+  resumeId    String?   @map("resume_id") @db.Uuid
+  status      String?   @default("applied")
+  coverNote   String?   @map("cover_note")
+  appliedAt   DateTime? @default(now()) @map("applied_at") @db.Timestamptz(6)
+  updatedAt   DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+
+  @@unique([jobId, candidateId])
+  @@index([candidateId], map: "idx_job_applications_candidate")
+  @@index([jobId, status], map: "idx_job_applications_job")
+  @@map("job_applications")
+}
+
+model alerts {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String    @db.Uuid
+  type       String
+  title      String
+  message    String
+  metadata   Json?     @default("{}")
+  read       Boolean?  @default(false)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, read], map: "idx_alerts_unread", where: raw("(read = false)"))
+  @@index([user_id], map: "idx_alerts_user")
+}
+
+model applications {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  job_id          String    @db.Uuid
+  candidate_id    String    @db.Uuid
+  resume_id       String?   @db.Uuid
+  match_score     Float?
+  status          String?   @default("applied")
+  cover_letter    String?
+  recruiter_notes String?
+  applied_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  users           users     @relation(fields: [candidate_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  jobs            Job       @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  resumes         Resume?   @relation(fields: [resume_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([job_id, candidate_id])
+  @@index([candidate_id], map: "idx_applications_cand")
+  @@index([job_id], map: "idx_applications_job")
+  @@index([status], map: "idx_applications_stat")
+}
+
+model interview_questions {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id         String             @db.Uuid
+  question_number    Int
+  question           String
+  category           String?
+  difficulty         String?            @default("medium")
+  ideal_answer       String?
+  user_answer        String?
+  score              Float?
+  feedback           String?
+  time_taken_secs    Int?
+  answered_at        DateTime?          @db.Timestamptz(6)
+  created_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  interview_sessions interview_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([session_id], map: "idx_questions_session")
+}
+
+model interview_sessions {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  candidate_id        String                @db.Uuid
+  job_id              String?               @db.Uuid
+  job_title           String
+  company             String?
+  session_type        String?               @default("technical")
+  status              String?               @default("in_progress")
+  overall_score       Float?
+  total_questions     Int?                  @default(0)
+  completed_at        DateTime?             @db.Timestamptz(6)
+  created_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  interview_questions interview_questions[]
+  users               users                 @relation(fields: [candidate_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+
+  @@index([candidate_id], map: "idx_sessions_candidate")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model users {
+  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  full_name          String
+  email              String               @unique
+  password_hash      String
+  reset_token        String?
+  reset_token_expiry DateTime?            @db.Timestamptz(6)
+  created_at         DateTime?            @default(now()) @db.Timestamptz(6)
+  role               String               @default("candidate")
+  alerts             alerts[]
+  applications       applications[]
+  interview_sessions interview_sessions[]
+  jobs               Job[]
+  resumes            Resume[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([reset_token], map: "idx_users_reset_token")
+  @@index([role], map: "idx_users_role")
+}

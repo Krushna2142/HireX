@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 // src/ats/ats.module.ts
 
 import { Module } from '@nestjs/common';

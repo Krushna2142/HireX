@@ -1,64 +1,39 @@
 /* eslint-disable prettier/prettier */
-// ts-api/src/config/configuration.ts
+// src/config/configuration.ts
+export default () => ({
+  port: parseInt(process.env.PORT ?? '3001', 10),
+  nodeEnv: process.env.NODE_ENV ?? 'development',
 
-function parseRedisUrl(url?: string) {
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    return {
-      host:     parsed.hostname,
-      port:     parseInt(parsed.port || '6379'),
-      password: parsed.password || undefined,
-      tls:      parsed.protocol === 'rediss:',  // rediss:// = TLS enabled
-    };
-  } catch {
-    return null;
-  }
-}
+  jwt: {
+    secret:    process.env.JWT_SECRET ?? 'supersecretkey',
+    expiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+  },
 
-export default () => {
-  const redisFromUrl = parseRedisUrl(process.env.REDIS_URL);
+  supabase: {
+    url:            process.env.SUPABASE_URL ?? '',
+    anonKey:        process.env.SUPABASE_ANON_KEY ?? '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+  },
 
-  return {
-    database: {
-      host:             process.env.DB_HOST             || 'localhost',
-      port:             parseInt(process.env.DB_PORT    || '5432', 10),
-      user:             process.env.DB_USER             || 'postgres',
-      password:         process.env.DB_PASSWORD         || '',
-      name:             process.env.DB_NAME             || 'postgres',
-      connectionString: process.env.DATABASE_URL,
-    },
+  groq: {
+    apiKey: process.env.GROQ_API_KEY ?? '',
+    model:  process.env.GROQ_MODEL   ?? 'mixtral-8x7b-32768',
+  },
 
-    jwt: {
-      secret:    process.env.JWT_SECRET    || 'change-me-in-production',
-      expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-    },
+  // Redis — supports both URL format (Upstash/Railway) and host/port (self-hosted)
+  redis: {
+    url:      process.env.REDIS_URL      ?? null,  // ← primary, used by BullMQ
+    host:     process.env.REDIS_HOST     ?? 'localhost',
+    port:     parseInt(process.env.REDIS_PORT ?? '6379', 10),
+    password: process.env.REDIS_PASSWORD ?? undefined,
+    tls:      process.env.REDIS_TLS      === 'true',
+  },
 
-    ollama: {
-      baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-      model:   process.env.OLLAMA_MODEL    || 'llama3.1:8b',
-    },
+  serpApiKey: process.env.SERPAPI_KEY ?? '',
 
-    smtp: {
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      user: process.env.SMTP_USER || '',
-      pass: process.env.SMTP_PASS || '',
-    },
+  database: {
+    url: process.env.DATABASE_URL ?? '',
+  },
 
-    // ── Redis — supports both REDIS_URL (Render/Upstash) and
-    //   individual vars (local dev). URL takes precedence.
-    redis: {
-      host:     redisFromUrl?.host     || process.env.REDIS_HOST     || 'localhost',
-      port:     redisFromUrl?.port     || parseInt(process.env.REDIS_PORT || '6379'),
-      password: redisFromUrl?.password || process.env.REDIS_PASSWORD || undefined,
-      tls:      redisFromUrl?.tls      ?? process.env.REDIS_TLS === 'true',
-    },
-
-    frontendUrl:   process.env.FRONTEND_URL   || 'http://localhost:3000',
-    pythonApiUrl:  process.env.PYTHON_API_URL,
-    pythonApiKey:  process.env.PYTHON_API_KEY,
-    serpApiKey:    process.env.SERPAPI_KEY,
-    redisUrl:      process.env.REDIS_URL,       // preserved for raw access if needed
-  };
-};
+  frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3000',
+});

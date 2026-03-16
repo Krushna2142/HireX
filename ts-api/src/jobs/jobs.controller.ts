@@ -1,20 +1,26 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable prettier/prettier */
+// src/jobs/jobs.controller.ts
+
 import {
-  Controller, Post, Get, Patch, Param,
-  Body, Query, Req,
+  Controller, Get, Post, Patch, Param,
+  Body, Query, Req, UseGuards,
 } from '@nestjs/common';
-import { JobsService } from './jobs.service';
-import { CreateJobDto } from './dto/create-job.dto';
+import { JwtAuthGuard }  from '../auth/guards/jwt-auth.guard';
+import { Public }        from '../auth/decorators/public.decorators';
+import { JobsService }   from './jobs.service';
+import { CreateJobDto }  from './dto/create-job.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
-import { Public } from '../auth/decorators/public.decorators';
 
 @Controller('jobs')
+@UseGuards(JwtAuthGuard)
 export class JobsController {
   constructor(private readonly jobs: JobsService) {}
 
-  // ── Public: unified job feed (internal + SerpAPI) ─────────────────────────
+  // ── Public: browse all jobs (both sources) ────────────────────────────────
+  // ?source=all|internal|serpapi  controls which jobs are returned
+  // ?search=react&workMode=remote&skills=typescript,node
 
   @Public()
   @Get()
@@ -25,61 +31,52 @@ export class JobsController {
     @Query('salaryMin')       salaryMin?: string,
     @Query('skills')          skills?: string,
     @Query('page')            page?: string,
-    @Query('includeExternal') includeExternal?: string,
+    @Query('source')          source?: string,
   ) {
-    // Pass userId if authenticated so match scores can be computed
-    const userId = req.user?.id || null;
-    return this.jobs.browseJobsUnified(userId, {
+    return this.jobs.browseJobs(req.user?.id ?? null, {
       search,
       workMode,
-      salaryMin:       salaryMin ? parseInt(salaryMin) : undefined,
-      skills:          skills ? skills.split(',') : undefined,
-      page:            page ? parseInt(page) : 1,
-      includeExternal: includeExternal !== 'false',
+      salaryMin:  salaryMin  ? parseInt(salaryMin,  10) : undefined,
+      skills:     skills     ? skills.split(',')        : undefined,
+      page:       page       ? parseInt(page,       10) : 1,
+      source:     (source as 'internal' | 'serpapi' | 'all') ?? 'all',
     });
   }
 
-  // ── Recruiter: post a job ─────────────────────────────────────────────────
+  // ── Candidate: personalised recommendations ───────────────────────────────
+  // Returns skill-matched jobs from BOTH sources, scored and ranked
 
-  @Post()
-  create(@Req() req: any, @Body() dto: CreateJobDto) {
-    return this.jobs.createJob(req.user.id, dto);
+  @Get('recommendations')
+  recommendations(@Req() req: any) {
+    return this.jobs.getRecommendations(req.user.id);
   }
 
-  // ── Recruiter: own postings with pipeline stats ───────────────────────────
+  // ── Candidate: own applications ───────────────────────────────────────────
+
+  @Get('applications/mine')
+  myApplications(@Req() req: any) {
+    return this.jobs.getCandidateApplications(req.user.id);
+  }
+
+  // ── Recruiter: own internal postings with pipeline stats ─────────────────
 
   @Get('mine')
-  getMyJobs(@Req() req: any) {
+  myJobs(@Req() req: any) {
     return this.jobs.getRecruiterJobs(req.user.id);
   }
 
-  // ── Recruiter: applicants for a specific job ──────────────────────────────
+  // ── Recruiter: applicants for a job ──────────────────────────────────────
 
   @Get(':id/applicants')
-  getApplicants(@Param('id') id: string, @Req() req: any) {
+  applicants(@Param('id') id: string, @Req() req: any) {
     return this.jobs.getJobApplicants(id, req.user.id);
   }
 
-  // ── Recruiter: move applicant through pipeline ────────────────────────────
+  // ── Recruiter: create internal job posting ────────────────────────────────
 
-  @Patch('applications/:applicationId/status')
-  updateStatus(
-    @Param('applicationId') applicationId: string,
-    @Req() req: any,
-    @Body() dto: UpdateApplicationStatusDto,
-  ) {
-    return this.jobs.updateApplicationStatus(applicationId, req.user.id, dto);
-  }
-
-  // ── Recruiter: pause / close / reopen job ────────────────────────────────
-
-  @Patch(':id/status')
-  updateJobStatus(
-    @Param('id') id: string,
-    @Req() req: any,
-    @Body('status') status: 'active' | 'paused' | 'closed',
-  ) {
-    return this.jobs.updateJobStatus(id, req.user.id, status);
+  @Post()
+  create(@Body() dto: CreateJobDto, @Req() req: any) {
+    return this.jobs.createJob(req.user.id, dto);
   }
 
   // ── Candidate: apply to internal job ─────────────────────────────────────
@@ -94,10 +91,25 @@ export class JobsController {
     return this.jobs.applyToJob(req.user.id, id, resumeId, coverLetter);
   }
 
-  // ── Candidate: own application history ───────────────────────────────────
+  // ── Recruiter: move application through pipeline ──────────────────────────
 
-  @Get('applications/mine')
-  myApplications(@Req() req: any) {
-    return this.jobs.getCandidateApplications(req.user.id);
+  @Patch('applications/:appId/status')
+  updateAppStatus(
+    @Param('appId') appId: string,
+    @Req() req: any,
+    @Body() dto: UpdateApplicationStatusDto,
+  ) {
+    return this.jobs.updateApplicationStatus(appId, req.user.id, dto);
+  }
+
+  // ── Recruiter: update job status (active/paused/closed) ──────────────────
+
+  @Patch(':id/status')
+  updateJobStatus(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body('status') status: 'active' | 'paused' | 'closed',
+  ) {
+    return this.jobs.updateJobStatus(id, req.user.id, status);
   }
 }
