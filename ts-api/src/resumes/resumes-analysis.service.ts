@@ -1,172 +1,56 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable prettier/prettier */
-// src/resumes/resume-analysis.service.ts
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { LlmService} from '../ollama/Llm.service';
-import { PrismaService } from '../../prisma/prisma.service';
+// src/resumes/resumes-analysis.service.ts
+//
+// Resume analysis pipeline — orchestrates:
+//   1. Text extraction  (pdf-parse / mammoth)
+//   2. NLP analysis     (Python spaCy API — deterministic, purpose-built)
+//   3. DB persistence   (Prisma → PostgreSQL)
+//   4. Profile sync     (candidate_profiles table)
+//
+// Architecture note:
+//   LLMs (Groq) are intentionally NOT used here.
+//   spaCy NER is superior for structured extraction:
+//     - Deterministic output
+//     - No hallucination risk
+//     - Faster inference
+//     - Zero API cost
+
+import { Injectable, Logger }  from '@nestjs/common';
+import { PrismaService }       from '../../prisma/prisma.service';
+import { PythonNlpService, NlpAnalysisResult } from './Python-Nlp.service';
+import { Prisma }              from '@prisma/client';
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
-import { Prisma } from '@prisma/client';
 
-// ── Helper — converts typed arrays to Prisma-compatible JsonArray ──
+// ── Prisma JSON helper ────────────────────────────────────────────────────────
+
 function toJson<T>(data: T): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
 }
-// ── Type definitions ──────────────────────────────────────────────
 
-interface WorkExperience {
-  company: string;
-  title: string;
-  startDate: string;
-  endDate: string | null;
-  isCurrent: boolean;
-  responsibilities: string[];
-  achievements: string[];
-}
-
-interface Education {
-  institution: string;
-  degree: string;
-  field: string;
-  graduationYear: number | null;
-  gpa: string | null;
-}
-
-interface Skill {
-  name: string;
-  category: 'frontend' | 'backend' | 'devops' | 'database' | 'cloud' | 'soft' | 'other';
-  proficiency: 1 | 2 | 3 | 4 | 5;
-}
-
-interface ExtractedResume {
-  personalInfo: {
-    name: string;
-    email: string;
-    phone: string;
-    location: string;
-    linkedin: string;
-    github: string;
-    portfolio: string;
-  };
-  workExperience: WorkExperience[];
-  education: Education[];
-  skills: Skill[];
-  certifications: Array<{
-    name: string;
-    issuer: string;
-    issueDate: string;
-    expiryDate: string | null;
-  }>;
-  projects: Array<{
-    title: string;
-    description: string;
-    techStack: string[];
-    repoUrl: string | null;
-    liveUrl: string | null;
-  }>;
-  languages: Array<{
-    language: string;
-    proficiency: 'native' | 'fluent' | 'intermediate' | 'basic';
-  }>;
-  summary: string;
-  experienceYears: number;
-  experienceLevel: 'junior' | 'mid' | 'senior' | 'principal';
-  topSkills: string[];
-  industryTags: string[];
-  trajectory: string;
-}
-
-// ── System prompt ─────────────────────────────────────────────────
-
-const EXTRACTION_SYSTEM_PROMPT = `
-You are a specialized resume parser. Extract structured data from resume text.
-
-CRITICAL RULES:
-1. Return ONLY valid JSON — no preamble, no explanation, no markdown fences
-2. Never invent data not present in the resume
-3. Use null for missing fields, never empty strings
-4. Dates must be "YYYY-MM" format or null
-5. experienceYears must be calculated from actual work history dates
-6. experienceLevel: junior=0-2yrs, mid=2-5yrs, senior=5-10yrs, principal=10+yrs
-
-Return this exact JSON structure:
-{
-  "personalInfo": {
-    "name": string,
-    "email": string | null,
-    "phone": string | null,
-    "location": string | null,
-    "linkedin": string | null,
-    "github": string | null,
-    "portfolio": string | null
-  },
-  "workExperience": [{
-    "company": string,
-    "title": string,
-    "startDate": "YYYY-MM" | null,
-    "endDate": "YYYY-MM" | null,
-    "isCurrent": boolean,
-    "responsibilities": string[],
-    "achievements": string[]
-  }],
-  "education": [{
-    "institution": string,
-    "degree": string,
-    "field": string,
-    "graduationYear": number | null,
-    "gpa": string | null
-  }],
-  "skills": [{
-    "name": string,
-    "category": "frontend|backend|devops|database|cloud|soft|other",
-    "proficiency": 1-5
-  }],
-  "certifications": [{
-    "name": string,
-    "issuer": string,
-    "issueDate": string | null,
-    "expiryDate": string | null
-  }],
-  "projects": [{
-    "title": string,
-    "description": string,
-    "techStack": string[],
-    "repoUrl": string | null,
-    "liveUrl": string | null
-  }],
-  "languages": [{
-    "language": string,
-    "proficiency": "native|fluent|intermediate|basic"
-  }],
-  "summary": string,
-  "experienceYears": number,
-  "experienceLevel": "junior|mid|senior|principal",
-  "topSkills": string[],
-  "industryTags": string[],
-  "trajectory": string
-}
-`.trim();
+// ── Service ───────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class ResumeAnalysisService {
   private readonly logger = new Logger(ResumeAnalysisService.name);
 
   constructor(
-    private readonly ollama: LlmService,
+    private readonly nlp:    PythonNlpService,   // ✅ spaCy — not Groq
     private readonly prisma: PrismaService,
   ) {}
 
-  // ── Text extraction ──────────────────────────────────────────────
+  // ── Text extraction ───────────────────────────────────────────────────────
+  // Supports PDF, DOCX, DOC. Throws on unsupported types.
 
   async extractText(buffer: Buffer, mimetype: string): Promise<string> {
     if (mimetype === 'application/pdf') {
       const result = await pdfParse(buffer);
-      return result.text;
+      return result.text as string;
     }
 
     if (
@@ -177,139 +61,224 @@ export class ResumeAnalysisService {
       return result.value;
     }
 
-    throw new Error(`Unsupported MIME type for text extraction: ${mimetype}`);
+    throw new Error(
+      `Unsupported MIME type for text extraction: ${mimetype}. ` +
+      `Supported: application/pdf, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+    );
   }
 
-  // ── Main analysis pipeline ────────────────────────────────────────
+  // ── Main analysis pipeline ────────────────────────────────────────────────
 
-  async analyzeResume(resumeId: string, buffer: Buffer, mimetype: string): Promise<void> {
-    this.logger.log(`Starting analysis for resume: ${resumeId}`);
+  async analyzeResume(
+    resumeId: string,
+    buffer:   Buffer,
+    mimetype: string,
+  ): Promise<void> {
+    this.logger.log(
+      `[${resumeId}] ── Analysis pipeline starting ──────────────────────────`,
+    );
+    this.logger.log(
+      `[${resumeId}] File: ${mimetype} | ${buffer.length} bytes`,
+    );
 
-    // Mark as processing
+    // Mark as processing so frontend poll sees the state change immediately
     await this.prisma.resume.update({
       where: { id: resumeId },
-      data: { status: 'processing' },
+      data:  { status: 'processing' },
     });
 
     try {
-      // Stage 1: Extract raw text
-      this.logger.log(`Extracting text from ${mimetype}`);
+
+      // ── Stage 1: Extract raw text ─────────────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 1/4: Extracting text from file`);
       const rawText = await this.extractText(buffer, mimetype);
-      this.logger.log(`Extracted ${rawText.length} characters`);
+      this.logger.log(`[${resumeId}] Extracted ${rawText.length} characters`);
 
       if (rawText.trim().length < 50) {
-        throw new Error('Extracted text is too short — file may be scanned/image-based');
+        throw new Error(
+          `Extracted text is too short (${rawText.trim().length} chars). ` +
+          `The file may be a scanned image. Please use a text-based PDF.`,
+        );
       }
 
-      // Stage 2: Ollama inference
-      this.logger.log(`Sending to Ollama for structured extraction`);
-      const extracted = await this.ollama.extractJson<ExtractedResume>(
-        EXTRACTION_SYSTEM_PROMPT,
-        `Parse this resume:\n\n${rawText.slice(0, 8000)}`, // Token limit guard
+      // ── Stage 2: Python spaCy NLP analysis ───────────────────────────────
+      this.logger.log(
+        `[${resumeId}] Stage 2/4: Sending to Python spaCy NLP API`,
       );
 
-      this.logger.log(`Extraction complete — ${extracted.skills.length} skills, ${extracted.workExperience.length} roles`);
+      // Slice to 12,000 chars — well within spaCy's processing window.
+      // Most resumes are 500-3000 chars; this guard handles edge cases.
+      const extracted: NlpAnalysisResult = await this.nlp.analyseResume(
+        rawText.slice(0, 12_000),
+      );
 
-      // Stage 3: Persist analysis
+      this.logger.log(
+        `[${resumeId}] spaCy extraction complete: ` +
+        `${extracted.skills?.length ?? 0} skills | ` +
+        `${extracted.workExperience?.length ?? 0} roles | ` +
+        `${extracted.education?.length ?? 0} education | ` +
+        `level: ${extracted.experienceLevel}`,
+      );
+
+      // ── Stage 3: Validate before persisting ──────────────────────────────
+      // Catch malformed API responses before they corrupt the DB.
+      if (!extracted.personalInfo) {
+        throw new Error(
+          'Python NLP API returned malformed response — missing personalInfo field',
+        );
+      }
+
+      // ── Stage 4: Persist analysis to DB ──────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 3/4: Persisting analysis to database`);
+
       await this.prisma.resumeAnalysis.create({
-  data: {
-    resumeId,
-    rawText,
-    personalInfo:    toJson(extracted.personalInfo),
-    workExperience:  toJson(extracted.workExperience),
-    education:       toJson(extracted.education),
-    skills:          toJson(extracted.skills),
-    certifications:  toJson(extracted.certifications),
-    projects:        toJson(extracted.projects),
-    languages:       toJson(extracted.languages),
-    experienceYears: extracted.experienceYears,
-    experienceLevel: extracted.experienceLevel,
-    topSkills:       extracted.topSkills,
-    industryTags:    extracted.industryTags,
-    trajectory:      extracted.trajectory,
-    status:          'completed',
-    processedAt:     new Date(),
-  },
-});
+        data: {
+          resumeId,
+          rawText,
+          personalInfo:    toJson(extracted.personalInfo),
+          workExperience:  toJson(extracted.workExperience  ?? []),
+          education:       toJson(extracted.education        ?? []),
+          skills:          toJson(extracted.skills           ?? []),
+          certifications:  toJson(extracted.certifications   ?? []),
+          projects:        toJson(extracted.projects         ?? []),
+          languages:       toJson(extracted.languages        ?? []),
+          experienceYears: extracted.experienceYears          ?? 0,
+          experienceLevel: extracted.experienceLevel          ?? 'junior',
+          topSkills:       extracted.topSkills                ?? [],
+          industryTags:    extracted.industryTags             ?? [],
+          trajectory:      extracted.trajectory               ?? '',
+          status:          'completed',
+          processedAt:     new Date(),
+        },
+      });
 
-      // Stage 4: Sync to candidate profile
+      // ── Stage 5: Sync candidate profile ──────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 4/4: Syncing candidate profile`);
       await this.syncCandidateProfile(resumeId, extracted);
 
-      // Stage 5: Mark resume as analyzed
+      // ── Mark resume as analyzed ───────────────────────────────────────────
       await this.prisma.resume.update({
         where: { id: resumeId },
-        data: { status: 'analyzed', content: rawText },
+        data:  { status: 'analyzed', content: rawText },
       });
 
-      this.logger.log(`Analysis pipeline complete for resume: ${resumeId}`);
+      this.logger.log(
+        `[${resumeId}] ✅ Analysis pipeline complete ──────────────────────────`,
+      );
 
     } catch (err) {
-      this.logger.error(`Analysis failed for resume ${resumeId}: ${err.message}`);
+      const error = err as Error;
+
+      this.logger.error(
+        `[${resumeId}] ❌ Analysis pipeline failed\n` +
+        `  Stage:   ${this.inferFailedStage(error.message)}\n` +
+        `  Message: ${error.message}\n` +
+        `  Stack:   ${error.stack?.split('\n')[1]?.trim() ?? 'N/A'}`,
+      );
+
+      // Mark as failed so frontend shows error state and retry button
       await this.prisma.resume.update({
         where: { id: resumeId },
-        data: { status: 'failed' },
+        data:  { status: 'failed' },
       });
+
+      // Re-throw so BullMQ records the failure and can trigger retries
       throw err;
     }
   }
 
-  // ── Profile sync ─────────────────────────────────────────────────
+  // ── Candidate profile sync ────────────────────────────────────────────────
+  // Keeps the candidate_profiles table in sync with the latest analysis.
+  // Uses upsert — safe to call multiple times.
 
   private async syncCandidateProfile(
-    resumeId: string,
-    data: ExtractedResume,
+    resumeId:  string,
+    extracted: NlpAnalysisResult,
   ): Promise<void> {
     const resume = await this.prisma.resume.findUnique({
       where: { id: resumeId },
     });
 
-    if (!resume) return;
+    if (!resume) {
+      this.logger.warn(`[${resumeId}] Resume not found during profile sync — skipping`);
+      return;
+    }
 
-    const currentRole = data.workExperience.find((w) => w.isCurrent) 
-      ?? data.workExperience[0];
+    // Use most recent current role, fall back to first role
+    const currentRole = extracted.workExperience?.find(w => w.isCurrent)
+      ?? extracted.workExperience?.[0];
+
+    const headline = currentRole
+      ? `${currentRole.title} at ${currentRole.company}`
+      : null;
 
     await this.prisma.candidateProfile.upsert({
-      where: { userId: resume.userId },
+      where:  { userId: resume.userId },
       create: {
-        userId:          resume.userId,
-        headline:        currentRole ? `${currentRole.title} at ${currentRole.company}` : null,
-        bio:             data.summary,
-        currentTitle:    currentRole?.title ?? null,
-        currentCompany:  currentRole?.company ?? null,
-        experienceYears: data.experienceYears,
-        experienceLevel: data.experienceLevel,
-        topSkills:       data.topSkills,
-        activeResumeId:  resumeId,
-        profileCompletion: this.calculateCompletion(data),
+        userId:            resume.userId,
+        headline,
+        bio:               extracted.summary           ?? null,
+        currentTitle:      currentRole?.title          ?? null,
+        currentCompany:    currentRole?.company        ?? null,
+        experienceYears:   extracted.experienceYears   ?? 0,
+        experienceLevel:   extracted.experienceLevel   ?? 'junior',
+        topSkills:         extracted.topSkills         ?? [],
+        activeResumeId:    resumeId,
+        profileCompletion: this.calculateCompletion(extracted),
       },
       update: {
-        currentTitle:    currentRole?.title ?? null,
-        currentCompany:  currentRole?.company ?? null,
-        experienceYears: data.experienceYears,
-        experienceLevel: data.experienceLevel,
-        topSkills:       data.topSkills,
-        activeResumeId:  resumeId,
-        profileCompletion: this.calculateCompletion(data),
+        headline,
+        currentTitle:      currentRole?.title          ?? null,
+        currentCompany:    currentRole?.company        ?? null,
+        experienceYears:   extracted.experienceYears   ?? 0,
+        experienceLevel:   extracted.experienceLevel   ?? 'junior',
+        topSkills:         extracted.topSkills         ?? [],
+        activeResumeId:    resumeId,
+        profileCompletion: this.calculateCompletion(extracted),
       },
     });
 
-    this.logger.log(`Candidate profile synced for user: ${resume.userId}`);
+    this.logger.log(
+      `[${resumeId}] Candidate profile synced for userId: ${resume.userId}`,
+    );
   }
 
-  private calculateCompletion(data: ExtractedResume): number {
+  // ── Profile completion score ──────────────────────────────────────────────
+  // 0-100 score based on how complete the extracted data is.
+  // Displayed in the candidate profile UI.
+
+  private calculateCompletion(data: NlpAnalysisResult): number {
     const checks = [
-      !!data.personalInfo.name,
-      !!data.personalInfo.email,
-      !!data.personalInfo.phone,
-      !!data.personalInfo.location,
-      !!data.personalInfo.linkedin,
-      data.workExperience.length > 0,
-      data.education.length > 0,
-      data.skills.length > 0,
+      !!data.personalInfo?.name,
+      !!data.personalInfo?.email,
+      !!data.personalInfo?.phone,
+      !!data.personalInfo?.location,
+      !!data.personalInfo?.linkedin,
+      (data.workExperience?.length ?? 0) > 0,
+      (data.education?.length      ?? 0) > 0,
+      (data.skills?.length         ?? 0) > 0,
       !!data.summary,
-      data.projects.length > 0,
+      (data.projects?.length       ?? 0) > 0,
     ];
 
     return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  }
+
+  // ── Error stage inference ─────────────────────────────────────────────────
+  // Makes logs much easier to scan — tells you which stage failed
+  // without needing to read the full stack trace.
+
+  private inferFailedStage(message: string): string {
+    if (message.includes('text is too short') || message.includes('Unsupported MIME'))
+      return 'Stage 1 — Text extraction';
+    if (message.includes('NLP API') || message.includes('spaCy') || message.includes('ECONNREFUSED'))
+      return 'Stage 2 — Python NLP analysis';
+    if (message.includes('personalInfo') || message.includes('malformed'))
+      return 'Stage 2 — NLP response validation';
+    if (message.includes('Prisma') || message.includes('database') || message.includes('unique'))
+      return 'Stage 3 — Database persistence';
+    if (message.includes('profile') || message.includes('upsert'))
+      return 'Stage 4 — Profile sync';
+    return 'Unknown stage';
   }
 }
