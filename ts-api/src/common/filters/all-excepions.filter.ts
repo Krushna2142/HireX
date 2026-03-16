@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 // src/common/filters/all-exceptions.filter.ts
 import {
   ExceptionFilter,

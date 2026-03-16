@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DatabaseService } from '../database/database.service';
-import { OllamaService } from '../ollama/ollama.service';
+import { LlmService } from '../ollama/ollama.service';
 
 interface GeneratedQuestion {
   question: string;
@@ -83,7 +83,7 @@ export class InterviewsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly prisma: PrismaService,
-    private readonly ollama: OllamaService,
+    private readonly ollama: LlmService,
   ) {}
 
   // ── Start a new interview session ─────────────────────────────────────────

@@ -7,7 +7,7 @@
 /* eslint-disable prettier/prettier */
 // src/resumes/resume-analysis.service.ts
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { OllamaService } from '../ollama/ollama.service';
+import { LlmService} from '../ollama/ollama.service';
 import { PrismaService } from '../../prisma/prisma.service';
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
@@ -157,7 +157,7 @@ export class ResumeAnalysisService {
   private readonly logger = new Logger(ResumeAnalysisService.name);
 
   constructor(
-    private readonly ollama: OllamaService,
+    private readonly ollama: LlmService,
     private readonly prisma: PrismaService,
   ) {}
 
