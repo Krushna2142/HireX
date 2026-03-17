@@ -11,12 +11,12 @@ import {
 import { ConfigService }  from '@nestjs/config';
 import { HttpService }    from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { DatabaseService } from '../database/database.service';
-import { AlertsService }   from '../alerts/alerts.service';
-import { CreateJobDto }    from './dto/create-job.dto';
+import { DatabaseService }  from '../database/database.service';
+import { AlertsService }    from '../alerts/alerts.service';
+import { CreateJobDto }     from './dto/create-job.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
 
-// ── Discriminated union — every job in the system has a source ───────────────
+// ── Public types ──────────────────────────────────────────────────────────────
 
 export type JobSource = 'internal' | 'serpapi';
 
@@ -34,24 +34,50 @@ export interface UnifiedJob {
   requiredSkills:  string[];
   description:     string;
   postedAt:        string;
-  applyUrl:        string | null;    // null for internal — use /apply endpoint
-  recruiterName:   string | null;    // only for internal jobs
+  applyUrl:        string | null;
+  recruiterName:   string | null;
   applicantCount:  number;
   status:          string;
-  matchScore?:     number;           // 0–99, injected by recommendation engine
+  matchScore?:     number;
 }
-
-// ── Filter shape for browse ───────────────────────────────────────────────────
 
 export interface BrowseFilters {
-  search?:          string;
-  workMode?:        string;
-  salaryMin?:       number;
-  skills?:          string[];
-  page?:            number;
-  limit?:           number;
-  source?:          'internal' | 'serpapi' | 'all';  // explicit filter
+  search?:   string;
+  workMode?: string;
+  salaryMin?: number;
+  skills?:   string[];
+  page?:     number;
+  limit?:    number;
+  source?:   'internal' | 'serpapi' | 'all';
 }
+
+// ── Typed DB row interfaces ───────────────────────────────────────────────────
+
+interface CountRow {
+  count: string;
+}
+
+interface ProfileRow {
+  top_skills:       string[];
+  experience_level: string;
+  current_title:    string;
+  industry_tags:    string[];
+}
+
+interface OwnershipRow {
+  id:           string;
+  candidate_id: string;
+  title:        string;
+}
+
+interface JobRow {
+  id:           string;
+  title:        string;
+  recruiter_id: string;
+  source:       string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class JobsService {
@@ -67,10 +93,6 @@ export class JobsService {
     this.serpApiKey = this.config.get<string>('SERPAPI_KEY') ?? '';
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // PUBLIC BROWSE — merged feed with source filter support
-  // ══════════════════════════════════════════════════════════════════════════
-
   async browseJobs(
     userId:  string | null,
     filters: BrowseFilters,
@@ -79,16 +101,14 @@ export class JobsService {
     total:   number;
     sources: { internal: number; serpapi: number };
   }> {
-    const page  = filters.page  ?? 1;
-    const limit = filters.limit ?? 20;
+    const page   = filters.page  ?? 1;
+    const limit  = filters.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    // Build dynamic WHERE clause
     const conditions: string[] = ["j.status = 'active'"];
-    const params: unknown[] = [];
+    const params: unknown[]    = [];
     let idx = 1;
 
-    // Source filter — default to 'all'
     const sourceFilter = filters.source ?? 'all';
     if (sourceFilter !== 'all') {
       conditions.push(`j.source = $${idx}`);
@@ -124,9 +144,9 @@ export class JobsService {
 
     const where = conditions.join(' AND ');
 
-    // Parallel: count + paginated rows
     const [countResult, rowsResult] = await Promise.all([
-      this.db.query(
+      // ✅ Typed — .count is now string
+      this.db.query<CountRow>(
         `SELECT COUNT(*) FROM jobs j WHERE ${where}`,
         params,
       ),
@@ -148,37 +168,31 @@ export class JobsService {
 
     let jobs: UnifiedJob[] = rowsResult.rows.map(r => this.mapRow(r));
 
-    // Inject match scores when user is authenticated
     if (userId) {
       jobs = await this.injectMatchScores(userId, jobs);
       jobs.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
     }
 
-    // Source breakdown for UI (e.g. "12 recruiter / 8 live")
     const internal = jobs.filter(j => j.source === 'internal').length;
     const serpapi  = jobs.filter(j => j.source === 'serpapi').length;
 
     return {
       jobs,
-      total:   parseInt(countResult.rows[0].count, 10),
+      total:   parseInt(countResult.rows[0].count, 10), // ✅ string → number
       sources: { internal, serpapi },
     };
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RECOMMENDATIONS — skill-matched, ranked, both sources
-  // ══════════════════════════════════════════════════════════════════════════
-
   async getRecommendations(userId: string): Promise<UnifiedJob[]> {
     this.logger.log(`[recs] Building for userId: ${userId}`);
 
-    const profileResult = await this.db.query(
+    // ✅ Typed — top_skills is string[], not unknown
+    const profileResult = await this.db.query<ProfileRow>(
       `SELECT top_skills, experience_level, current_title, industry_tags
        FROM candidate_profiles WHERE user_id = $1`,
       [userId],
     );
 
-    // No profile = analysis hasn't run → return latest active jobs
     if (!profileResult.rows.length || !profileResult.rows[0].top_skills?.length) {
       this.logger.warn(`[recs] No profile for ${userId} — returning latest jobs`);
       return this.browseJobs(null, { limit: 12, source: 'all' })
@@ -195,7 +209,6 @@ export class JobsService {
 
     this.logger.log(`[recs] Profile: ${curTitle} | Skills: ${skills.slice(0, 4).join(', ')}`);
 
-    // Fetch all active jobs (both sources) and score them
     const { rows } = await this.db.query(
       `SELECT j.*, u.full_name AS recruiter_name,
               COUNT(a.id) AS applicant_count
@@ -207,26 +220,26 @@ export class JobsService {
       [],
     );
 
-    const normalise = (s: string) => s.toLowerCase().trim();
+    const normalise  = (s: string) => s.toLowerCase().trim();
     const userSkills = skills.map(normalise);
 
     const scored = rows
       .map((row: any) => {
-        const jobSkills  = (row.required_skills as string[] ?? []).map(normalise);
-        const jobTitle   = normalise(row.title ?? '');
-        const jobDesc    = normalise(row.description ?? '');
-        const jobLevel   = normalise(row.experience_level ?? '');
-        const jobInd     = normalise(row.industry ?? '');
+        const jobSkills = (row.required_skills as string[] ?? []).map(normalise);
+        const jobTitle  = normalise(row.title ?? '');
+        const jobDesc   = normalise(row.description ?? '');
+        const jobLevel  = normalise(row.experience_level ?? '');
+        const jobInd    = normalise(row.industry ?? '');
 
         let score = 0;
 
         for (const skill of userSkills) {
           if (jobSkills.some(js => js === skill || js.includes(skill) || skill.includes(js))) {
-            score += 10; // exact skill match — recruiter explicitly listed it
+            score += 10;
           } else if (new RegExp(`\\b${skill}\\b`).test(jobTitle)) {
-            score += 6;  // word boundary title match
+            score += 6;
           } else if (jobDesc.includes(skill)) {
-            score += 2;  // description mention
+            score += 2;
           }
         }
 
@@ -236,7 +249,7 @@ export class JobsService {
         }
 
         const daysSince = (Date.now() - new Date(row.created_at).getTime()) / 86_400_000;
-        if (daysSince < 2) score += 4;
+        if (daysSince < 2)      score += 4;
         else if (daysSince < 7) score += 2;
 
         const matchScore = score > 0
@@ -253,10 +266,6 @@ export class JobsService {
     this.logger.log(`[recs] ${scored.length} jobs matched from DB (internal + serpapi)`);
     return scored;
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // RECRUITER ACTIONS — internal jobs only
-  // ══════════════════════════════════════════════════════════════════════════
 
   async createJob(recruiterId: string, dto: CreateJobDto): Promise<UnifiedJob> {
     const { rows } = await this.db.query(
@@ -282,7 +291,6 @@ export class JobsService {
     const job = rows[0];
     this.logger.log(`Job created: ${job.id} by recruiter: ${recruiterId}`);
 
-    // Notify matching candidates (non-blocking)
     void this.alerts.notifyMatchingCandidates(job);
 
     return this.mapRow({ ...job, recruiter_name: null, applicant_count: 0 });
@@ -330,7 +338,8 @@ export class JobsService {
     recruiterId:   string,
     dto:           UpdateApplicationStatusDto,
   ): Promise<any> {
-    const { rows: ownership } = await this.db.query(
+    // ✅ Typed — candidate_id and title are now string, not unknown
+    const { rows: ownership } = await this.db.query<OwnershipRow>(
       `SELECT a.id, a.candidate_id, j.title
        FROM applications a
        JOIN jobs j ON j.id = a.job_id
@@ -342,7 +351,7 @@ export class JobsService {
       throw new ForbiddenException('Not authorized to update this application');
     }
 
-    const { candidate_id, title } = ownership[0];
+    const { candidate_id, title } = ownership[0]; // ✅ both string
 
     const { rows } = await this.db.query(
       `UPDATE applications
@@ -352,10 +361,10 @@ export class JobsService {
     );
 
     await this.alerts.createAlert({
-      userId:   candidate_id,
+      userId:   candidate_id,                          // ✅ string
       type:     'application_update',
       title:    `Application ${dto.status}`,
-      message:  this.statusMessage(dto.status, title),
+      message:  this.statusMessage(dto.status, title), // ✅ string
       metadata: { application_id: applicationId, status: dto.status },
     });
 
@@ -377,17 +386,14 @@ export class JobsService {
     return rows[0];
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // CANDIDATE ACTIONS
-  // ══════════════════════════════════════════════════════════════════════════
-
   async applyToJob(
     candidateId:  string,
     jobId:        string,
     resumeId:     string,
     coverLetter?: string,
   ): Promise<any> {
-    const { rows: jobRows } = await this.db.query(
+    // ✅ Typed — recruiter_id is now string, not unknown
+    const { rows: jobRows } = await this.db.query<JobRow>(
       `SELECT id, title, recruiter_id, source
        FROM jobs WHERE id = $1 AND status = 'active'`,
       [jobId],
@@ -395,29 +401,33 @@ export class JobsService {
 
     if (!jobRows.length) throw new NotFoundException('Job not found or closed');
 
-    const job = jobRows[0];
+    const job = jobRows[0]; // ✅ fully typed
 
-    // SerpAPI jobs are external — candidates must apply via applyUrl
     if (job.source === 'serpapi') {
       throw new ForbiddenException(
         'This is an external job — please apply via the provided URL',
       );
     }
 
-    // Compute match score at application time
     const [profileResult, skillsResult] = await Promise.all([
-      this.db.query('SELECT top_skills FROM candidate_profiles WHERE user_id = $1', [candidateId]),
-      this.db.query('SELECT required_skills FROM jobs WHERE id = $1', [jobId]),
+      this.db.query<{ top_skills: string[] }>(
+        'SELECT top_skills FROM candidate_profiles WHERE user_id = $1',
+        [candidateId],
+      ),
+      this.db.query<{ required_skills: string[] }>(
+        'SELECT required_skills FROM jobs WHERE id = $1',
+        [jobId],
+      ),
     ]);
 
     let matchScore: number | null = null;
-    const userSkills = profileResult.rows[0]?.top_skills as string[] ?? [];
-    const jobSkills  = skillsResult.rows[0]?.required_skills as string[] ?? [];
+    const userSkills = profileResult.rows[0]?.top_skills ?? [];
+    const jobSkills  = skillsResult.rows[0]?.required_skills ?? [];
 
     if (userSkills.length && jobSkills.length) {
-      const lower = (arr: string[]) => arr.map(s => s.toLowerCase());
+      const lower   = (arr: string[]) => arr.map(s => s.toLowerCase());
       const overlap = lower(userSkills).filter(s => lower(jobSkills).includes(s)).length;
-      matchScore = Math.round((overlap / jobSkills.length) * 100);
+      matchScore    = Math.round((overlap / jobSkills.length) * 100);
     }
 
     try {
@@ -428,7 +438,7 @@ export class JobsService {
       );
 
       await this.alerts.createAlert({
-        userId:   job.recruiter_id,
+        userId:   job.recruiter_id,              // ✅ string
         type:     'new_applicant',
         title:    'New Application Received',
         message:  `Someone applied to "${job.title}"`,
@@ -455,9 +465,7 @@ export class JobsService {
     return rows;
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // PRIVATE HELPERS
-  // ══════════════════════════════════════════════════════════════════════════
+  // ── Private helpers ───────────────────────────────────────────────────────
 
   private mapRow(row: any): UnifiedJob {
     return {
@@ -485,22 +493,21 @@ export class JobsService {
     userId: string,
     jobs:   UnifiedJob[],
   ): Promise<UnifiedJob[]> {
-    const { rows } = await this.db.query(
+    const { rows } = await this.db.query<{ top_skills: string[] }>(
       'SELECT top_skills FROM candidate_profiles WHERE user_id = $1',
       [userId],
     );
     if (!rows.length) return jobs;
 
-    const userSkills = (rows[0].top_skills as string[] ?? [])
-      .map(s => s.toLowerCase());
+    const userSkills = (rows[0].top_skills ?? []).map(s => s.toLowerCase());
 
     return jobs.map(job => {
       if (!job.requiredSkills?.length || !userSkills.length) {
         return { ...job, matchScore: 0 };
       }
       const jobSkillsLower = job.requiredSkills.map(s => s.toLowerCase());
-      const overlap  = userSkills.filter(s => jobSkillsLower.includes(s)).length;
-      const matchScore = Math.round((overlap / jobSkillsLower.length) * 100);
+      const overlap        = userSkills.filter(s => jobSkillsLower.includes(s)).length;
+      const matchScore     = Math.round((overlap / jobSkillsLower.length) * 100);
       return { ...job, matchScore };
     });
   }
@@ -527,7 +534,6 @@ export class JobsService {
     return map[status] ?? `Application status updated for "${title}"`;
   }
 
-  // Kept for backwards compatibility — JobsSyncService calls this
   async fetchSerpApiJobs(params: {
     query:     string;
     location?: string;
@@ -538,12 +544,12 @@ export class JobsService {
       const { data } = await firstValueFrom(
         this.http.get('https://serpapi.com/search', {
           params: {
-            engine:  'google_jobs',
-            q:       params.query,
+            engine:   'google_jobs',
+            q:        params.query,
             location: params.location ?? 'India',
-            hl:      'en',
-            gl:      'in',
-            api_key: this.serpApiKey,
+            hl:       'en',
+            gl:       'in',
+            api_key:  this.serpApiKey,
           },
           timeout: 10_000,
         }),

@@ -13,19 +13,35 @@ interface CreateAlertPayload {
   metadata?: Record<string, any>;
 }
 
+// ── Typed row interfaces ──────────────────────────────────────────────────────
+
+interface AlertRow {
+  id:         string;
+  user_id:    string;
+  type:       string;
+  title:      string;
+  message:    string;
+  metadata:   Record<string, unknown>;
+  read:       boolean;
+  created_at: Date;
+}
+
+interface CountRow {
+  count: string;
+}
+
+interface CandidateRow {
+  user_id: string;
+}
+
 @Injectable()
 export class AlertsService {
   private readonly logger = new Logger(AlertsService.name);
 
   constructor(private readonly db: DatabaseService) {}
 
-  // ── Create a single alert ────────────────────────────────────────────────
-  // Writing to the alerts table automatically triggers Supabase Realtime
-  // to broadcast to any subscribed client — no additional WebSocket
-  // management needed on the backend.
-
   async createAlert(payload: CreateAlertPayload) {
-    const { rows } = await this.db.query(
+    const { rows } = await this.db.query<AlertRow>(
       `INSERT INTO alerts (user_id, type, title, message, metadata)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [
@@ -41,8 +57,6 @@ export class AlertsService {
     return rows[0];
   }
 
-  // ── Bulk create alerts ───────────────────────────────────────────────────
-
   async createBulkAlerts(payloads: CreateAlertPayload[]) {
     if (payloads.length === 0) return [];
 
@@ -55,7 +69,7 @@ export class AlertsService {
       JSON.stringify(p.metadata || {}),
     ]);
 
-    const { rows } = await this.db.query(
+    const { rows } = await this.db.query<AlertRow>(
       `INSERT INTO alerts (user_id, type, title, message, metadata)
        VALUES ${values} RETURNING *`,
       params,
@@ -64,20 +78,16 @@ export class AlertsService {
     return rows;
   }
 
-  // ── Notify matching candidates when a new job is posted ──────────────────
-
   async notifyMatchingCandidates(job: any) {
     try {
-      // Find candidates whose top_skills overlap with job required_skills
-      // and whose experience level is within range
-      const { rows: candidates } = await this.db.query(
+      const { rows: candidates } = await this.db.query<CandidateRow>(
         `SELECT cp.user_id
          FROM candidate_profiles cp
          WHERE cp.is_visible = true
            AND cp.top_skills && $1::text[]
            AND (cp.experience_years IS NULL OR cp.experience_years >= $2)
            AND (cp.experience_years IS NULL OR $3::float IS NULL OR cp.experience_years <= $3)
-         LIMIT 500`,  // cap to avoid thundering herd
+         LIMIT 500`,
         [
           job.required_skills,
           job.experience_min || 0,
@@ -88,15 +98,15 @@ export class AlertsService {
       if (candidates.length === 0) return;
 
       const alerts = candidates.map(c => ({
-        userId: c.user_id,
-        type: 'job_match',
-        title: `New job match: ${job.title}`,
+        userId:  c.user_id,
+        type:    'job_match',
+        title:   `New job match: ${job.title}`,
         message: `${job.company} is hiring for "${job.title}" — matches your skills`,
         metadata: {
-          job_id: job.id,
-          company: job.company,
-          location: job.location,
-          work_mode: job.work_mode,
+          job_id:     job.id,
+          company:    job.company,
+          location:   job.location,
+          work_mode:  job.work_mode,
           salary_min: job.salary_min,
           salary_max: job.salary_max,
         },
@@ -106,23 +116,20 @@ export class AlertsService {
       this.logger.log(`Notified ${candidates.length} candidates for job ${job.id}`);
 
     } catch (err) {
-      // Non-critical — log but don't throw. Job was already posted successfully.
-      this.logger.error(`Failed to notify candidates for job ${job.id}: ${err.message}`);
+      this.logger.error(`Failed to notify candidates for job ${job.id}: ${(err as Error).message}`);
     }
   }
-
-  // ── Get alerts for a user ────────────────────────────────────────────────
 
   async getUserAlerts(userId: string, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
 
     const [alertsResult, countResult] = await Promise.all([
-      this.db.query(
+      this.db.query<AlertRow>(
         `SELECT * FROM alerts WHERE user_id = $1
          ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
         [userId, limit, offset],
       ),
-      this.db.query(
+      this.db.query<CountRow>(
         `SELECT COUNT(*) FROM alerts WHERE user_id = $1 AND read = FALSE`,
         [userId],
       ),
@@ -130,13 +137,11 @@ export class AlertsService {
 
     return {
       alerts: alertsResult.rows,
-      unread: parseInt(countResult.rows[0].count),
+      unread: parseInt(countResult.rows[0].count, 10), // ✅ string → number
       page,
       limit,
     };
   }
-
-  // ── Mark alerts as read ──────────────────────────────────────────────────
 
   async markRead(userId: string, alertIds?: string[]) {
     if (alertIds?.length) {
@@ -146,7 +151,6 @@ export class AlertsService {
         [userId, alertIds],
       );
     } else {
-      // Mark all as read
       await this.db.query(
         'UPDATE alerts SET read = TRUE WHERE user_id = $1 AND read = FALSE',
         [userId],

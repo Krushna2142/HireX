@@ -2,8 +2,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
-// src/interviews/interviews.service.ts
-
 import {
   Injectable,
   Logger,
@@ -11,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService }   from '../../prisma/prisma.service';
 import { DatabaseService } from '../database/database.service';
-import { LlmService }      from '../ollama/Llm.service';   // ← was OllamaService
+import { LlmService }      from '../ollama/Llm.service';
 
 // ── Domain interfaces ─────────────────────────────────────────────────────────
 
@@ -28,11 +26,36 @@ interface QuestionSet {
   sessionType: string;
 }
 
-interface AnswerEvaluation {
+// ✅ Exported so InterviewsController can reference the return type
+export interface AnswerEvaluation {
   score:        number;
   feedback:     string;
   strengths:    string[];
   improvements: string[];
+}
+
+// ── Typed DB row interface ────────────────────────────────────────────────────
+
+interface InterviewQuestionRow {
+  id:              string;
+  session_id:      string;
+  question_number: number;
+  question:        string;
+  category:        string;
+  difficulty:      string;
+  ideal_answer:    string;
+  user_answer:     string | null;
+  score:           number | null;
+  feedback:        string | null;
+  time_taken_secs: number | null;
+  answered_at:     Date | null;
+}
+
+interface AnalysisRow {
+  experience_level:  string;
+  experience_years:  number;
+  skills:            unknown;
+  work_experience:   unknown;
 }
 
 // ── System prompts ────────────────────────────────────────────────────────────
@@ -91,12 +114,10 @@ export class InterviewsService {
   private readonly logger = new Logger(InterviewsService.name);
 
   constructor(
-    private readonly db:    DatabaseService,
+    private readonly db:     DatabaseService,
     private readonly prisma: PrismaService,
-    private readonly llm:   LlmService,   // ← was OllamaService
+    private readonly llm:    LlmService,
   ) {}
-
-  // ── Start interview session ───────────────────────────────────────────────
 
   async startSession(
     candidateId: string,
@@ -107,8 +128,7 @@ export class InterviewsService {
   ) {
     this.logger.log(`Starting ${sessionType} session for: ${jobTitle} at ${company}`);
 
-    // Fetch candidate context for tailored question generation
-    const { rows: analysisRows } = await this.db.query(
+    const { rows: analysisRows } = await this.db.query<AnalysisRow>(
       `SELECT ra.skills, ra.work_experience, ra.experience_level, ra.experience_years
        FROM resume_analyses ra
        JOIN resumes r ON r.id = ra.resume_id
@@ -126,7 +146,6 @@ export class InterviewsService {
         `Skills: ${JSON.stringify(analysisRows[0].skills).slice(0, 500)}`
       : 'No resume on file — generate general questions for the role';
 
-    // Generate questions via Groq
     const questionSet = await this.llm.extractJsonWithRetry<QuestionSet>(
       QUESTION_SYSTEM_PROMPT,
       `Role: ${jobTitle}
@@ -137,7 +156,6 @@ export class InterviewsService {
        Generate 5 targeted interview questions.`,
     );
 
-    // Persist session
     const { rows: sessionRows } = await this.db.query(
       `INSERT INTO interview_sessions
          (candidate_id, job_id, job_title, company, session_type, total_questions)
@@ -148,10 +166,9 @@ export class InterviewsService {
 
     const session = sessionRows[0];
 
-    // Persist questions in parallel
     const questionResults = await Promise.all(
       questionSet.questions.map((q, i) =>
-        this.db.query(
+        this.db.query<InterviewQuestionRow>(
           `INSERT INTO interview_questions
              (session_id, question_number, question, category, difficulty, ideal_answer)
            VALUES ($1, $2, $3, $4, $5, $6)
@@ -167,7 +184,6 @@ export class InterviewsService {
 
     return {
       session,
-      // idealAnswer deliberately excluded — revealed only after candidate answers
       questions: questions.map(q => ({
         id:             q.id,
         questionNumber: q.question_number,
@@ -178,15 +194,13 @@ export class InterviewsService {
     };
   }
 
-  // ── Submit answer for evaluation ──────────────────────────────────────────
-
   async submitAnswer(
-    questionId:     string,
-    candidateId:    string,
-    answer:         string,
-    timeTakenSecs:  number,
+    questionId:    string,
+    candidateId:   string,
+    answer:        string,
+    timeTakenSecs: number,
   ) {
-    const { rows } = await this.db.query(
+    const { rows } = await this.db.query<InterviewQuestionRow & { candidate_id: string }>(
       `SELECT q.*, s.candidate_id
        FROM interview_questions q
        JOIN interview_sessions s ON s.id = q.session_id
@@ -200,7 +214,6 @@ export class InterviewsService {
 
     const question = rows[0];
 
-    // Evaluate via Groq
     const evaluation = await this.llm.extractJsonWithRetry<AnswerEvaluation>(
       EVALUATION_SYSTEM_PROMPT,
       `Question: ${question.question}
@@ -210,7 +223,7 @@ export class InterviewsService {
        Evaluate the candidate's answer objectively.`,
     );
 
-    const { rows: updated } = await this.db.query(
+    const { rows: updated } = await this.db.query<InterviewQuestionRow>(
       `UPDATE interview_questions
        SET user_answer     = $1,
            score           = $2,
@@ -225,14 +238,12 @@ export class InterviewsService {
     return {
       ...updated[0],
       evaluation,
-      idealAnswer: question.ideal_answer,   // safe to reveal post-answer
+      idealAnswer: question.ideal_answer,
     };
   }
 
-  // ── Complete session ──────────────────────────────────────────────────────
-
   async completeSession(sessionId: string, candidateId: string) {
-    const { rows: questions } = await this.db.query(
+    const { rows: questions } = await this.db.query<InterviewQuestionRow>(
       `SELECT q.*
        FROM interview_questions q
        JOIN interview_sessions s ON s.id = q.session_id
@@ -243,10 +254,13 @@ export class InterviewsService {
     if (!questions.length) throw new NotFoundException('Session not found');
 
     const answeredCount = questions.filter(q => q.user_answer).length;
-    const totalScore    = questions
+
+    // ✅ Use null-safe (q.score ?? 0) — score is number | null
+    const totalScore = questions
       .filter(q => q.score !== null)
-      .reduce((sum, q) => sum + q.score, 0);
-    const avgScore      = answeredCount > 0
+      .reduce((sum, q) => sum + (q.score ?? 0), 0);
+
+    const avgScore = answeredCount > 0
       ? Math.round(totalScore / answeredCount)
       : 0;
 
@@ -268,17 +282,16 @@ export class InterviewsService {
         answered:       answeredCount,
         averageScore:   avgScore,
         scoreBreakdown: {
-          excellent: questions.filter(q => q.score >= 90).length,
-          good:      questions.filter(q => q.score >= 70 && q.score < 90).length,
-          adequate:  questions.filter(q => q.score >= 50 && q.score < 70).length,
-          needsWork: questions.filter(q => q.score !== null && q.score < 50).length,
+          // ✅ null-safe comparisons throughout
+          excellent: questions.filter(q => (q.score ?? 0) >= 90).length,
+          good:      questions.filter(q => (q.score ?? 0) >= 70 && (q.score ?? 0) < 90).length,
+          adequate:  questions.filter(q => (q.score ?? 0) >= 50 && (q.score ?? 0) < 70).length,
+          needsWork: questions.filter(q => q.score !== null && (q.score ?? 0) < 50).length,
         },
         byCategory: this.aggregateByCategory(questions),
       },
     };
   }
-
-  // ── Session history ───────────────────────────────────────────────────────
 
   async getSessionHistory(candidateId: string) {
     const { rows } = await this.db.query(
@@ -296,8 +309,6 @@ export class InterviewsService {
     return rows;
   }
 
-  // ── Session detail ────────────────────────────────────────────────────────
-
   async getSession(sessionId: string, candidateId: string) {
     const { rows: sessions } = await this.db.query(
       'SELECT * FROM interview_sessions WHERE id = $1 AND candidate_id = $2',
@@ -306,7 +317,7 @@ export class InterviewsService {
 
     if (!sessions.length) throw new NotFoundException('Session not found');
 
-    const { rows: questions } = await this.db.query(
+    const { rows: questions } = await this.db.query<InterviewQuestionRow>(
       'SELECT * FROM interview_questions WHERE session_id = $1 ORDER BY question_number',
       [sessionId],
     );
@@ -314,9 +325,7 @@ export class InterviewsService {
     return { session: sessions[0], questions };
   }
 
-  // ── Private helpers ───────────────────────────────────────────────────────
-
-  private aggregateByCategory(questions: any[]) {
+  private aggregateByCategory(questions: InterviewQuestionRow[]) {
     const categories: Record<string, { count: number; totalScore: number }> = {};
 
     questions.forEach(q => {

@@ -9,30 +9,52 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as bcrypt from 'bcryptjs';
-import * as jwt from 'jsonwebtoken';
-import * as crypto from 'crypto';
-import * as nodemailer from 'nodemailer';
+import * as bcrypt      from 'bcryptjs';
+import * as jwt         from 'jsonwebtoken';
+import * as crypto      from 'crypto';
+import * as nodemailer  from 'nodemailer';
 import { DatabaseService } from '../database/database.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RegisterDto }     from './dto/register.dto';
+import { LoginDto }        from './dto/login.dto';
+import { ForgotPasswordDto }  from './dto/forgot-password.dto';
+import { ResetPasswordDto }   from './dto/reset-password.dto';
+
+// ── Typed DB row interfaces ───────────────────────────────────────────────────
+
+interface UserRow {
+  id:            string;
+  full_name:     string;
+  email:         string;
+  role:          string;
+  password_hash: string;
+  created_at:    Date;
+}
+
+interface UserIdEmailRow {
+  id:    string;
+  email: string;
+}
+
+interface UserIdRow {
+  id: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class AuthService {
   private transporter: nodemailer.Transporter;
-  private readonly jwtSecret: string;
+  private readonly jwtSecret:    string;
   private readonly jwtExpiresIn: string;
-  private readonly frontendUrl: string;
+  private readonly frontendUrl:  string;
 
   constructor(
-    private readonly db: DatabaseService,
+    private readonly db:     DatabaseService,
     private readonly config: ConfigService,
   ) {
-    this.jwtSecret = this.config.getOrThrow<string>('jwt.secret');
+    this.jwtSecret    = this.config.getOrThrow<string>('jwt.secret');
     this.jwtExpiresIn = this.config.get<string>('jwt.expiresIn') || '7d';
-    this.frontendUrl =
+    this.frontendUrl  =
       this.config.get<string>('frontendUrl') || 'http://localhost:3000';
 
     const smtpUser = this.config.get<string>('smtp.user');
@@ -40,10 +62,10 @@ export class AuthService {
 
     if (smtpUser && smtpPass) {
       this.transporter = nodemailer.createTransport({
-        host: this.config.get<string>('smtp.host'),
-        port: this.config.get<number>('smtp.port'),
+        host:   this.config.get<string>('smtp.host'),
+        port:   this.config.get<number>('smtp.port'),
         secure: false,
-        auth: { user: smtpUser, pass: smtpPass },
+        auth:   { user: smtpUser, pass: smtpPass },
       });
     }
   }
@@ -55,7 +77,7 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    const existing = await this.db.query(
+    const existing = await this.db.query<UserIdRow>(
       'SELECT id FROM users WHERE email = $1',
       [dto.email.toLowerCase()],
     );
@@ -66,29 +88,29 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    const result = await this.db.query(
+    const result = await this.db.query<UserRow>(
       `INSERT INTO users (full_name, email, password_hash, role, created_at)
        VALUES ($1, $2, $3, $4, NOW())
        RETURNING id, full_name, email, role, created_at`,
       [dto.full_name, dto.email.toLowerCase(), passwordHash, dto.role],
     );
 
-    const user = result.rows[0];
+    const user = result.rows[0]; // ✅ now fully typed
 
     return {
-      token: this.signToken(user.id, user.email, user.role),
+      token: this.signToken(user.id, user.email, user.role), // ✅
       user: {
-        id: user.id,
-        full_name: user.full_name,
-        email: user.email,
-        role: user.role,
+        id:         user.id,
+        full_name:  user.full_name,
+        email:      user.email,
+        role:       user.role,
         created_at: user.created_at,
       },
     };
   }
 
   async login(dto: LoginDto) {
-    const result = await this.db.query(
+    const result = await this.db.query<UserRow>(
       `SELECT id, full_name, email, password_hash, role, created_at
        FROM users WHERE email = $1`,
       [dto.email.toLowerCase()],
@@ -98,7 +120,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const user = result.rows[0];
+    const user = result.rows[0]; // ✅ now fully typed
 
     if (!user.password_hash) {
       throw new UnauthorizedException(
@@ -106,25 +128,25 @@ export class AuthService {
       );
     }
 
-    const valid = await bcrypt.compare(dto.password, user.password_hash);
+    const valid = await bcrypt.compare(dto.password, user.password_hash); // ✅
     if (!valid) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
     return {
-      token: this.signToken(user.id, user.email, user.role),
+      token: this.signToken(user.id, user.email, user.role), // ✅
       user: {
-        id: user.id,
-        full_name: user.full_name,
-        email: user.email,
-        role: user.role,
+        id:         user.id,
+        full_name:  user.full_name,
+        email:      user.email,
+        role:       user.role,
         created_at: user.created_at,
       },
     };
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
-    const result = await this.db.query(
+    const result = await this.db.query<UserIdEmailRow>(
       'SELECT id, email FROM users WHERE email = $1',
       [dto.email.toLowerCase()],
     );
@@ -133,9 +155,9 @@ export class AuthService {
       return { message: 'If the email exists, a reset link has been sent.' };
     }
 
-    const user = result.rows[0];
+    const user       = result.rows[0]; // ✅ now fully typed
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 60 * 60 * 1000);
+    const expiry     = new Date(Date.now() + 60 * 60 * 1000);
 
     await this.db.query(
       'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3',
@@ -145,8 +167,8 @@ export class AuthService {
     if (this.transporter) {
       const resetUrl = `${this.frontendUrl}/reset-password?token=${resetToken}`;
       await this.transporter.sendMail({
-        from: `"Job Crawler" <${this.config.get<string>('smtp.user')}>`,
-        to: user.email,
+        from:    `"Job Crawler" <${this.config.get<string>('smtp.user')}>`,
+        to:      user.email, // ✅ string, not unknown
         subject: 'Password Reset — Job Crawler',
         html: `
           <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;">
@@ -167,7 +189,7 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto) {
-    const result = await this.db.query(
+    const result = await this.db.query<UserIdRow>(
       'SELECT id FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
       [dto.token],
     );
@@ -176,7 +198,7 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
-    const user = result.rows[0];
+    const user         = result.rows[0];
     const passwordHash = await bcrypt.hash(dto.new_password, 12);
 
     await this.db.query(
@@ -188,7 +210,7 @@ export class AuthService {
   }
 
   async getMe(userId: string) {
-    const result = await this.db.query(
+    const result = await this.db.query<UserRow>(
       'SELECT id, full_name, email, role, created_at FROM users WHERE id = $1',
       [userId],
     );

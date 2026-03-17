@@ -4,7 +4,54 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
 import { Injectable, Logger } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { DatabaseService }    from '../database/database.service';
+
+// ── Typed DB row interfaces ───────────────────────────────────────────────────
+
+interface CandidateProfileRow {
+  top_skills:       string[];
+  experience_level: string;
+  experience_years: number;
+  target_roles:     string[];
+  work_mode:        string | null;
+  salary_min:       number | null;
+  salary_max:       number | null;
+}
+
+interface JobRecommendationRow {
+  id:              string;
+  title:           string;
+  company:         string;
+  location:        string | null;
+  work_mode:       string | null;
+  employment_type: string | null;
+  salary_min:      number | null;
+  salary_max:      number | null;
+  salary_currency: string;
+  required_skills: string[];
+  description:     string;
+  created_at:      Date;
+  apply_url:       string | null;
+  recruiter_name:  string;
+  applicant_count: string;
+  status:          string;
+  // Computed columns from SQL CASE expressions
+  skill_score:  number;
+  mode_score:   number;
+  salary_score: number;
+}
+
+interface SkillDemandRow {
+  skill:         string;
+  demand_count:  string;
+  candidate_has: boolean;
+}
+
+interface SkillsProfileRow {
+  top_skills: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class RecommendationsService {
@@ -13,8 +60,8 @@ export class RecommendationsService {
   constructor(private readonly db: DatabaseService) {}
 
   async getJobRecommendations(candidateId: string, limit = 10) {
-    // Fetch candidate profile for scoring context
-    const { rows: profileRows } = await this.db.query(
+    // ✅ Typed — all fields are now properly typed
+    const { rows: profileRows } = await this.db.query<CandidateProfileRow>(
       `SELECT cp.top_skills, cp.experience_level, cp.experience_years,
               cp.target_roles, cp.work_mode, cp.salary_min, cp.salary_max
        FROM candidate_profiles cp
@@ -22,18 +69,20 @@ export class RecommendationsService {
       [candidateId],
     );
 
-    if (!profileRows.length) return { recommendations: [], reason: 'Complete your profile for recommendations' };
+    if (!profileRows.length) {
+      return { recommendations: [], reason: 'Complete your profile for recommendations' };
+    }
 
     const profile = profileRows[0];
-    const skills:  string[] = profile.top_skills || [];
+
+    // ✅ Both now properly typed as string[]
+    const skills:      string[] = profile.top_skills  || [];
     const targetRoles: string[] = profile.target_roles || [];
 
-    // Fetch jobs not yet applied to — with rich scoring via SQL
-    const { rows: jobs } = await this.db.query(
+    const { rows: jobs } = await this.db.query<JobRecommendationRow>(
       `SELECT
          j.*,
          u.full_name AS recruiter_name,
-         -- Skill overlap score (0-100)
          CASE
            WHEN array_length(j.required_skills, 1) IS NULL THEN 0
            ELSE ROUND(
@@ -44,9 +93,7 @@ export class RecommendationsService {
              ) / array_length(j.required_skills, 1) * 100
            )::INTEGER
          END AS skill_score,
-         -- Work mode preference match
          CASE WHEN $3::text IS NULL OR j.work_mode = $3 THEN 20 ELSE 0 END AS mode_score,
-         -- Salary in range
          CASE
            WHEN $4::integer IS NULL THEN 10
            WHEN j.salary_max IS NULL THEN 10
@@ -70,7 +117,6 @@ export class RecommendationsService {
       ],
     );
 
-    // Map to unified format with composite score
     const recommendations = jobs.map(job => ({
       id:             job.id,
       source:         'internal' as const,
@@ -89,7 +135,8 @@ export class RecommendationsService {
       recruiterName:  job.recruiter_name,
       applicantCount: job.applicant_count,
       status:         job.status,
-      matchScore:     Math.min(
+      // ✅ All three are now number — arithmetic works
+      matchScore: Math.min(
         100,
         (job.skill_score || 0) + (job.mode_score || 0) + (job.salary_score || 0),
       ),
@@ -106,21 +153,19 @@ export class RecommendationsService {
     };
   }
 
-  // ── GET skill gap analysis ─────────────────────────────────────────────────
-  // Compare candidate skills against most-demanded skills in their target roles
-
   async getSkillGapAnalysis(candidateId: string) {
-    const { rows: profileRows } = await this.db.query(
+    // ✅ Typed
+    const { rows: profileRows } = await this.db.query<SkillsProfileRow>(
       'SELECT top_skills FROM candidate_profiles WHERE user_id = $1',
       [candidateId],
     );
 
     if (!profileRows.length) return null;
 
+    // ✅ Properly typed as string[]
     const userSkills: string[] = profileRows[0].top_skills || [];
 
-    // Find most common skills in active jobs
-    const { rows: demandRows } = await this.db.query(
+    const { rows: demandRows } = await this.db.query<SkillDemandRow>(
       `SELECT
          skill,
          COUNT(*) AS demand_count,
@@ -148,8 +193,8 @@ export class RecommendationsService {
   }
 
   private buildMatchReason(
-    job: any,
-    profile: any,
+    job:        JobRecommendationRow,
+    profile:    CandidateProfileRow,
     userSkills: string[],
   ): string {
     const overlapping = (job.required_skills || [])

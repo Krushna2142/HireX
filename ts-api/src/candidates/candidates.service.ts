@@ -8,7 +8,7 @@ import {
   Injectable, Logger, NotFoundException,
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService }   from '../../prisma/prisma.service';
 import { UpdateCandidateProfileDto } from './dto/update-candidate-profile.dto';
 
 @Injectable()
@@ -16,11 +16,9 @@ export class CandidatesService {
   private readonly logger = new Logger(CandidatesService.name);
 
   constructor(
-    private readonly db: DatabaseService,
+    private readonly db:     DatabaseService,
     private readonly prisma: PrismaService,
   ) {}
-
-  // ── GET profile ──────────────────────────────────────────────────────────
 
   async getProfile(userId: string) {
     const profile = await this.prisma.candidateProfile.findUnique({
@@ -28,7 +26,6 @@ export class CandidatesService {
     });
 
     if (!profile) {
-      // Auto-create empty profile on first access — no 404 for new users
       return this.prisma.candidateProfile.create({
         data: { userId },
       });
@@ -37,15 +34,14 @@ export class CandidatesService {
     return profile;
   }
 
-  // ── GET profile with enriched resume data ────────────────────────────────
-
   async getEnrichedProfile(userId: string) {
     const profile = await this.getProfile(userId);
 
-    // Fetch latest analysis if activeResumeId exists
-    let analysis = null;
+    // ✅ Explicitly typed so rows[0] assignment is valid
+    let analysis: Record<string, unknown> | null = null;
+
     if (profile.activeResumeId) {
-      const { rows } = await this.db.query(
+      const { rows } = await this.db.query<Record<string, unknown>>(
         `SELECT ra.*
          FROM resume_analyses ra
          WHERE ra.resume_id = $1
@@ -54,10 +50,9 @@ export class CandidatesService {
          LIMIT 1`,
         [profile.activeResumeId],
       );
-      analysis = rows[0] || null;
+      analysis = rows[0] || null; // ✅ now valid
     }
 
-    // Fetch application stats
     const { rows: appStats } = await this.db.query(
       `SELECT
          COUNT(*)                                            AS total,
@@ -72,7 +67,6 @@ export class CandidatesService {
       [userId],
     );
 
-    // Fetch recent applications with job details
     const { rows: recentApps } = await this.db.query(
       `SELECT a.id, a.status, a.match_score, a.applied_at,
               j.title, j.company, j.location, j.work_mode,
@@ -93,10 +87,7 @@ export class CandidatesService {
     };
   }
 
-  // ── UPDATE profile — partial, user fields only ──────────────────────────
-
   async updateProfile(userId: string, dto: UpdateCandidateProfileDto) {
-    // Ensure profile exists first
     await this.getProfile(userId);
 
     const updated = await this.prisma.candidateProfile.update({
@@ -127,26 +118,24 @@ export class CandidatesService {
     return updated;
   }
 
-  // ── GET profile completion breakdown ─────────────────────────────────────
-
   async getCompletionDetails(userId: string) {
     const profile = await this.getProfile(userId);
 
     const checks = [
-      { field: 'Full Name',          done: true },
-      { field: 'Headline',           done: !!profile.headline },
-      { field: 'Bio / Summary',      done: !!profile.bio },
-      { field: 'Location',           done: !!profile.location },
-      { field: 'Phone',              done: !!profile.phone },
-      { field: 'Target Roles',       done: profile.targetRoles?.length > 0 },
-      { field: 'Work Mode',          done: !!profile.workMode },
-      { field: 'Resume Uploaded',    done: !!profile.activeResumeId },
-      { field: 'Skills (from resume)', done: profile.topSkills?.length > 0 },
-      { field: 'Salary Expectation', done: !!profile.salaryMin || !!profile.salaryMax },
+      { field: 'Full Name',           done: true },
+      { field: 'Headline',            done: !!profile.headline },
+      { field: 'Bio / Summary',       done: !!profile.bio },
+      { field: 'Location',            done: !!profile.location },
+      { field: 'Phone',               done: !!profile.phone },
+      { field: 'Target Roles',        done: profile.targetRoles?.length > 0 },
+      { field: 'Work Mode',           done: !!profile.workMode },
+      { field: 'Resume Uploaded',     done: !!profile.activeResumeId },
+      { field: 'Skills (from resume)',done: profile.topSkills?.length > 0 },
+      { field: 'Salary Expectation',  done: !!profile.salaryMin || !!profile.salaryMax },
     ];
 
     const completed = checks.filter(c => c.done).length;
-    const score = Math.round((completed / checks.length) * 100);
+    const score     = Math.round((completed / checks.length) * 100);
 
     return { score, checks, total: checks.length, completed };
   }

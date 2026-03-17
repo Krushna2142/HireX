@@ -9,5 +9,5 @@ function requireEnv(name: string): string {
 }
 
 export const ENV = {
-  SERP_API_KEY: requireEnv("SERP_API_KEY"),
+  SERPAPI_KEY: requireEnv("SERPAPI_KEY"),
 };
