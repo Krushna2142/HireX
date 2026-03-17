@@ -32,8 +32,8 @@ export default () => ({
   serpApiKey: process.env.SERPAPI_KEY ?? '',
 
   database: {
-    url: process.env.DATABASE_URL ?? '',
-  },
+  connectionString: process.env.DATABASE_URL ?? '',
+},
 
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3000',
 });

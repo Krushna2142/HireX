@@ -38,4 +38,4 @@ app.setGlobalPrefix('api', {
   exclude: ['health'], // ← add this
 });
 }
-bootstrap();
+// bootstrap();      
