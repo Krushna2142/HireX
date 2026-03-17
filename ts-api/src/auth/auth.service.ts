@@ -21,7 +21,7 @@ import { ResetPasswordDto }   from './dto/reset-password.dto';
 
 // ── Typed DB row interfaces ───────────────────────────────────────────────────
 
-interface UserRow {
+export interface UserRow {
   id:            string;
   full_name:     string;
   email:         string;

@@ -6,9 +6,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService }    from '../database/database.service';
 
-// ── Typed DB row interfaces ───────────────────────────────────────────────────
+// ── Typed DB row interfaces — all exported so controllers can reference them ──
 
-interface CandidateProfileRow {
+export interface CandidateProfileRow {
   top_skills:       string[];
   experience_level: string;
   experience_years: number;
@@ -18,7 +18,7 @@ interface CandidateProfileRow {
   salary_max:       number | null;
 }
 
-interface JobRecommendationRow {
+export interface JobRecommendationRow {
   id:              string;
   title:           string;
   company:         string;
@@ -35,20 +35,51 @@ interface JobRecommendationRow {
   recruiter_name:  string;
   applicant_count: string;
   status:          string;
-  // Computed columns from SQL CASE expressions
-  skill_score:  number;
-  mode_score:   number;
-  salary_score: number;
+  skill_score:     number;
+  mode_score:      number;
+  salary_score:    number;
 }
 
-interface SkillDemandRow {
+export interface SkillDemandRow {        // ← THIS is what controller needs
   skill:         string;
   demand_count:  string;
   candidate_has: boolean;
 }
 
-interface SkillsProfileRow {
+export interface SkillsProfileRow {
   top_skills: string[];
+}
+
+// ── Recommendation result shape (returned to controller) ─────────────────────
+
+export interface JobRecommendation {
+  id:              string;
+  source:          'internal';
+  title:           string;
+  company:         string;
+  location:        string | null;
+  workMode:        string | null;
+  employmentType:  string | null;
+  salaryMin:       number | null;
+  salaryMax:       number | null;
+  salaryCurrency:  string;
+  requiredSkills:  string[];
+  description:     string;
+  postedAt:        Date;
+  applyUrl:        null;
+  recruiterName:   string;
+  applicantCount:  string;
+  status:          string;
+  matchScore:      number;
+  matchReason:     string;
+}
+
+export interface SkillGapAnalysis {
+  userSkills:        string[];
+  topDemandedSkills: SkillDemandRow[];
+  skillGaps:         SkillDemandRow[];
+  matchedSkills:     SkillDemandRow[];
+  coveragePercent:   number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,8 +90,10 @@ export class RecommendationsService {
 
   constructor(private readonly db: DatabaseService) {}
 
-  async getJobRecommendations(candidateId: string, limit = 10) {
-    // ✅ Typed — all fields are now properly typed
+  async getJobRecommendations(
+    candidateId: string,
+    limit = 10,
+  ): Promise<{ recommendations: JobRecommendation[]; reason?: string; profile?: object }> {
     const { rows: profileRows } = await this.db.query<CandidateProfileRow>(
       `SELECT cp.top_skills, cp.experience_level, cp.experience_years,
               cp.target_roles, cp.work_mode, cp.salary_min, cp.salary_max
@@ -74,9 +107,7 @@ export class RecommendationsService {
     }
 
     const profile = profileRows[0];
-
-    // ✅ Both now properly typed as string[]
-    const skills:      string[] = profile.top_skills  || [];
+    const skills:      string[] = profile.top_skills   || [];
     const targetRoles: string[] = profile.target_roles || [];
 
     const { rows: jobs } = await this.db.query<JobRecommendationRow>(
@@ -117,7 +148,7 @@ export class RecommendationsService {
       ],
     );
 
-    const recommendations = jobs.map(job => ({
+    const recommendations: JobRecommendation[] = jobs.map(job => ({
       id:             job.id,
       source:         'internal' as const,
       title:          job.title,
@@ -135,7 +166,6 @@ export class RecommendationsService {
       recruiterName:  job.recruiter_name,
       applicantCount: job.applicant_count,
       status:         job.status,
-      // ✅ All three are now number — arithmetic works
       matchScore: Math.min(
         100,
         (job.skill_score || 0) + (job.mode_score || 0) + (job.salary_score || 0),
@@ -153,8 +183,7 @@ export class RecommendationsService {
     };
   }
 
-  async getSkillGapAnalysis(candidateId: string) {
-    // ✅ Typed
+  async getSkillGapAnalysis(candidateId: string): Promise<SkillGapAnalysis | null> {
     const { rows: profileRows } = await this.db.query<SkillsProfileRow>(
       'SELECT top_skills FROM candidate_profiles WHERE user_id = $1',
       [candidateId],
@@ -162,7 +191,6 @@ export class RecommendationsService {
 
     if (!profileRows.length) return null;
 
-    // ✅ Properly typed as string[]
     const userSkills: string[] = profileRows[0].top_skills || [];
 
     const { rows: demandRows } = await this.db.query<SkillDemandRow>(
@@ -179,7 +207,7 @@ export class RecommendationsService {
     );
 
     const gaps    = demandRows.filter(r => !r.candidate_has);
-    const matches = demandRows.filter(r => r.candidate_has);
+    const matches = demandRows.filter(r =>  r.candidate_has);
 
     return {
       userSkills,

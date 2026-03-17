@@ -36,7 +36,7 @@ export interface AnswerEvaluation {
 
 // ── Typed DB row interface ────────────────────────────────────────────────────
 
-interface InterviewQuestionRow {
+export interface InterviewQuestionRow {
   id:              string;
   session_id:      string;
   question_number: number;
