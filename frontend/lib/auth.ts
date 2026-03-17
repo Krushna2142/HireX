@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // frontend/lib/auth.ts
+// NEXT_PUBLIC_API_URL already ends in /api
+// e.g. https://job-crawler-ts-api-t9r0.onrender.com/api
+// So all paths here are /auth/login, /auth/me etc. — no extra /api needed.
 
-const API_URL   = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL   = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const TOKEN_KEY = 'jc_token';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -22,8 +25,6 @@ export interface AuthResponse {
 }
 
 // ── Routing ───────────────────────────────────────────────────────────────────
-// Both roles land on /dashboard — page renders role-conditionally.
-// Never route to /recruiter/dashboard — that segment does not exist.
 
 export function roleRedirectPath(_role: UserRole): string {
   return '/dashboard';
@@ -38,10 +39,9 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
-  // Sync to cookie so Edge middleware can read it for route protection
   if (typeof document !== 'undefined') {
     const secure = process.env.NODE_ENV === 'production' ? ';Secure' : '';
-    const maxAge = 60 * 60 * 24 * 7; // 7 days — matches JWT expiry
+    const maxAge = 60 * 60 * 24 * 7;
     document.cookie = `${TOKEN_KEY}=${token};path=/;SameSite=Strict;max-age=${maxAge}${secure}`;
   }
 }
