@@ -11,6 +11,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service';
 
 // ── Queries we proactively sync from SerpAPI ──────────────────────────────────
@@ -28,29 +29,38 @@ const SYNC_QUERIES = [
   'UI UX designer',
   'machine learning engineer',
   'cloud architect',
+  // Remote-specific variants — SerpAPI needs a real geo location,
+  // so we encode "remote" in the query string instead.
+  'remote software engineer',
+  'remote frontend developer',
+  'remote backend developer',
+  'remote full stack developer',
+  'remote data engineer',
 ];
 
-const SYNC_LOCATIONS = ['India', 'Remote'];
+// ⚠️  'Remote' is NOT a valid SerpAPI location — it causes 400 errors.
+// Use real geographic locations only.
+const SYNC_LOCATIONS = ['India'];
 
 // SerpAPI jobs are valid for 24 hours — after that they're considered stale
 const JOB_TTL_HOURS = 24;
 
 interface SerpApiJob {
-  job_id:      string;
-  title:       string;
-  company_name:string;
-  location:    string;
-  description: string;
+  job_id:       string;
+  title:        string;
+  company_name: string;
+  location:     string;
+  description:  string;
   related_links?: { link: string; text: string }[];
-  share_link?:  string;
+  share_link?:   string;
   detected_extensions?: {
-    posted_at?:    string;
-    salary?:       string;
+    posted_at?:     string;
+    salary?:        string;
     schedule_type?: string;
   };
   job_highlights?: Array<{
-    title:    string;
-    items:    string[];
+    title: string;
+    items: string[];
   }>;
 }
 
@@ -58,7 +68,7 @@ interface SerpApiJob {
 export class JobsSyncService {
   private readonly logger = new Logger(JobsSyncService.name);
   private readonly serpApiKey: string;
-  private isSyncing = false;   // guard against overlapping runs
+  private isSyncing = false; // guard against overlapping runs
 
   constructor(
     private readonly db: DatabaseService,
@@ -69,18 +79,12 @@ export class JobsSyncService {
   }
 
   // ── Cron: runs every 30 minutes ──────────────────────────────────────────
-  // CronExpression.EVERY_30_MINUTES = '*/30 * * * *'
-  // On first deploy, also runs immediately via onModuleInit below.
-
   @Cron(CronExpression.EVERY_30_MINUTES)
   async scheduledSync(): Promise<void> {
     await this.syncAllJobs();
   }
 
   // ── Manual trigger: runs once on app startup ──────────────────────────────
-  // Ensures jobs are available immediately on first deploy without
-  // waiting up to 30 minutes for the first cron tick.
-
   async onModuleInit(): Promise<void> {
     this.logger.log('JobsSyncService initialized — triggering initial sync');
     // Slight delay to let DB connections stabilize
@@ -101,7 +105,7 @@ export class JobsSyncService {
     }
 
     this.isSyncing = true;
-    const batchId  = `sync_${Date.now()}`;
+    const batchId    = `sync_${Date.now()}`;
     let totalSynced  = 0;
     let totalSkipped = 0;
     let totalErrors  = 0;
@@ -134,7 +138,8 @@ export class JobsSyncService {
           } else {
             totalErrors++;
             this.logger.error(
-              `Failed to fetch "${batch[idx].query}": ${result.reason?.message}`
+              `Failed to fetch "${batch[idx].query}" in ${batch[idx].location}: ` +
+              `${result.reason?.message} | Response: ${JSON.stringify(result.reason?.response?.data ?? {})}`
             );
           }
         });
@@ -147,9 +152,9 @@ export class JobsSyncService {
 
       this.logger.log(`Total raw jobs fetched: ${allJobs.length}`);
 
-      // ── Step 2: Deduplicate by external_id ────────────────────────────────
-      const seen    = new Set<string>();
-      const unique  = allJobs.filter(j => {
+      // ── Step 2: Deduplicate by job_id ─────────────────────────────────────
+      const seen   = new Set<string>();
+      const unique = allJobs.filter(j => {
         if (!j.job_id || seen.has(j.job_id)) return false;
         seen.add(j.job_id);
         return true;
@@ -166,12 +171,13 @@ export class JobsSyncService {
           totalSynced++;
         } catch (err) {
           totalErrors++;
-          this.logger.error(`Failed to upsert job ${job.job_id}: ${err.message}`);
+          this.logger.error(
+            `Failed to upsert job ${job.job_id}: ${err.message}`
+          );
         }
       }
 
       // ── Step 4: Expire stale jobs ──────────────────────────────────────────
-      // Delete SerpAPI jobs not refreshed in this batch that are past TTL
       const { rowCount } = await this.db.query(
         `DELETE FROM jobs
          WHERE source = 'serpapi'
@@ -192,18 +198,21 @@ export class JobsSyncService {
   }
 
   // ── Upsert a single SerpAPI job into the DB ───────────────────────────────
-  // Uses INSERT ... ON CONFLICT (external_id) DO UPDATE so re-running
-  // the sync never creates duplicates — it just refreshes existing rows.
 
   private async upsertJob(
     job: SerpApiJob,
     batchId: string,
     expiresAt: Date,
   ): Promise<void> {
-    const applyUrl   = job.related_links?.[0]?.link ?? job.share_link ?? null;
-    const workMode   = this.inferWorkMode(job);
-    const empType    = this.inferEmploymentType(job);
-    const skills     = this.extractSkills(job);
+    // SerpAPI job_ids are long base64-encoded JSON strings (often 300-500+ chars).
+    // We hash them to a stable 64-char SHA-256 hex string so they always fit
+    // within the VARCHAR(255) external_id column.
+    const externalId = this.normalizeJobId(job.job_id);
+
+    const applyUrl = job.related_links?.[0]?.link ?? job.share_link ?? null;
+    const workMode = this.inferWorkMode(job);
+    const empType  = this.inferEmploymentType(job);
+    const skills   = this.extractSkills(job);
     const { min: salaryMin, max: salaryMax } = this.parseSalary(
       job.detected_extensions?.salary
     );
@@ -227,36 +236,36 @@ export class JobsSyncService {
         NOW(), NOW()
       )
       ON CONFLICT (external_id) DO UPDATE SET
-        title          = EXCLUDED.title,
-        company        = EXCLUDED.company,
-        location       = EXCLUDED.location,
-        description    = EXCLUDED.description,
-        work_mode      = EXCLUDED.work_mode,
-        employment_type= EXCLUDED.employment_type,
-        salary_min     = EXCLUDED.salary_min,
-        salary_max     = EXCLUDED.salary_max,
-        required_skills= EXCLUDED.required_skills,
-        apply_url      = EXCLUDED.apply_url,
-        expires_at     = EXCLUDED.expires_at,
-        sync_batch     = EXCLUDED.sync_batch,
-        status         = 'active',
-        updated_at     = NOW()`,
+        title           = EXCLUDED.title,
+        company         = EXCLUDED.company,
+        location        = EXCLUDED.location,
+        description     = EXCLUDED.description,
+        work_mode       = EXCLUDED.work_mode,
+        employment_type = EXCLUDED.employment_type,
+        salary_min      = EXCLUDED.salary_min,
+        salary_max      = EXCLUDED.salary_max,
+        required_skills = EXCLUDED.required_skills,
+        apply_url       = EXCLUDED.apply_url,
+        expires_at      = EXCLUDED.expires_at,
+        sync_batch      = EXCLUDED.sync_batch,
+        status          = 'active',
+        updated_at      = NOW()`,
       [
-        job.job_id,
-        'serpapi',
-        job.title,
-        job.company_name,
-        job.location,
-        (job.description || '').slice(0, 5000),  // guard against huge descriptions
-        workMode,
-        empType,
-        salaryMin,
-        salaryMax,
-        'INR',
-        skills,
-        applyUrl,
-        expiresAt,
-        batchId,
+        externalId,                              // $1  — hashed, always ≤ 64 chars
+        'serpapi',                               // $2
+        job.title,                               // $3
+        job.company_name,                        // $4
+        job.location,                            // $5
+        (job.description || '').slice(0, 5000),  // $6  — guard against huge descriptions
+        workMode,                                // $7
+        empType,                                 // $8
+        salaryMin,                               // $9
+        salaryMax,                               // $10
+        'INR',                                   // $11
+        skills,                                  // $12
+        applyUrl,                                // $13
+        expiresAt,                               // $14
+        batchId,                                 // $15
       ]
     );
   }
@@ -284,26 +293,35 @@ export class JobsSyncService {
     return data.jobs_results || [];
   }
 
-  // ── Parsers ───────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /**
+   * SerpAPI job_ids are base64-encoded JSON blobs that can exceed 400 chars.
+   * This hashes them to a stable 64-char SHA-256 hex string so they always
+   * fit in VARCHAR(255). Short ids (unlikely but possible) pass through as-is.
+   */
+  private normalizeJobId(rawId: string): string {
+    if (rawId.length <= 255) return rawId;
+    return createHash('sha256').update(rawId).digest('hex');
+  }
 
   private inferWorkMode(job: SerpApiJob): string {
     const text = `${job.title} ${job.description || ''}`.toLowerCase();
-    if (text.includes('remote'))                             return 'remote';
-    if (text.includes('hybrid'))                             return 'hybrid';
+    if (text.includes('remote'))                              return 'remote';
+    if (text.includes('hybrid'))                              return 'hybrid';
     if (text.includes('on-site') || text.includes('onsite')) return 'onsite';
     return 'hybrid';
   }
 
   private inferEmploymentType(job: SerpApiJob): string {
     const s = (job.detected_extensions?.schedule_type || '').toLowerCase();
-    if (s.includes('contract'))  return 'contract';
-    if (s.includes('part'))      return 'part_time';
-    if (s.includes('intern'))    return 'internship';
+    if (s.includes('contract')) return 'contract';
+    if (s.includes('part'))     return 'part_time';
+    if (s.includes('intern'))   return 'internship';
     return 'full_time';
   }
 
   private extractSkills(job: SerpApiJob): string[] {
-    // SerpAPI sometimes surfaces qualifications in job_highlights
     const quals = job.job_highlights?.find(
       h => h.title?.toLowerCase().includes('qualif')
     );

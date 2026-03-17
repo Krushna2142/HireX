@@ -3,6 +3,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg }    from '@prisma/adapter-pg';
+import { Pool }        from 'pg';
 
 @Injectable()
 export class PrismaService
@@ -21,9 +22,19 @@ export class PrismaService
       );
     }
 
-    const adapter = new PrismaPg({ connectionString });
+    // ── SSL fix ────────────────────────────────────────────────────────────
+    // When using PrismaPg (driver adapter), DATABASE_URL query params like
+    // ?sslmode=no-verify are ignored — SSL must be configured on the pg Pool.
+    // Render and Supabase use self-signed certs; rejectUnauthorized: false
+    // keeps the connection encrypted but skips certificate chain validation.
+    const pool = new Pool({
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+    });
 
-    super({ adapter });   // ← adapter goes here, not in defineConfig
+    const adapter = new PrismaPg(pool);
+
+    super({ adapter });
   }
 
   async onModuleInit(): Promise<void> {

@@ -5,8 +5,7 @@
 /* eslint-disable prettier/prettier */
 // src/resumes/resumes.service.ts
 
-import {
-  Injectable,
+import {Injectable,
   InternalServerErrorException,
   NotFoundException,
   ForbiddenException,

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-const MINDPAL_URL = 'https://chatbot.getmindpal.com/mock-interview-master-7ia?theme=dark';
+const MINDPAL_URL = 'https://chatbot.getmindpal.com/mock-interview-master-7ia?theme=light';
 
 export default function MockInterviewPage() {
   const [started, setStarted] = useState(false);

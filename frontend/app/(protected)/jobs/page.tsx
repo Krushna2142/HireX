@@ -2,9 +2,10 @@
 // frontend/app/(protected)/jobs/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import api from '@/lib/axios';  // ← interceptor injects jc_token automatically
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface UnifiedJob {
   id:             string;
@@ -26,87 +27,134 @@ interface UnifiedJob {
   matchScore?:    number;
 }
 
+interface Resume {
+  id:         string;
+  file_name?: string;
+  created_at: string;
+}
+
+interface Application {
+  job_id: string;
+  status: 'applied' | 'reviewed' | 'shortlisted' | 'interview' | 'offered' | 'rejected';
+}
+
+type SourceFilter = 'all' | 'internal' | 'serpapi';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const fmtSalary = (min: number | null, max: number | null) => {
+  if (!min && !max) return null;
+  const f = (n: number) => `₹${(n / 100000).toFixed(0)}L`;
+  if (min && max) return `${f(min)}–${f(max)} PA`;
+  return min ? `From ${f(min)}` : `Up to ${f(max!)}`;
+};
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+const APP_BADGE: Record<string, { bg: string; color: string; label: string }> = {
+  applied:     { bg: 'rgba(96,165,250,0.12)',  color: '#60A5FA', label: 'Applied'       },
+  reviewed:    { bg: 'rgba(167,139,250,0.12)', color: '#A78BFA', label: 'Under review'  },
+  shortlisted: { bg: 'rgba(52,211,153,0.12)',  color: '#34D399', label: 'Shortlisted'   },
+  interview:   { bg: 'rgba(251,191,36,0.12)',  color: '#FBBF24', label: 'Interview'     },
+  offered:     { bg: 'rgba(52,211,153,0.15)',  color: '#10B981', label: 'Offer received'},
+  rejected:    { bg: 'rgba(248,113,113,0.12)', color: '#F87171', label: 'Not selected'  },
+};
+
 // ── Source badge ──────────────────────────────────────────────────────────────
 
 function SourceBadge({ source }: { source: 'internal' | 'serpapi' }) {
   return source === 'internal' ? (
-    <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-      style={{ background: 'rgba(167,139,250,0.15)', color: '#A78BFA', border: '1px solid rgba(167,139,250,0.3)' }}>
+    <span style={{ background: 'rgba(167,139,250,0.15)', color: '#A78BFA', border: '1px solid rgba(167,139,250,0.3)', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
       Recruiter
     </span>
   ) : (
-    <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-      style={{ background: 'rgba(96,165,250,0.15)', color: '#60A5FA', border: '1px solid rgba(96,165,250,0.3)' }}>
+    <span style={{ background: 'rgba(96,165,250,0.12)', color: '#60A5FA', border: '1px solid rgba(96,165,250,0.25)', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
       Live
     </span>
   );
 }
 
-// ── Match score badge ─────────────────────────────────────────────────────────
+// ── Match badge ───────────────────────────────────────────────────────────────
 
 function MatchBadge({ score }: { score: number }) {
   const color = score >= 80 ? '#34D399' : score >= 60 ? '#A78BFA' : '#60A5FA';
   return (
-    <span className="px-2 py-0.5 rounded text-xs font-bold"
-      style={{ background: `${color}15`, color, border: `1px solid ${color}30` }}>
+    <span style={{ background: `${color}18`, color, border: `1px solid ${color}30`, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
       {score}% match
     </span>
   );
 }
 
-// ── Individual job card ───────────────────────────────────────────────────────
+// ── Skeleton card ─────────────────────────────────────────────────────────────
 
-function JobCard({ job, onApply }: {
-  job:     UnifiedJob;
-  onApply: (job: UnifiedJob) => void;
+function SkeletonCard() {
+  return (
+    <div className="card p-5" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ height: 14, width: '60%', borderRadius: 6, background: 'rgba(255,255,255,0.07)', animation: 'pulse 1.5s ease infinite' }} />
+      <div style={{ height: 11, width: '40%', borderRadius: 6, background: 'rgba(255,255,255,0.05)', animation: 'pulse 1.5s ease infinite' }} />
+      <div style={{ height: 60, borderRadius: 6, background: 'rgba(255,255,255,0.04)', animation: 'pulse 1.5s ease infinite' }} />
+      <div style={{ height: 32, borderRadius: 8, background: 'rgba(255,255,255,0.05)', animation: 'pulse 1.5s ease infinite' }} />
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+    </div>
+  );
+}
+
+// ── Job card ──────────────────────────────────────────────────────────────────
+
+function JobCard({
+  job,
+  application,
+  onApply,
+}: {
+  job:         UnifiedJob;
+  application: Application | undefined;
+  onApply:     (job: UnifiedJob) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const salary    = fmtSalary(job.salaryMin, job.salaryMax);
   const isInternal = job.source === 'internal';
-
-  const salary = job.salaryMin && job.salaryMax
-    ? `₹${(job.salaryMin / 100000).toFixed(0)}–${(job.salaryMax / 100000).toFixed(0)} LPA`
-    : null;
+  const appBadge   = application ? APP_BADGE[application.status] : null;
 
   return (
-    <div className="card p-5 flex flex-col gap-3 hover:border-[var(--border-hover)] transition-colors">
+    <div className="card p-5" style={{ display: 'flex', flexDirection: 'column', gap: 12, transition: 'border-color 0.2s' }}>
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span className="font-semibold text-sm leading-snug">{job.title}</span>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+            <span style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: 'var(--text-primary)' }}>{job.title}</span>
             <SourceBadge source={job.source} />
-            {job.matchScore != null && job.matchScore > 0 && (
-              <MatchBadge score={job.matchScore} />
-            )}
+            {job.matchScore != null && job.matchScore > 0 && <MatchBadge score={job.matchScore} />}
           </div>
-          <p className="text-[var(--text-muted)] text-xs">
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
             {job.company}
-            {job.location    && <span> · {job.location}</span>}
-            {job.workMode    && <span> · {job.workMode}</span>}
+            {job.location && ` · ${job.location}`}
+            {job.workMode && ` · ${job.workMode}`}
           </p>
         </div>
-
-        {/* Recruiter: show applicant count */}
         {isInternal && (
-          <div className="text-right shrink-0">
-            <div className="text-xs text-[var(--text-muted)]">{job.applicantCount} applied</div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{job.applicantCount} applied</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{fmtDate(job.postedAt)}</div>
           </div>
         )}
       </div>
 
-      {/* Meta pills */}
-      <div className="flex flex-wrap gap-2">
+      {/* Tags */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {job.employmentType && (
-          <span className="badge-neon px-2 py-0.5 rounded text-xs">{job.employmentType.replace('_', ' ')}</span>
+          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            {job.employmentType.replace('_', ' ')}
+          </span>
         )}
         {salary && (
-          <span className="text-emerald-400 text-xs font-medium">{salary}</span>
+          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(52,211,153,0.08)', color: '#34D399', border: '1px solid rgba(52,211,153,0.2)' }}>
+            {salary}
+          </span>
         )}
-        {/* Recruiter jobs show required skills */}
         {isInternal && job.requiredSkills.slice(0, 4).map(skill => (
-          <span key={skill} className="px-2 py-0.5 rounded text-xs"
-            style={{ background: 'rgba(124,58,237,0.08)', color: '#A78BFA', border: '1px solid rgba(124,58,237,0.2)' }}>
+          <span key={skill} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(124,58,237,0.08)', color: '#A78BFA', border: '1px solid rgba(124,58,237,0.2)' }}>
             {skill}
           </span>
         ))}
@@ -115,134 +163,180 @@ function JobCard({ job, onApply }: {
       {/* Description */}
       {job.description && (
         <div>
-          <p className={`text-sm text-[var(--text-muted)] leading-relaxed ${expanded ? '' : 'line-clamp-2'}`}>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: expanded ? 'unset' : 2, WebkitBoxOrient: 'vertical' }}>
             {job.description}
           </p>
           {job.description.length > 120 && (
-            <button onClick={() => setExpanded(p => !p)}
-              className="text-xs text-violet-400 hover:text-violet-300 mt-1 transition-colors">
+            <button onClick={() => setExpanded(p => !p)} style={{ fontSize: 12, color: '#A78BFA', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0 0', transition: 'color 0.15s' }}>
               {expanded ? 'Show less' : 'Read more'}
             </button>
           )}
         </div>
       )}
 
-      {/* Recruiter info */}
+      {/* Recruiter credit */}
       {isInternal && job.recruiterName && (
-        <p className="text-xs text-[var(--text-muted)]">
-          Posted by <span className="text-violet-400">{job.recruiterName}</span>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+          Posted by <span style={{ color: '#A78BFA' }}>{job.recruiterName}</span>
         </p>
       )}
 
-      {/* Actions — differ by source */}
-      <div className="flex gap-2 mt-auto pt-1">
-        {isInternal ? (
-          // Internal: use in-app apply flow
-          <>
-            <button className="btn text-sm" onClick={() => onApply(job)}>
-              Apply now
-            </button>
-            <button className="btn btn-secondary text-sm">Save</button>
-          </>
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 4 }}>
+        {/* Already applied — show status pill */}
+        {appBadge ? (
+          <span style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8, ...appBadge }}>
+            {appBadge.label}
+          </span>
+        ) : isInternal ? (
+          <button className="btn text-sm" onClick={() => onApply(job)} style={{ fontSize: 13 }}>
+            Apply now
+          </button>
+        ) : job.applyUrl ? (
+          <a href={job.applyUrl} target="_blank" rel="noopener noreferrer" className="btn text-sm" style={{ fontSize: 13 }}>
+            Apply externally ↗
+          </a>
         ) : (
-          // SerpAPI: redirect to external URL
-          <>
-            {job.applyUrl ? (
-              <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
-                className="btn text-sm">
-                Apply externally ↗
-              </a>
-            ) : (
-              <button className="btn text-sm" disabled>No apply link</button>
-            )}
-            <button className="btn btn-secondary text-sm">Save</button>
-          </>
+          <button className="btn text-sm" disabled style={{ fontSize: 13, opacity: 0.4 }}>No apply link</button>
         )}
+        <button className="btn btn-secondary text-sm" style={{ fontSize: 13 }}>Save</button>
       </div>
     </div>
   );
 }
 
-// ── Apply modal (internal jobs only) ─────────────────────────────────────────
+// ── Apply modal ───────────────────────────────────────────────────────────────
 
-function ApplyModal({ job, onClose }: { job: UnifiedJob; onClose: () => void }) {
+function ApplyModal({ job, onClose, onSuccess }: {
+  job:       UnifiedJob;
+  onClose:   () => void;
+  onSuccess: (jobId: string) => void;
+}) {
+  const [resumes,  setResumes]  = useState<Resume[]>([]);
   const [resumeId, setResumeId] = useState('');
   const [cover,    setCover]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  const [fetching, setFetching] = useState(true);
   const [error,    setError]    = useState<string | null>(null);
   const [success,  setSuccess]  = useState(false);
 
+  // Fetch the user's resumes so they can pick one
+  useEffect(() => {
+    api.get<Resume[]>('/api/resumes')
+      .then(({ data }) => {
+        setResumes(data);
+        if (data.length === 1) setResumeId(data[0].id); // auto-select if only one
+      })
+      .catch(() => {})
+      .finally(() => setFetching(false));
+  }, []);
+
   const submit = async () => {
-    if (!resumeId.trim()) { setError('Please enter your resume ID'); return; }
+    if (!resumeId) { setError('Please select a resume'); return; }
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API}/jobs/${job.id}/apply`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ resumeId, coverLetter: cover }),
+      await api.post(`/api/jobs/${job.id}/apply`, {
+        resumeId,
+        coverLetter: cover || undefined,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as any).message ?? 'Application failed');
-      }
       setSuccess(true);
-      setTimeout(onClose, 1500);
-    } catch (e) {
-      setError((e as Error).message);
+      setTimeout(() => { onSuccess(job.id); onClose(); }, 1500);
+    } catch (e: any) {
+      setError(e.response?.data?.message ?? 'Application failed');
     } finally {
       setLoading(false);
     }
   };
 
+  // Trap focus & close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
-    <div style={{
-      minHeight: '100vh', background: 'rgba(0,0,0,0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '1rem',
-    }}>
-      <div className="card p-6 w-full max-w-md">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-base">Apply to {job.title}</h2>
-          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white text-lg leading-none">
-            ✕
-          </button>
+    <div
+      style={{ minHeight: '100vh', background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="card p-6 w-full" style={{ maxWidth: 480 }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>Apply to {job.title}</h2>
+            <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{job.company}</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 4 }}>✕</button>
         </div>
 
-        <p className="text-[var(--text-muted)] text-sm mb-4">{job.company}</p>
-
         {success ? (
-          <div className="text-center py-6">
-            <div className="text-3xl mb-2">🎉</div>
-            <p className="text-emerald-400 font-semibold">Application submitted!</p>
+          <div style={{ textAlign: 'center', padding: '2rem 0' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
+            <p style={{ color: '#34D399', fontWeight: 600, margin: 0 }}>Application submitted!</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* Resume selector */}
             <div>
-              <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Resume ID</label>
-              <input
-                value={resumeId}
-                onChange={e => setResumeId(e.target.value)}
-                placeholder="Paste your resume ID from the sidebar"
-                className="w-full bg-transparent border border-[var(--border)] rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
-              />
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
+                Select resume *
+              </label>
+              {fetching ? (
+                <div style={{ height: 40, borderRadius: 8, background: 'rgba(255,255,255,0.05)', animation: 'pulse 1.5s infinite' }} />
+              ) : resumes.length === 0 ? (
+                <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', fontSize: 13, color: '#F87171' }}>
+                  No resumes found.{' '}
+                  <a href="/resumes" style={{ color: '#F87171', textDecoration: 'underline' }}>Upload one first →</a>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {resumes.map(r => (
+                    <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, border: `1px solid ${resumeId === r.id ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.08)'}`, background: resumeId === r.id ? 'rgba(167,139,250,0.08)' : 'rgba(255,255,255,0.02)', cursor: 'pointer', transition: 'all 0.15s' }}>
+                      <input type="radio" name="resume" value={r.id} checked={resumeId === r.id} onChange={() => setResumeId(r.id)} style={{ accentColor: '#A78BFA' }} />
+                      <div>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: resumeId === r.id ? '#A78BFA' : 'var(--text-primary)' }}>
+                          {r.file_name ?? `Resume ${r.id.slice(0, 8)}`}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)' }}>
+                          {new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* Cover note */}
             <div>
-              <label className="block text-xs font-medium text-[var(--text-muted)] mb-1">Cover note (optional)</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
+                Cover note <span style={{ fontWeight: 400 }}>(optional)</span>
+              </label>
               <textarea
                 value={cover}
                 onChange={e => setCover(e.target.value)}
                 rows={4}
-                placeholder="Why are you a good fit?"
-                className="w-full bg-transparent border border-[var(--border)] rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500 resize-none"
+                placeholder="Why are you a great fit for this role?"
+                style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--text-primary)', resize: 'vertical', outline: 'none' }}
               />
             </div>
-            {error && <p className="text-red-400 text-xs">{error}</p>}
-            <button onClick={() => void submit()} disabled={loading} className="btn w-full">
+
+            {error && (
+              <p style={{ margin: 0, fontSize: 13, color: '#F87171', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, padding: '8px 12px' }}>
+                {error}
+              </p>
+            )}
+
+            <button
+              onClick={() => void submit()}
+              disabled={loading || !resumeId || resumes.length === 0}
+              className="btn w-full"
+              style={{ opacity: (loading || !resumeId || resumes.length === 0) ? 0.5 : 1, fontSize: 14 }}
+            >
               {loading ? 'Submitting…' : 'Submit application'}
             </button>
           </div>
@@ -255,54 +349,77 @@ function ApplyModal({ job, onClose }: { job: UnifiedJob; onClose: () => void }) 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function JobsPage() {
-  const [jobs,        setJobs]        = useState<UnifiedJob[]>([]);
-  const [total,       setTotal]       = useState(0);
-  const [sources,     setSources]     = useState({ internal: 0, serpapi: 0 });
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState<string | null>(null);
-  const [search,      setSearch]      = useState('');
-  const [workMode,    setWorkMode]    = useState('');
-  const [sourceFilter,setSourceFilter]= useState<'all' | 'internal' | 'serpapi'>('all');
-  const [applyTarget, setApplyTarget] = useState<UnifiedJob | null>(null);
+  const [jobs,         setJobs]         = useState<UnifiedJob[]>([]);
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [total,        setTotal]        = useState(0);
+  const [sources,      setSources]      = useState({ internal: 0, serpapi: 0 });
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+  const [search,       setSearch]       = useState('');
+  const [workMode,     setWorkMode]     = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [applyTarget,  setApplyTarget]  = useState<UnifiedJob | null>(null);
 
+  // Debounce search input
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current); };
+  }, [search]);
+
+  // Fetch jobs
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const token  = localStorage.getItem('token');
-      const params = new URLSearchParams({
-        ...(search       && { search }),
-        ...(workMode     && { workMode }),
-        ...(sourceFilter && { source: sourceFilter }),
-      });
+      const params: Record<string, string> = {};
+      if (debouncedSearch) params.search   = debouncedSearch;
+      if (workMode)        params.workMode  = workMode;
+      if (sourceFilter !== 'all') params.source = sourceFilter;
 
-      const res = await fetch(`${API}/jobs?${params}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const { data } = await api.get<{
+        jobs:    UnifiedJob[];
+        total:   number;
+        sources: { internal: number; serpapi: number };
+      }>('/api/jobs', { params });
 
-      if (!res.ok) throw new Error('Failed to load jobs');
-      const data = await res.json();
       setJobs(data.jobs);
       setTotal(data.total);
       setSources(data.sources);
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (e: any) {
+      setError(e.response?.data?.message ?? 'Failed to load jobs');
     } finally {
       setLoading(false);
     }
-  }, [search, workMode, sourceFilter]);
+  }, [debouncedSearch, workMode, sourceFilter]);
 
   useEffect(() => { void fetchJobs(); }, [fetchJobs]);
 
+  // Fetch my applications (to show status badges)
+  useEffect(() => {
+    api.get<Application[]>('/api/jobs/applications/mine')
+      .then(({ data }) => setApplications(data))
+      .catch(() => {});
+  }, []);
+
+  const getApp = (jobId: string) => applications.find(a => a.job_id === jobId);
+
+  // When an application is submitted, optimistically add it
+  const handleApplySuccess = (jobId: string) => {
+    setApplications(prev => [...prev, { job_id: jobId, status: 'applied' }]);
+  };
+
   return (
-    <section className="px-4 sm:px-6 lg:px-8 py-8 max-w-6xl mx-auto">
+    <section style={{ padding: '2rem 2rem 4rem', maxWidth: 1200, margin: '0 auto' }}>
 
       {/* Header */}
-      <div className="section-header mb-6">
-        <h1 className="text-3xl font-bold">Jobs</h1>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, margin: '0 0 4px', color: 'var(--text-primary)' }}>Jobs</h1>
         {!loading && (
-          <p className="text-[var(--text-muted)] text-sm mt-1">
-            {total} jobs ·{' '}
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+            {total} openings ·{' '}
             <span style={{ color: '#A78BFA' }}>{sources.internal} recruiter-posted</span>
             {' · '}
             <span style={{ color: '#60A5FA' }}>{sources.serpapi} live from Google</span>
@@ -311,18 +428,21 @@ export default function JobsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: '1.5rem', alignItems: 'center' }}>
+
+        {/* Search */}
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search jobs, companies, skills…"
-          className="flex-1 min-w-[200px] bg-transparent border border-[var(--border)] rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+          style={{ flex: 1, minWidth: 220, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 8, padding: '8px 14px', fontSize: 13, color: 'var(--text-primary)', outline: 'none' }}
         />
 
+        {/* Work mode */}
         <select
           value={workMode}
           onChange={e => setWorkMode(e.target.value)}
-          className="bg-transparent border border-[var(--border)] rounded-lg px-3 py-2 text-sm outline-none focus:border-violet-500"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--text-primary)', outline: 'none', cursor: 'pointer' }}
         >
           <option value="">All modes</option>
           <option value="remote">Remote</option>
@@ -330,46 +450,84 @@ export default function JobsPage() {
           <option value="onsite">Onsite</option>
         </select>
 
-        {/* Source filter — the key control */}
-        <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
-          {(['all', 'internal', 'serpapi'] as const).map(s => (
+        {/* Source toggle */}
+        <div style={{ display: 'flex', borderRadius: 8, border: '1px solid rgba(255,255,255,0.09)', overflow: 'hidden' }}>
+          {(['all', 'internal', 'serpapi'] as SourceFilter[]).map((s, i) => (
             <button
               key={s}
               onClick={() => setSourceFilter(s)}
-              className="px-3 py-2 text-xs font-medium transition-colors"
               style={{
-                background:   sourceFilter === s ? 'rgba(124,58,237,0.2)' : 'transparent',
-                color:        sourceFilter === s ? '#A78BFA' : 'var(--text-muted)',
-                borderRight:  s !== 'serpapi' ? '1px solid var(--border)' : undefined,
+                padding: '7px 14px', fontSize: 12, fontWeight: 500,
+                background:  sourceFilter === s ? 'rgba(124,58,237,0.2)'   : 'transparent',
+                color:       sourceFilter === s ? '#A78BFA'                 : 'var(--text-muted)',
+                border:      'none',
+                borderRight: i < 2 ? '1px solid rgba(255,255,255,0.09)' : 'none',
+                cursor:      'pointer', transition: 'all 0.15s',
               }}
             >
-              {s === 'all'      ? 'All'      :
-               s === 'internal' ? 'Recruiter' : 'Live'}
+              {s === 'all' ? 'All' : s === 'internal' ? 'Recruiter' : 'Live'}
             </button>
           ))}
         </div>
+
+        {/* Refresh */}
+        <button
+          onClick={() => void fetchJobs()}
+          disabled={loading}
+          style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)', cursor: loading ? 'not-allowed' : 'pointer', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 5 }}
+        >
+          <span style={{ display: 'inline-block', animation: loading ? 'spin 0.8s linear infinite' : 'none', fontSize: 14 }}>↻</span>
+          Refresh
+        </button>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
 
-      {/* Results */}
-      {loading ? (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1,2,3,4,5,6].map(i => (
-            <div key={i} className="card p-5 h-48 animate-pulse opacity-40" />
-          ))}
+      {/* My applications status strip */}
+      {applications.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center' }}>My applications:</span>
+          {Object.entries(
+            applications.reduce<Record<string, number>>((acc, a) => {
+              acc[a.status] = (acc[a.status] ?? 0) + 1;
+              return acc;
+            }, {})
+          ).map(([status, count]) => {
+            const b = APP_BADGE[status];
+            if (!b) return null;
+            return (
+              <span key={status} style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, ...b }}>
+                {b.label} ({count})
+              </span>
+            );
+          })}
         </div>
-      ) : error ? (
-        <div className="card p-8 text-center">
-          <p className="text-red-400 text-sm mb-3">{error}</p>
-          <button className="btn btn-secondary text-sm" onClick={() => void fetchJobs()}>Retry</button>
+      )}
+
+      {/* Results */}
+      {error ? (
+        <div className="card p-8" style={{ textAlign: 'center' }}>
+          <p style={{ color: '#F87171', fontSize: 14, marginBottom: 12 }}>{error}</p>
+          <button className="btn btn-secondary" style={{ fontSize: 13 }} onClick={() => void fetchJobs()}>Retry</button>
+        </div>
+      ) : loading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
+          {Array.from({ length: 9 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : jobs.length === 0 ? (
-        <div className="card p-10 text-center">
-          <p className="text-[var(--text-muted)] text-sm">No jobs found — try adjusting your filters</p>
+        <div className="card p-10" style={{ textAlign: 'center' }}>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', margin: 0 }}>
+            No jobs found — try adjusting your filters or refreshing
+          </p>
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
           {jobs.map(job => (
-            <JobCard key={job.id} job={job} onApply={setApplyTarget} />
+            <JobCard
+              key={job.id}
+              job={job}
+              application={getApp(job.id)}
+              onApply={setApplyTarget}
+            />
           ))}
         </div>
       )}
@@ -377,7 +535,11 @@ export default function JobsPage() {
       {/* Apply modal */}
       {applyTarget && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50 }}>
-          <ApplyModal job={applyTarget} onClose={() => setApplyTarget(null)} />
+          <ApplyModal
+            job={applyTarget}
+            onClose={() => setApplyTarget(null)}
+            onSuccess={handleApplySuccess}
+          />
         </div>
       )}
     </section>

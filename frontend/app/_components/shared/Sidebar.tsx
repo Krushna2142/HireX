@@ -7,18 +7,18 @@ import { useAuth }      from '@/components/providers/AuthProvider';
 import { useResumeAnalysis, AnalysisState } from '@/hooks/useAnalyseResume';
 import ResumeAnalysisTab from '@/components/resumes/ResumeAnalysisTab';
 
-// ── Nav structure — split into named groups ───────────────────────────────────
+// ── Nav structure ─────────────────────────────────────────────────────────────
 
 const CANDIDATE_NAV_GROUPS = [
   {
     label: 'Menu',
     items: [
-      { href: '/dashboard',       icon: '⊞', label: 'Dashboard' },
-      { href: '/jobs',            icon: '💼', label: 'Jobs'      },
-      { href: '/resumes',         icon: '📄', label: 'Resume'    },
+      { href: '/dashboard',         icon: '⊞', label: 'Dashboard'      },
+      { href: '/jobs',              icon: '💼', label: 'Jobs'           },
+      { href: '/resumes',           icon: '📄', label: 'Resume'         },
+      { href: '/resume-analysis',   icon: '🧠', label: 'AI Analysis'    },
     ],
   },
-  // ← Resume Analysis section injected here (see below)
   {
     label: 'Discover',
     items: [
@@ -39,9 +39,16 @@ const RECRUITER_NAV_GROUPS = [
   {
     label: 'Menu',
     items: [
-      { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-      { href: '/jobs',      icon: '💼', label: 'Jobs'      },
-      { href: '/settings',  icon: '⚙',  label: 'Settings'  },
+      { href: '/dashboard',            icon: '⊞', label: 'Overview'   },
+      { href: '/recruiter/dashboard',  icon: '🏢', label: 'Recruitment' },
+      { href: '/jobs',                 icon: '💼', label: 'All Jobs'   },
+    ],
+  },
+  {
+    label: 'Account',
+    items: [
+      { href: '/recruiter/profile', icon: '👤', label: 'Profile'  },
+      { href: '/settings',          icon: '⚙',  label: 'Settings' },
     ],
   },
 ] as const;
@@ -109,19 +116,13 @@ function ResumeAnalysisSection() {
       borderBottom: '1px solid rgba(255,255,255,0.05)',
       margin:       '4px 0',
     }}>
-      {/* Section header — toggles the panel */}
       <button
         onClick={() => setExpanded(p => !p)}
         style={{
-          width:          '100%',
-          display:        'flex',
-          alignItems:     'center',
-          justifyContent: 'space-between',
-          padding:        '8px 12px',
-          background:     'none',
-          border:         'none',
-          cursor:         'pointer',
-          fontFamily:     'Sora, sans-serif',
+          width: '100%', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', padding: '8px 12px',
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontFamily: 'Sora, sans-serif',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -135,29 +136,20 @@ function ResumeAnalysisSection() {
             </div>
           </div>
         </div>
-
-        {/* Chevron — rotates when expanded */}
         <span style={{
-          fontSize:         '10px',
-          color:            'rgba(255,255,255,0.25)',
-          transform:        expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-          transition:       'transform 0.2s ease',
-          display:          'inline-block',
+          fontSize: '10px', color: 'rgba(255,255,255,0.25)',
+          transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.2s ease', display: 'inline-block',
         }}>
           ▾
         </span>
       </button>
 
-      {/* Collapsible panel */}
       <div style={{
-        maxHeight:  expanded ? '600px' : '0px',
-        overflow:   'hidden',
-        transition: 'max-height 0.3s ease',
+        maxHeight: expanded ? '600px' : '0px',
+        overflow: 'hidden', transition: 'max-height 0.3s ease',
       }}>
-        <div style={{
-          padding:    '0 8px 12px',
-          // Scoped overrides so ResumeAnalysisTab renders well on dark bg
-        }}>
+        <div style={{ padding: '0 8px 12px' }}>
           <style>{`
             .sb-analysis-panel .text-gray-800,
             .sb-analysis-panel .text-gray-900 { color: rgba(255,255,255,0.85) !important; }
@@ -172,7 +164,6 @@ function ResumeAnalysisSection() {
             .sb-analysis-panel .text-sm        { font-size: 12px !important; }
             .sb-analysis-panel .text-xs        { font-size: 11px !important; }
           `}</style>
-
           <div className="sb-analysis-panel">
             <ResumeAnalysisTab />
           </div>
@@ -182,7 +173,47 @@ function ResumeAnalysisSection() {
   );
 }
 
-// ── Main sidebar component ────────────────────────────────────────────────────
+// ── Recruiter quick-stats pill ────────────────────────────────────────────────
+// Shown in the sidebar under "Recruitment" for recruiters as a nudge
+// to visit the dashboard. Reads from localStorage cache set by the dashboard.
+
+function RecruiterQuickStats() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw   = localStorage.getItem('jc_recruiter_stats');
+    if (!raw) return null;
+    const stats = JSON.parse(raw) as { activeJobs: number; newApplicants: number };
+    if (!stats.newApplicants) return null;
+    return (
+      <div style={{
+        margin:       '2px 10px 6px',
+        padding:      '8px 10px',
+        borderRadius: '8px',
+        background:   'rgba(244,114,182,0.07)',
+        border:       '1px solid rgba(244,114,182,0.18)',
+        display:      'flex',
+        gap:          '12px',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#F472B6', lineHeight: 1 }}>
+            {stats.activeJobs}
+          </div>
+          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>active</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#38BDF8', lineHeight: 1 }}>
+            {stats.newApplicants}
+          </div>
+          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>new apps</div>
+        </div>
+      </div>
+    );
+  } catch {
+    return null;
+  }
+}
+
+// ── Main sidebar ──────────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const { user, logout } = useAuth();
@@ -191,11 +222,12 @@ export function Sidebar() {
 
   const { analysisState, canAnalyse, trigger, error } = useResumeAnalysis();
 
-  const isCandidate    = user?.role === 'candidate';
-  const navGroups      = isCandidate ? CANDIDATE_NAV_GROUPS : RECRUITER_NAV_GROUPS;
-  const cfg            = ANALYSE_CONFIG[analysisState];
-  const isSpinning     = analysisState === 'triggering' || analysisState === 'processing';
-  const avatarInitial  = user?.full_name
+  const isCandidate   = user?.role === 'candidate';
+  const isRecruiter   = user?.role === 'recruiter';
+  const navGroups     = isCandidate ? CANDIDATE_NAV_GROUPS : RECRUITER_NAV_GROUPS;
+  const cfg           = ANALYSE_CONFIG[analysisState];
+  const isSpinning    = analysisState === 'triggering' || analysisState === 'processing';
+  const avatarInitial = user?.full_name
     ? user.full_name.charAt(0).toUpperCase()
     : user?.email?.charAt(0).toUpperCase() ?? 'U';
 
@@ -242,7 +274,20 @@ export function Sidebar() {
           border: 1px solid transparent;
         }
         .sb-nav-item:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
-        .sb-nav-item.active { background: rgba(56,189,248,0.08); color: #38BDF8; border-color: rgba(56,189,248,0.15); }
+
+        /* Candidate active — sky blue */
+        .sb-nav-item.active-candidate {
+          background: rgba(56,189,248,0.08);
+          color: #38BDF8;
+          border-color: rgba(56,189,248,0.15);
+        }
+        /* Recruiter active — pink */
+        .sb-nav-item.active-recruiter {
+          background: rgba(244,114,182,0.08);
+          color: #F472B6;
+          border-color: rgba(244,114,182,0.15);
+        }
+
         .sb-nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
 
         .sb-analyse-wrap {
@@ -290,7 +335,6 @@ export function Sidebar() {
         }
         .sb-logout-btn:hover { color: #F87171; }
 
-        /* Sidebar scrollbar */
         .sb-nav::-webkit-scrollbar       { width: 4px; }
         .sb-nav::-webkit-scrollbar-track { background: transparent; }
         .sb-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
@@ -304,32 +348,41 @@ export function Sidebar() {
           <span className="sb-logo-name">JobCrawler</span>
         </div>
 
-        {/* Navigation — grouped with section labels */}
+        {/* Navigation */}
         <nav className="sb-nav" aria-label="Main navigation">
           {navGroups.map((group, gi) => (
             <div key={gi}>
               <div className="sb-section-label">{group.label}</div>
 
-              {group.items.map(item => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`sb-nav-item${pathname === item.href ? ' active' : ''}`}
-                >
-                  <span className="sb-nav-icon" aria-hidden="true">{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
+              {group.items.map(item => {
+                const isActive = pathname === item.href ||
+                  (item.href !== '/dashboard' && pathname.startsWith(item.href));
+                const activeClass = isActive
+                  ? isRecruiter ? 'active-recruiter' : 'active-candidate'
+                  : '';
 
-              {/* Inject Resume Analysis panel after the first group (after Resume) */}
-              {isCandidate && gi === 0 && (
-                <ResumeAnalysisSection />
-              )}
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`sb-nav-item ${activeClass}`}
+                  >
+                    <span className="sb-nav-icon" aria-hidden="true">{item.icon}</span>
+                    {item.label}
+                  </Link>
+                );
+              })}
+
+              {/* Recruiter quick stats after "Recruitment" link */}
+              {isRecruiter && gi === 0 && <RecruiterQuickStats />}
+
+              {/* Candidate: resume analysis panel after first group */}
+              {isCandidate && gi === 0 && <ResumeAnalysisSection />}
             </div>
           ))}
         </nav>
 
-        {/* Analyse button — quick trigger without opening the panel */}
+        {/* Candidate: AI analyse quick-trigger button */}
         {isCandidate && (
           <div className="sb-analyse-wrap">
             <div className="sb-section-label" style={{ padding: '0 0.25rem', marginBottom: '0.5rem' }}>
@@ -361,6 +414,45 @@ export function Sidebar() {
             {error && analysisState === 'failed' && (
               <p className="sb-analyse-error" role="alert">{error}</p>
             )}
+
+            {/* Shortcut to full analysis page */}
+            <Link
+              href="/resume-analysis"
+              style={{
+                display: 'block', textAlign: 'center',
+                fontSize: '11px', color: 'rgba(255,255,255,0.25)',
+                textDecoration: 'none', marginTop: '8px',
+                transition: 'color 0.15s',
+              }}
+            >
+              View full analysis →
+            </Link>
+          </div>
+        )}
+
+        {/* Recruiter: post job shortcut */}
+        {isRecruiter && (
+          <div style={{ padding: '0.75rem' }}>
+            <Link
+              href="/recruiter/dashboard"
+              style={{
+                display:        'flex',
+                alignItems:     'center',
+                justifyContent: 'center',
+                gap:            '6px',
+                padding:        '10px',
+                borderRadius:   '10px',
+                background:     'rgba(244,114,182,0.08)',
+                border:         '1px solid rgba(244,114,182,0.2)',
+                color:          '#F472B6',
+                fontSize:       '12px',
+                fontWeight:     600,
+                textDecoration: 'none',
+                transition:     'all 0.15s',
+              }}
+            >
+              <span>+</span> Post a New Job
+            </Link>
           </div>
         )}
 
@@ -369,10 +461,10 @@ export function Sidebar() {
           <div className="sb-user">
             <div
               className="sb-user-card"
-              onClick={() => router.push('/profile')}
+              onClick={() => router.push(isRecruiter ? '/recruiter/profile' : '/profile')}
               role="button"
               tabIndex={0}
-              onKeyDown={e => e.key === 'Enter' && router.push('/profile')}
+              onKeyDown={e => e.key === 'Enter' && router.push(isRecruiter ? '/recruiter/profile' : '/profile')}
               aria-label="Go to profile"
             >
               <div className="sb-avatar" aria-hidden="true">{avatarInitial}</div>

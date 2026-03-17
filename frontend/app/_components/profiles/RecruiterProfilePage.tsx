@@ -1,787 +1,363 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useState } from 'react';
-import {
-  useRecruiterProfile,
-  useUpdateRecruiterProfile,
-} from '../../../hooks/userProfile';
+import { useEffect, useState } from 'react';
+import api from '@/lib/axios';   // ← your axios instance with jc_token interceptor
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Design tokens — recruiter brand uses pink (#F472B6)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const ACCENT  = '#F472B6';
-const BG      = '#0B0F1A';
-const CARD_BG = '#0F1526';
-const BORDER  = 'rgba(255,255,255,0.07)';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pipeline stats interface — mirrors what the enriched API returns
-// Explicit typing here eliminates all (profile as any) casts downstream
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface PipelineStats {
-  totalJobs:         number;
-  totalApplications: number;
-  newApplicants:     number;
-  shortlisted:       number;
-  inInterview:       number;
-  offered:           number;
-  rejected:          number;
-  activeJobs:        number;
-  offerRate:         number;
-  avgDaysToHire:     number;
+interface Job {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  work_mode: 'remote' | 'hybrid' | 'onsite';
+  employment_type: 'full_time' | 'part_time' | 'contract' | 'internship';
+  description: string;
+  required_skills: string[];
+  salary_min?: number;
+  salary_max?: number;
+  status: 'active' | 'closed' | 'draft';
+  created_at: string;
+  _count?: { applications: number };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Style factories
-// ─────────────────────────────────────────────────────────────────────────────
+interface Applicant {
+  id: string;
+  status: 'applied' | 'reviewing' | 'shortlisted' | 'rejected' | 'hired';
+  applied_at: string;
+  candidate: { id: string; name: string; email: string };
+  resume?: { id: string; file_name?: string };
+}
 
-const input = (extra?: React.CSSProperties): React.CSSProperties => ({
-  width:        '100%',
-  padding:      '10px 14px',
-  background:   'rgba(255,255,255,0.05)',
-  border:       '1px solid rgba(255,255,255,0.1)',
-  borderRadius: '10px',
-  color:        '#F1F5F9',
-  fontSize:     '13px',
-  outline:      'none',
-  transition:   'border-color 0.15s, box-shadow 0.15s',
-  ...extra,
-});
+interface PostJobForm {
+  title: string; location: string; work_mode: string;
+  employment_type: string; description: string;
+  required_skills: string; salary_min: string; salary_max: string;
+}
 
-const labelStyle: React.CSSProperties = {
-  display:       'block',
-  fontSize:      '11px',
-  fontWeight:    600,
-  color:         'rgba(255,255,255,0.4)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.08em',
-  marginBottom:  '6px',
+type Tab = 'jobs' | 'post';
+
+const EMPTY_FORM: PostJobForm = {
+  title: '', location: '', work_mode: 'hybrid',
+  employment_type: 'full_time', description: '',
+  required_skills: '', salary_min: '', salary_max: '',
 };
 
-const cardStyle: React.CSSProperties = {
-  background:   CARD_BG,
-  border:       `1px solid ${BORDER}`,
-  borderRadius: '14px',
-  padding:      '1.5rem',
-  marginBottom: '1rem',
+const JOB_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
+  active: { bg: '#EAF3DE', color: '#3B6D11' },
+  closed: { bg: '#F1EFE8', color: '#5F5E5A' },
+  draft:  { bg: '#FAEEDA', color: '#854F0B' },
 };
 
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize:     '14px',
-  fontWeight:   600,
-  color:        '#F1F5F9',
-  margin:       '0 0 1.25rem',
+const APP_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
+  applied:     { bg: '#E6F1FB', color: '#0C447C' },
+  reviewing:   { bg: '#FAEEDA', color: '#854F0B' },
+  shortlisted: { bg: '#EAF3DE', color: '#3B6D11' },
+  rejected:    { bg: '#FCEBEB', color: '#A32D2D' },
+  hired:       { bg: '#E1F5EE', color: '#0F6E56' },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TagInput
-// ─────────────────────────────────────────────────────────────────────────────
+export default function RecruiterDashboard() {
+  const [tab, setTab]               = useState<Tab>('jobs');
+  const [jobs, setJobs]             = useState<Job[]>([]);
+  const [selectedJob, setJob]       = useState<Job | null>(null);
+  const [applicants, setApplicants] = useState<Applicant[]>([]);
+  const [loadingJobs, setLoadJobs]  = useState(true);
+  const [loadingApps, setLoadApps]  = useState(false);
+  const [posting, setPosting]       = useState(false);
+  const [form, setForm]             = useState<PostJobForm>(EMPTY_FORM);
+  const [formError, setFormError]   = useState<string | null>(null);
+  const [postSuccess, setSuccess]   = useState(false);
 
-function TagInput({
-  label,
-  values,
-  onChange,
-  placeholder,
-}: {
-  label:        string;
-  values:       string[];
-  onChange:     (v: string[]) => void;
-  placeholder?: string;
-}) {
-  const [draft, setDraft] = useState('');
+  useEffect(() => {
+    api.get<Job[]>('/api/jobs/mine')
+      .then(({ data }) => {
+        setJobs(data);
+        // Cache stats for sidebar quick-view
+        const activeJobs    = data.filter(j => j.status === 'active').length;
+        const newApplicants = data.reduce((n, j) => n + (j._count?.applications ?? 0), 0);
+        try { localStorage.setItem('jc_recruiter_stats', JSON.stringify({ activeJobs, newApplicants })); } catch {}
+      })
+      .catch(() => {})
+      .finally(() => setLoadJobs(false));
+  }, []);
 
-  function add() {
-    const val = draft.trim();
-    if (val && !values.includes(val)) {
-      onChange([...values, val]);
-      setDraft('');
+  useEffect(() => {
+    if (!selectedJob) return;
+    setLoadApps(true);
+    api.get<Applicant[]>(`/api/jobs/${selectedJob.id}/applicants`)
+      .then(({ data }) => setApplicants(data))
+      .catch(() => setApplicants([]))
+      .finally(() => setLoadApps(false));
+  }, [selectedJob]);
+
+  const handlePost = async () => {
+    setFormError(null);
+    if (!form.title.trim() || !form.location.trim() || !form.description.trim()) {
+      setFormError('Title, location, and description are required.');
+      return;
     }
-  }
+    setPosting(true);
+    try {
+      const { data: newJob } = await api.post<Job>('/api/jobs', {
+        title:           form.title.trim(),
+        location:        form.location.trim(),
+        work_mode:       form.work_mode,
+        employment_type: form.employment_type,
+        description:     form.description.trim(),
+        required_skills: form.required_skills.split(',').map(s => s.trim()).filter(Boolean),
+        salary_min:      form.salary_min ? parseInt(form.salary_min) : undefined,
+        salary_max:      form.salary_max ? parseInt(form.salary_max) : undefined,
+        status:          'active',
+      });
+      setJobs(prev => [newJob, ...prev]);
+      setSuccess(true);
+      setForm(EMPTY_FORM);
+      setTimeout(() => { setSuccess(false); setTab('jobs'); }, 1800);
+    } catch (err: any) {
+      setFormError(err.response?.data?.message ?? 'Failed to post job.');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const updateAppStatus = async (appId: string, status: string) => {
+    try {
+      await api.patch(`/api/jobs/applications/${appId}/status`, { status });
+      setApplicants(prev => prev.map(a => a.id === appId ? { ...a, status: status as Applicant['status'] } : a));
+    } catch {}
+  };
+
+  const toggleJobStatus = async (job: Job) => {
+    const newStatus = job.status === 'active' ? 'closed' : 'active';
+    try {
+      await api.patch(`/api/jobs/${job.id}/status`, { status: newStatus });
+      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: newStatus } : j));
+      if (selectedJob?.id === job.id) setJob(prev => prev ? { ...prev, status: newStatus } : prev);
+    } catch {}
+  };
+
+  const f = (key: keyof PostJobForm, val: string) => setForm(prev => ({ ...prev, [key]: val }));
+  const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const fmtSalary = (n: number) => n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : `₹${n.toLocaleString('en-IN')}`;
+
+  const totalApplicants = jobs.reduce((n, j) => n + (j._count?.applications ?? 0), 0);
+  const activeJobs      = jobs.filter(j => j.status === 'active').length;
 
   return (
-    <div style={{ marginBottom: '1.25rem' }}>
-      <label style={labelStyle}>{label}</label>
+    <div style={{ minHeight: '100vh', background: 'var(--color-background-tertiary)' }}>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-        <input
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder={placeholder ?? `Add ${label.toLowerCase()} and press Enter`}
-          style={input({ flex: 1 })}
-        />
-        <button
-          type="button"
-          onClick={add}
-          style={{
-            padding:      '10px 16px',
-            background:   `${ACCENT}18`,
-            border:       `1px solid ${ACCENT}33`,
-            borderRadius: '10px',
-            color:         ACCENT,
-            fontSize:     '12px',
-            cursor:       'pointer',
-            whiteSpace:   'nowrap',
-            fontWeight:    500,
-          }}
-        >
-          Add
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        {values.map(v => (
-          <span
-            key={v}
-            style={{
-              display:      'inline-flex',
-              alignItems:   'center',
-              gap:          '4px',
-              padding:      '4px 10px',
-              borderRadius: '20px',
-              background:   `${ACCENT}15`,
-              border:       `1px solid ${ACCENT}33`,
-              color:         ACCENT,
-              fontSize:     '12px',
-            }}
+      {/* Header */}
+      <div style={{ background: 'var(--color-background-primary)', borderBottom: '0.5px solid var(--color-border-tertiary)', padding: '1.5rem 2rem' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 500, margin: 0, color: 'var(--color-text-primary)' }}>Recruitment</h1>
+            <p style={{ fontSize: 14, color: 'var(--color-text-secondary)', margin: '4px 0 0' }}>Manage job postings and review applicants</p>
+          </div>
+          <button
+            onClick={() => { setTab('post'); setJob(null); }}
+            style={{ padding: '0.625rem 1.25rem', background: 'var(--color-text-primary)', color: 'var(--color-background-primary)', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {v}
-            <button
-              type="button"
-              onClick={() => onChange(values.filter(x => x !== v))}
-              style={{
-                background: 'none',
-                border:     'none',
-                cursor:     'pointer',
-                color:      'inherit',
-                fontSize:   '13px',
-                lineHeight:  1,
-                padding:    '0 0 0 2px',
-              }}
-            >
-              ×
+            <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Post a Job
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: '1.25rem' }}>
+          {[{ label: 'Total posted', value: jobs.length }, { label: 'Active', value: activeJobs }, { label: 'Total applicants', value: totalApplicants }].map(({ label, value }) => (
+            <div key={label} style={{ background: 'var(--color-background-secondary)', borderRadius: 8, padding: '0.75rem 1.25rem' }}>
+              <p style={{ margin: 0, fontSize: 22, fontWeight: 500, color: 'var(--color-text-primary)' }}>{value}</p>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>{label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+          {(['jobs', 'post'] as Tab[]).map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{ padding: '0.625rem 1.25rem', background: 'none', border: 'none', borderBottom: tab === t ? '2px solid var(--color-text-primary)' : '2px solid transparent', fontSize: 14, fontWeight: tab === t ? 500 : 400, color: tab === t ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', marginBottom: -1 }}>
+              {t === 'jobs' ? 'My Jobs' : 'Post New Job'}
             </button>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PipelineStat card
-// ─────────────────────────────────────────────────────────────────────────────
-
-function PipelineStat({
-  label,
-  value,
-  accent,
-}: {
-  label:  string;
-  value:  string | number;
-  accent: string;
-}) {
-  return (
-    <div style={{
-      background:   'rgba(255,255,255,0.03)',
-      border:       `1px solid rgba(255,255,255,0.06)`,
-      borderRadius: '10px',
-      padding:      '12px 14px',
-      textAlign:    'center',
-    }}>
-      <div style={{
-        fontSize:   '22px',
-        fontWeight:  700,
-        color:       accent,
-        fontFamily: 'monospace',
-        lineHeight:  1,
-      }}>
-        {value}
-      </div>
-      <div style={{
-        fontSize:      '10px',
-        color:         'rgba(255,255,255,0.3)',
-        marginTop:     '4px',
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-      }}>
-        {label}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SECTIONS = [
-  { id: 'company',  label: 'Company'       },
-  { id: 'identity', label: 'My Details'    },
-  { id: 'hiring',   label: 'Hiring Intent' },
-  { id: 'pipeline', label: 'Pipeline'      },
-];
-
-const COMPANY_SIZES = [
-  { value: '1-10',    label: '1–10'    },
-  { value: '11-50',   label: '11–50'   },
-  { value: '51-200',  label: '51–200'  },
-  { value: '201-500', label: '201–500' },
-  { value: '500+',    label: '500+'    },
-];
-
-const HIRING_VOLUMES = [
-  { value: '1-5',  label: '1–5 / qtr'  },
-  { value: '5-20', label: '5–20 / qtr' },
-  { value: '20+',  label: '20+ / qtr'  },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Page component
-// ─────────────────────────────────────────────────────────────────────────────
-
-export default function RecruiterProfilePage() {
-  const { data: profile, isLoading }      = useRecruiterProfile();
-  const { mutate: update, isPending }     = useUpdateRecruiterProfile();
-  const [activeSection, setActiveSection] = useState('company');
-  const [form, setForm]                   = useState<Record<string, any>>({});
-
-  if (isLoading) {
-    return (
-      <div style={{ padding: '2rem', color: 'rgba(255,255,255,0.3)', fontSize: '13px' }}>
-        Loading…
-      </div>
-    );
-  }
-
-  // ── Merge server state with local form state ─────────────────────────────
-  // Cast to Record<string,any> so `get()` can index by dynamic string key.
-  const p   = { ...profile, ...form } as Record<string, any>;
-  const set = (key: string, val: any) =>
-    setForm(prev => ({ ...prev, [key]: val }));
-  const get = (key: string, fallback: any = '') => p[key] ?? fallback;
-
-  const isDirty       = Object.keys(form).length > 0;
-  const completionPct = profile?.profileCompletion ?? 0;
-
-  // ── Safe array helpers — guard against undefined optional fields ─────────
-  // companyIndustry, hiringRoles, typicalStack are string[] | undefined.
-  // Pre-compute as guaranteed string[] to prevent .length / .map errors.
-  const companyIndustry: string[] = get('companyIndustry', []) as string[];
-  const hiringRoles: string[]     = get('hiringRoles', [])     as string[];
-  const typicalStack: string[]    = get('typicalStack', [])    as string[];
-
-  // ── Pipeline stats — typed extraction from enriched API response ─────────
-  // Avoids (profile as any) cast at every access site
-  const pipeline: PipelineStats | undefined =
-    (profile as unknown as { pipeline?: PipelineStats })?.pipeline;
-
-  function handleSave() {
-    update(form, { onSuccess: () => setForm({}) });
-  }
-
-  return (
-    <div style={{
-      fontFamily: "'Plus Jakarta Sans', sans-serif",
-      background:  BG,
-      minHeight:  '100vh',
-      padding:    '2rem',
-      color:      '#E2E8F0',
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.2); }
-        select option { background: #0F1526; color: #F1F5F9; }
-      `}</style>
-
-      {/* ── Page header ──────────────────────────────────────────────────── */}
-
-      <div style={{
-        display:        'flex',
-        alignItems:     'flex-start',
-        justifyContent: 'space-between',
-        marginBottom:   '1.5rem',
-        flexWrap:       'wrap',
-        gap:            '1rem',
-      }}>
-        <div>
-          <h1 style={{ fontSize: '22px', fontWeight: 600, color: '#F1F5F9', margin: '0 0 4px' }}>
-            Recruiter Profile
-          </h1>
-          <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', margin: 0 }}>
-            A complete company profile increases candidate response rates
-          </p>
-        </div>
-
-        <div style={{ textAlign: 'right' }}>
-          <div style={{
-            fontSize:   '26px',
-            fontWeight:  700,
-            fontFamily: 'monospace',
-            lineHeight:  1,
-            color: completionPct >= 80
-              ? '#10B981'
-              : completionPct >= 50
-              ? ACCENT
-              : '#F59E0B',
-          }}>
-            {completionPct}%
-          </div>
-          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '3px' }}>
-            Profile complete
-          </div>
+          ))}
         </div>
       </div>
 
-      {/* Completion bar */}
-      <div style={{
-        height:       '4px',
-        background:   'rgba(255,255,255,0.06)',
-        borderRadius: '99px',
-        overflow:     'hidden',
-        marginBottom: '1.75rem',
-      }}>
-        <div style={{
-          width:        `${completionPct}%`,
-          height:       '100%',
-          background:   `linear-gradient(90deg, ${ACCENT}, #EC4899)`,
-          borderRadius: '99px',
-          transition:   'width 0.6s ease',
-        }} />
-      </div>
+      {/* ── JOBS TAB ── */}
+      {tab === 'jobs' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', minHeight: 'calc(100vh - 220px)' }}>
 
-      {/* ── Section tabs ─────────────────────────────────────────────────── */}
-
-      <div style={{
-        display:      'flex',
-        gap:          '4px',
-        marginBottom: '1.5rem',
-        background:   'rgba(255,255,255,0.04)',
-        borderRadius: '10px',
-        padding:      '4px',
-        width:        'fit-content',
-      }}>
-        {SECTIONS.map(s => (
-          <button
-            key={s.id}
-            onClick={() => setActiveSection(s.id)}
-            style={{
-              padding:      '7px 16px',
-              borderRadius: '7px',
-              fontSize:     '12px',
-              fontWeight:   activeSection === s.id ? 600 : 400,
-              cursor:       'pointer',
-              border:       'none',
-              background:   activeSection === s.id ? ACCENT : 'none',
-              color:        activeSection === s.id ? '#fff' : 'rgba(255,255,255,0.4)',
-              transition:   'all 0.15s',
-            }}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── COMPANY ──────────────────────────────────────────────────────── */}
-
-      {activeSection === 'company' && (
-        <div style={cardStyle}>
-          <h2 style={sectionTitleStyle}>Company Information</h2>
-
-          <div style={{
-            display:             'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap:                 '1rem',
-            marginBottom:        '1rem',
-          }}>
-            <div>
-              <label style={labelStyle}>Company Name</label>
-              <input
-                value={get('companyName')}
-                onChange={e => set('companyName', e.target.value)}
-                placeholder="e.g. Razorpay"
-                style={input()}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>HQ Location</label>
-              <input
-                value={get('companyLocation')}
-                onChange={e => set('companyLocation', e.target.value)}
-                placeholder="e.g. Bangalore, India"
-                style={input()}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Company Website</label>
-              <input
-                type="url"
-                value={get('companyWebsite')}
-                onChange={e => set('companyWebsite', e.target.value)}
-                placeholder="https://yourcompany.com"
-                style={input()}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Company Logo URL</label>
-              <input
-                type="url"
-                value={get('companyLogoUrl')}
-                onChange={e => set('companyLogoUrl', e.target.value)}
-                placeholder="https://cdn.company.com/logo.png"
-                style={input()}
-              />
-            </div>
+          {/* Job list */}
+          <div style={{ background: 'var(--color-background-primary)', borderRight: '0.5px solid var(--color-border-tertiary)', overflowY: 'auto' }}>
+            {loadingJobs ? (
+              <div style={{ padding: '2rem', textAlign: 'center', fontSize: 14, color: 'var(--color-text-secondary)' }}>Loading...</div>
+            ) : jobs.length === 0 ? (
+              <div style={{ padding: '3rem 2rem', textAlign: 'center' }}>
+                <p style={{ fontSize: 14, color: 'var(--color-text-secondary)', margin: '0 0 12px' }}>No jobs posted yet</p>
+                <button onClick={() => setTab('post')} style={{ fontSize: 13, color: 'var(--color-text-info)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Post your first job →</button>
+              </div>
+            ) : jobs.map(job => {
+              const isSel = selectedJob?.id === job.id;
+              const st    = JOB_STATUS_STYLE[job.status] ?? JOB_STATUS_STYLE.draft;
+              return (
+                <button key={job.id} onClick={() => setJob(job)} style={{ width: '100%', textAlign: 'left', padding: '1rem 1.25rem', background: isSel ? 'var(--color-background-secondary)' : 'transparent', borderBottom: '0.5px solid var(--color-border-tertiary)', borderLeft: isSel ? '3px solid var(--color-text-primary)' : '3px solid transparent', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.title}</p>
+                      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>{job.location} · {job.work_mode}</p>
+                    </div>
+                    <span style={{ flexShrink: 0, fontSize: 11, padding: '2px 8px', borderRadius: 20, ...st }}>{job.status}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{job._count?.applications ?? 0} applicants</span>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>Posted {formatDate(job.created_at)}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Company size toggle group */}
-          <div style={{ marginBottom: '1.25rem' }}>
-            <label style={labelStyle}>Company Size</label>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {COMPANY_SIZES.map(opt => {
-                const selected = get('companySize') === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => set('companySize', opt.value)}
-                    style={{
-                      padding:      '7px 16px',
-                      borderRadius: '8px',
-                      fontSize:     '12px',
-                      fontWeight:   selected ? 600 : 400,
-                      cursor:       'pointer',
-                      border:       selected
-                        ? `1px solid ${ACCENT}66`
-                        : '1px solid rgba(255,255,255,0.1)',
-                      background:   selected
-                        ? `${ACCENT}18`
-                        : 'rgba(255,255,255,0.04)',
-                      color:        selected ? ACCENT : 'rgba(255,255,255,0.45)',
-                      transition:   'all 0.15s',
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {/* Job detail + applicants */}
+          <div style={{ padding: '2rem', overflowY: 'auto' }}>
+            {!selectedJob ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-secondary)' }}>
+                <p style={{ fontSize: 14 }}>Select a job to view applicants</p>
+              </div>
+            ) : (
+              <div style={{ maxWidth: 740 }}>
+                {/* Job card */}
+                <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 12, padding: '1.5rem', marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>{selectedJob.title}</p>
+                      <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--color-text-secondary)' }}>{selectedJob.location} · {selectedJob.work_mode} · {selectedJob.employment_type?.replace('_', ' ')}</p>
+                    </div>
+                    <button onClick={() => toggleJobStatus(selectedJob)} style={{ flexShrink: 0, fontSize: 13, padding: '6px 14px', background: 'none', border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, cursor: 'pointer', color: 'var(--color-text-secondary)' }}>
+                      {selectedJob.status === 'active' ? 'Close listing' : 'Reopen listing'}
+                    </button>
+                  </div>
 
-          <div style={{ marginBottom: '1.25rem' }}>
-            <label style={labelStyle}>Company Description</label>
-            <textarea
-              value={get('companyDescription')}
-              onChange={e => set('companyDescription', e.target.value)}
-              placeholder="Brief description of what your company builds…"
-              rows={4}
-              style={input({ resize: 'vertical', lineHeight: '1.6' }) as React.CSSProperties}
-            />
-          </div>
+                  {selectedJob.required_skills?.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: '1rem' }}>
+                      {selectedJob.required_skills.map(s => <span key={s} style={{ fontSize: 12, padding: '3px 10px', background: '#E6F1FB', color: '#0C447C', borderRadius: 20 }}>{s}</span>)}
+                    </div>
+                  )}
 
-          {/* ✅ Fixed: pre-computed companyIndustry (never undefined) */}
-          <TagInput
-            label="Industries"
-            values={companyIndustry}
-            onChange={v => set('companyIndustry', v)}
-            placeholder="e.g. Fintech, SaaS, HealthTech"
-          />
-        </div>
-      )}
+                  <p style={{ margin: '1rem 0 0', fontSize: 14, lineHeight: 1.7, color: 'var(--color-text-secondary)' }}>
+                    {selectedJob.description.slice(0, 300)}{selectedJob.description.length > 300 && '...'}
+                  </p>
+                </div>
 
-      {/* ── IDENTITY ─────────────────────────────────────────────────────── */}
+                {/* Applicants */}
+                <p style={{ margin: '0 0 1rem', fontSize: 16, fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                  Applicants ({applicants.length})
+                </p>
 
-      {activeSection === 'identity' && (
-        <div style={cardStyle}>
-          <h2 style={sectionTitleStyle}>My Details</h2>
+                {loadingApps && <div style={{ fontSize: 14, color: 'var(--color-text-secondary)' }}>Loading applicants...</div>}
 
-          <div style={{
-            display:             'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap:                 '1rem',
-          }}>
-            <div>
-              <label style={labelStyle}>Job Title</label>
-              <input
-                value={get('title')}
-                onChange={e => set('title', e.target.value)}
-                placeholder="e.g. Senior Technical Recruiter"
-                style={input()}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Phone</label>
-              <input
-                value={get('phone')}
-                onChange={e => set('phone', e.target.value)}
-                placeholder="+91 98765 43210"
-                style={input()}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>LinkedIn URL</label>
-              <input
-                type="url"
-                value={get('linkedinUrl')}
-                onChange={e => set('linkedinUrl', e.target.value)}
-                placeholder="https://linkedin.com/in/yourprofile"
-                style={input()}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Profile Photo URL</label>
-              <input
-                type="url"
-                value={get('photoUrl')}
-                onChange={e => set('photoUrl', e.target.value)}
-                placeholder="https://…"
-                style={input()}
-              />
-            </div>
+                {!loadingApps && applicants.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '2.5rem', background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 12 }}>
+                    <p style={{ fontSize: 14, color: 'var(--color-text-secondary)', margin: 0 }}>No applications yet</p>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {applicants.map(app => {
+                    const ast = APP_STATUS_STYLE[app.status] ?? APP_STATUS_STYLE.applied;
+                    return (
+                      <div key={app.id} style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ width: 38, height: 38, borderRadius: '50%', background: '#E6F1FB', color: '#185FA5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 500, flexShrink: 0 }}>
+                          {app.candidate.name?.slice(0, 2).toUpperCase() ?? 'C'}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary)' }}>{app.candidate.name}</p>
+                          <p style={{ margin: '1px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>{app.candidate.email} · Applied {formatDate(app.applied_at)}</p>
+                        </div>
+                        <select
+                          value={app.status}
+                          onChange={e => updateAppStatus(app.id, e.target.value)}
+                          style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '0.5px solid var(--color-border-secondary)', background: ast.bg, color: ast.color, cursor: 'pointer' }}
+                        >
+                          {['applied','reviewing','shortlisted','rejected','hired'].map(s => (
+                            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── HIRING INTENT ────────────────────────────────────────────────── */}
+      {/* ── POST JOB TAB ── */}
+      {tab === 'post' && (
+        <div style={{ padding: '2rem', maxWidth: 680, margin: '0 auto' }}>
+          <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 12, padding: '2rem' }}>
+            <p style={{ margin: '0 0 1.5rem', fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>Post a New Job</p>
 
-      {activeSection === 'hiring' && (
-        <div style={cardStyle}>
-          <h2 style={sectionTitleStyle}>Hiring Intent</h2>
+            {formError && <div style={{ background: '#FCEBEB', border: '0.5px solid #F09595', borderRadius: 8, padding: '0.75rem 1rem', fontSize: 14, color: '#A32D2D', marginBottom: '1.25rem' }}>{formError}</div>}
+            {postSuccess && <div style={{ background: '#EAF3DE', border: '0.5px solid #C0DD97', borderRadius: 8, padding: '0.75rem 1rem', fontSize: 14, color: '#3B6D11', marginBottom: '1.25rem' }}>Job posted! Candidates can now see it in their Jobs tab.</div>}
 
-          {/* ✅ Fixed: pre-computed hiringRoles and typicalStack */}
-          <TagInput
-            label="Roles You Hire For"
-            values={hiringRoles}
-            onChange={v => set('hiringRoles', v)}
-            placeholder="e.g. Frontend Engineer, DevOps Lead"
-          />
-
-          <TagInput
-            label="Typical Tech Stack"
-            values={typicalStack}
-            onChange={v => set('typicalStack', v)}
-            placeholder="e.g. React, Node.js, PostgreSQL, Docker"
-          />
-
-          {/* Hiring volume */}
-          <div style={{ marginBottom: '1.25rem' }}>
-            <label style={labelStyle}>Hiring Volume (per quarter)</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              {HIRING_VOLUMES.map(opt => {
-                const selected = get('hiringVolume') === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => set('hiringVolume', opt.value)}
-                    style={{
-                      padding:      '8px 18px',
-                      borderRadius: '8px',
-                      fontSize:     '12px',
-                      fontWeight:   selected ? 600 : 400,
-                      cursor:       'pointer',
-                      border:       selected
-                        ? `1px solid ${ACCENT}66`
-                        : '1px solid rgba(255,255,255,0.1)',
-                      background:   selected
-                        ? `${ACCENT}18`
-                        : 'rgba(255,255,255,0.04)',
-                      color:        selected ? ACCENT : 'rgba(255,255,255,0.45)',
-                      transition:   'all 0.15s',
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Remote toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div
-              role="switch"
-              aria-checked={get('openToRemote', true)}
-              onClick={() => set('openToRemote', !get('openToRemote', true))}
-              style={{
-                width:        '44px',
-                height:       '24px',
-                borderRadius: '12px',
-                background:   get('openToRemote', true)
-                  ? ACCENT
-                  : 'rgba(255,255,255,0.12)',
-                position:    'relative',
-                cursor:      'pointer',
-                flexShrink:   0,
-                transition:  'background 0.2s',
-              }}
-            >
-              <div style={{
-                position:     'absolute',
-                top:          '3px',
-                left:          get('openToRemote', true) ? '22px' : '3px',
-                width:        '18px',
-                height:       '18px',
-                borderRadius: '50%',
-                background:   '#fff',
-                transition:   'left 0.2s',
-              }} />
-            </div>
-            <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)' }}>
-              Open to hiring remote candidates
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* ── PIPELINE (read-only live stats) ──────────────────────────────── */}
-
-      {activeSection === 'pipeline' && (
-        <>
-          {pipeline ? (
-            <div>
-              {/* Top KPI row */}
-              <div style={{
-                display:             'grid',
-                gridTemplateColumns: 'repeat(4,1fr)',
-                gap:                 '10px',
-                marginBottom:        '10px',
-              }}>
-                <PipelineStat
-                  label="Active Jobs"
-                  value={pipeline.activeJobs ?? 0}
-                  accent={ACCENT}
-                />
-                <PipelineStat
-                  label="Total Applications"
-                  value={pipeline.totalApplications ?? 0}
-                  accent="#38BDF8"
-                />
-                <PipelineStat
-                  label="In Interview"
-                  value={pipeline.inInterview ?? 0}
-                  accent="#F59E0B"
-                />
-                <PipelineStat
-                  label="Offers Extended"
-                  value={pipeline.offered ?? 0}
-                  accent="#10B981"
-                />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Job title *</label>
+                <input type="text" value={form.title} onChange={e => f('title', e.target.value)} placeholder="e.g. Senior Frontend Engineer" style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
 
-              {/* Secondary metrics */}
-              <div style={{
-                display:             'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap:                 '10px',
-              }}>
-                <PipelineStat
-                  label="Offer Acceptance Rate"
-                  value={`${pipeline.offerRate ?? 0}%`}
-                  accent="#10B981"
-                />
-                <PipelineStat
-                  label="Avg Days to Hire"
-                  value={pipeline.avgDaysToHire != null
-                    ? `${pipeline.avgDaysToHire}d`
-                    : '—'}
-                  accent={ACCENT}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Location *</label>
+                  <input type="text" value={form.location} onChange={e => f('location', e.target.value)} placeholder="e.g. Bangalore, India" style={{ width: '100%', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Work mode</label>
+                  <select value={form.work_mode} onChange={e => f('work_mode', e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }}>
+                    <option value="hybrid">Hybrid</option>
+                    <option value="remote">Remote</option>
+                    <option value="onsite">Onsite</option>
+                  </select>
+                </div>
               </div>
 
-              <p style={{
-                fontSize:  '11px',
-                color:     'rgba(255,255,255,0.2)',
-                marginTop: '12px',
-                textAlign: 'center',
-              }}>
-                Pipeline stats update in real-time via Supabase Realtime
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Employment type</label>
+                <select value={form.employment_type} onChange={e => f('employment_type', e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }}>
+                  <option value="full_time">Full time</option>
+                  <option value="part_time">Part time</option>
+                  <option value="contract">Contract</option>
+                  <option value="internship">Internship</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Salary min (₹)</label>
+                  <input type="number" value={form.salary_min} onChange={e => f('salary_min', e.target.value)} placeholder="e.g. 1500000" style={{ width: '100%', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Salary max (₹)</label>
+                  <input type="number" value={form.salary_max} onChange={e => f('salary_max', e.target.value)} placeholder="e.g. 2500000" style={{ width: '100%', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Required skills (comma separated)</label>
+                <input type="text" value={form.required_skills} onChange={e => f('required_skills', e.target.value)} placeholder="e.g. React, TypeScript, Node.js" style={{ width: '100%', boxSizing: 'border-box' }} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Job description *</label>
+                <textarea value={form.description} onChange={e => f('description', e.target.value)} placeholder="Describe the role, responsibilities, and what you're looking for..." rows={6} style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }} />
+              </div>
+
+              <button onClick={handlePost} disabled={posting} style={{ width: '100%', padding: '0.875rem', background: posting ? 'var(--color-background-secondary)' : 'var(--color-text-primary)', color: posting ? 'var(--color-text-secondary)' : 'var(--color-background-primary)', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 500, cursor: posting ? 'not-allowed' : 'pointer' }}>
+                {posting ? 'Posting...' : 'Post Job'}
+              </button>
+              <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', textAlign: 'center', margin: 0 }}>
+                Once posted, candidates immediately see this in their Jobs tab
               </p>
             </div>
-          ) : (
-            // Empty state — no jobs posted yet
-            <div style={{
-              ...cardStyle,
-              textAlign: 'center',
-              padding:   '3rem',
-            }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
-              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px', margin: 0 }}>
-                Post your first job to see live pipeline statistics here
-              </p>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ── Sticky save bar ───────────────────────────────────────────────── */}
-
-      {isDirty && (
-        <div style={{
-          position:       'fixed',
-          bottom:         '1.5rem',
-          right:          '2rem',
-          display:        'flex',
-          alignItems:     'center',
-          gap:            '12px',
-          background:     CARD_BG,
-          border:         `1px solid ${BORDER}`,
-          borderRadius:   '12px',
-          padding:        '12px 16px',
-          boxShadow:      '0 8px 32px rgba(0,0,0,0.4)',
-          zIndex:          100,
-          animation:      'slideUp 0.2s ease',
-        }}>
-          <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>
-            {Object.keys(form).length} unsaved change
-            {Object.keys(form).length > 1 ? 's' : ''}
-          </span>
-
-          <button
-            onClick={() => setForm({})}
-            style={{
-              padding:      '8px 14px',
-              background:   'none',
-              border:       `1px solid ${BORDER}`,
-              borderRadius: '8px',
-              color:        'rgba(255,255,255,0.4)',
-              fontSize:     '12px',
-              cursor:       'pointer',
-            }}
-          >
-            Discard
-          </button>
-
-          <button
-            onClick={handleSave}
-            disabled={isPending}
-            style={{
-              padding:      '8px 20px',
-              background:   `linear-gradient(135deg, ${ACCENT}cc, ${ACCENT})`,
-              border:       'none',
-              borderRadius: '8px',
-              color:        '#fff',
-              fontSize:     '12px',
-              fontWeight:    600,
-              cursor:        isPending ? 'not-allowed' : 'pointer',
-              opacity:       isPending ? 0.6 : 1,
-              transition:   'opacity 0.15s',
-            }}
-          >
-            {isPending ? 'Saving…' : 'Save Changes'}
-          </button>
+          </div>
         </div>
       )}
     </div>
