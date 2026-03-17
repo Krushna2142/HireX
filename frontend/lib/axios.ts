@@ -1,9 +1,14 @@
-import axios from 'axios';
 // frontend/lib/axios.ts
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import axios from 'axios';
+
+// NEXT_PUBLIC_API_URL already includes /api
+// e.g. https://job-crawler-ts-api-t9r0.onrender.com/api
+// So call sites just use: api.get('/resumes'), api.post('/auth/login') etc.
+// DO NOT add /api in baseURL here or in call sites — it's already in the env var.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: API_URL,  // ← no /api appended — already in the env var
 });
 
 // Attach JWT token from localStorage to every request
