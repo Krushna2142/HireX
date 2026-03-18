@@ -18,6 +18,17 @@ const SKILL_CATEGORIES: Record<string, string[]> = {
   'Cloud & DevOps': ['AWS', 'GCP', 'Azure', 'Docker', 'Kubernetes', 'Terraform', 'CI/CD', 'Linux'],
   'AI / ML':        ['Python', 'TensorFlow', 'PyTorch', 'LangChain', 'OpenAI API', 'Hugging Face', 'MLOps'],
   'Tools':          ['Git', 'GraphQL', 'REST', 'gRPC', 'Kafka', 'RabbitMQ', 'Figma', 'Jira'],
+  'Mobile Applications Development': ['Flutter', 'React Native', 'Swift', 'Kotlin', 'iOS', 'Android'],
+  'Data Science & Analytics': ['Python', 'R', 'SQL', 'Tableau', 'Power BI', 'Data Visualization', 'Statistics'],
+  'Cybersecurity': ['Network Security', 'Penetration Testing', 'Ethical Hacking', 'Firewalls', 'SIEM', 'Cryptography'],
+  'Project Management': ['Agile', 'Scrum', 'Kanban', 'Jira', 'Asana', 'Trello', 'Leadership'],
+  'Other': ['Communication', 'Problem Solving', 'Time Management', 'Critical Thinking', 'Teamwork'],
+  'Languages': ['English', 'Spanish', 'Mandarin', 'French', 'German', 'Japanese', 'Hindi'],
+  'Certifications': ['AWS Certified Solutions Architect', 'Certified Scrum Master', 'PMP', 'Cisco CCNA', 'Google Professional Data Engineer'],
+  'Soft Skills': ['Communication', 'Problem Solving', 'Time Management', 'Critical Thinking', 'Teamwork'],
+  'Frameworks & Libraries': ['React', 'Angular', 'Vue', 'Django', 'Flask', 'Spring Boot', 'Express', 'TensorFlow', 'PyTorch'],
+  'Programming Languages': ['JavaScript', 'TypeScript', 'Python', 'Java', 'Go', 'Rust', 'C#', 'C++'],
+  'Cloud Platforms': ['AWS', 'Google Cloud', 'Microsoft Azure', 'Heroku', 'DigitalOcean'],
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -26,6 +37,7 @@ type Tab = 'jobs' | 'post';
 
 interface PostJobForm {
   title:           string;
+  company:         string;
   location:        string;
   work_mode:       string;
   employment_type: string;
@@ -36,7 +48,7 @@ interface PostJobForm {
 }
 
 const EMPTY_FORM: PostJobForm = {
-  title: '', location: '', work_mode: 'hybrid', employment_type: 'full_time',
+  title: '', company: '', location: '', work_mode: 'hybrid', employment_type: 'full_time',
   description: '', required_skills: [], salary_min: '', salary_max: '',
 };
 
@@ -228,13 +240,13 @@ export default function RecruiterDashboard() {
   const { applicants, loading: loadingApps, updateStatus } = useJobApplicants(selectedJobId);
 
   // selectedJob is typed as RecruiterJob | undefined — no 'as any' needed
-  const selectedJob: RecruiterJob | undefined = jobs.find((j: { id: string | null; }) => j.id === selectedJobId);
+  const selectedJob: RecruiterJob | undefined = jobs.find((j: RecruiterJob) => j.id === selectedJobId);
 
   // ── Post job handler ──────────────────────────────────────────────────────
   const handlePost = async () => {
     setErr(null);
-    if (!form.title.trim() || !form.location.trim() || !form.description.trim()) {
-      setErr('Title, location and description are required.'); return;
+    if (!form.title.trim() || !form.company.trim() || !form.location.trim() || !form.description.trim()) {
+      setErr('Title, company, location and description are required.'); return;
     }
     if (form.required_skills.length === 0) {
       setErr('Select at least one required skill.'); return;
@@ -243,6 +255,7 @@ export default function RecruiterDashboard() {
     try {
       await postJob({
         title:          form.title.trim(),
+        company:        form.company.trim(),
         location:       form.location.trim(),
         workMode:       form.work_mode,
         employmentType: form.employment_type,
@@ -543,10 +556,16 @@ export default function RecruiterDashboard() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
-                {/* Title */}
-                <div>
-                  <label style={labelStyle}>Job title *</label>
-                  <input type="text" value={form.title} onChange={e => f('title', e.target.value)} placeholder="e.g. Senior Frontend Engineer" style={inputStyle} />
+                {/* Title + Company */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={labelStyle}>Job title *</label>
+                    <input type="text" value={form.title} onChange={e => f('title', e.target.value)} placeholder="e.g. Senior Frontend Engineer" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Company name *</label>
+                    <input type="text" value={form.company} onChange={e => f('company', e.target.value)} placeholder="e.g. Razorpay" style={inputStyle} />
+                  </div>
                 </div>
 
                 {/* Location + Work mode */}
