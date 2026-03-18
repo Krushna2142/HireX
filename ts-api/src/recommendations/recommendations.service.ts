@@ -8,6 +8,17 @@ import { DatabaseService }    from '../database/database.service';
 
 // ── Typed DB row interfaces — all exported so controllers can reference them ──
 
+/**
+ * Lightweight profile shape used for enriched lookups (title + industry context).
+ * Returned by the dedicated fetchCandidateProfile helper.
+ */
+export interface ProfileRow {
+  top_skills:       string[];
+  experience_level: string;
+  current_title:    string | null;
+  industry_tags:    string[] | null; // mapped from target_industries column
+}
+
 export interface CandidateProfileRow {
   top_skills:       string[];
   experience_level: string;
@@ -40,7 +51,7 @@ export interface JobRecommendationRow {
   salary_score:    number;
 }
 
-export interface SkillDemandRow {        // ← THIS is what controller needs
+export interface SkillDemandRow {
   skill:         string;
   demand_count:  string;
   candidate_has: boolean;
@@ -90,10 +101,38 @@ export class RecommendationsService {
 
   constructor(private readonly db: DatabaseService) {}
 
+  // ── Private Helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Fetches the enriched candidate profile row including current job title
+   * and target industry tags. Used wherever we need richer context beyond
+   * the base skills/salary/work-mode profile.
+   *
+   * Maps `target_industries` → `industry_tags` at the SQL level so the
+   * application layer always works with the canonical `ProfileRow` shape.
+   */
+  private async fetchCandidateProfile(userId: string): Promise<ProfileRow | null> {
+    const { rows } = await this.db.query<ProfileRow>(
+      `SELECT top_skills,
+              experience_level,
+              current_title,
+              target_industries AS industry_tags
+       FROM candidate_profiles
+       WHERE user_id = $1`,
+      [userId],
+    );
+
+    return rows.length ? rows[0] : null;
+  }
+
+  // ── Public Methods ─────────────────────────────────────────────────────────
+
   async getJobRecommendations(
     candidateId: string,
     limit = 10,
   ): Promise<{ recommendations: JobRecommendation[]; reason?: string; profile?: object }> {
+
+    // ── 1. Fetch full candidate profile (existing scoring fields) ────────────
     const { rows: profileRows } = await this.db.query<CandidateProfileRow>(
       `SELECT cp.top_skills, cp.experience_level, cp.experience_years,
               cp.target_roles, cp.work_mode, cp.salary_min, cp.salary_max
@@ -106,10 +145,14 @@ export class RecommendationsService {
       return { recommendations: [], reason: 'Complete your profile for recommendations' };
     }
 
-    const profile = profileRows[0];
+    // ── 2. Fetch enriched profile (title + industry context) ─────────────────
+    const enrichedProfile = await this.fetchCandidateProfile(candidateId);
+
+    const profile      = profileRows[0];
     const skills:      string[] = profile.top_skills   || [];
     const targetRoles: string[] = profile.target_roles || [];
 
+    // ── 3. Score and fetch matching jobs ─────────────────────────────────────
     const { rows: jobs } = await this.db.query<JobRecommendationRow>(
       `SELECT
          j.*,
@@ -179,6 +222,9 @@ export class RecommendationsService {
         skills,
         experienceLevel: profile.experience_level,
         workMode:        profile.work_mode,
+        // Enriched fields exposed to consumers if available
+        currentTitle:    enrichedProfile?.current_title   ?? null,
+        industryTags:    enrichedProfile?.industry_tags   ?? [],
       },
     };
   }
