@@ -1,10 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable react-hooks/set-state-in-effect */
 // hooks/useResumePolling.ts
-'use client';
+// SWR-backed adapter — replaces the old polling-loop approach.
+// ResumeAnalysisTab.tsx imports from here unchanged.
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import useSWR from 'swr';
+import { useState, useCallback } from 'react';
 import api from '@/lib/axios';
+
+const fetcher = (url: string) => api.get(url).then(r => r.data);
 
 export type ResumeStatus = 'uploaded' | 'processing' | 'analyzed' | 'failed';
 
@@ -16,116 +18,73 @@ export interface Resume {
   createdAt: string;
 }
 
-export interface Analysis {
+export interface ResumeAnalysis {
   id:              string;
   resumeId:        string;
-  personalInfo:    Record<string, unknown>;
-  workExperience:  unknown[];
-  education:       unknown[];
-  skills:          unknown[];
-  topSkills:       string[];
-  industryTags:    string[];
   experienceYears: number;
   experienceLevel: string;
-  trajectory:      string;
-  summary:         string;
-  processedAt:     string;
+  topSkills:       string[];
+  industryTags:    string[];
+  trajectory?:     string;
+  status:          string;
 }
 
-// ── useResumes ────────────────────────────────────────────────────────────────
-
+// Polls every 8s normally, drops to 5s while processing
 export function useResumes() {
-  const [resumes, setResumes] = useState<Resume[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, error, isLoading, mutate } = useSWR<Resume[]>(
+    '/resumes',
+    fetcher,
+    { refreshInterval: 8_000, revalidateOnFocus: true, revalidateOnReconnect: true },
+  );
+
+  return {
+    resumes: data ?? [],
+    loading: isLoading,
+    error:   error?.message ?? null,
+    reload:  useCallback(async () => { await mutate(); }, [mutate]),
+  };
+}
+
+// Watches one resume's status; loads analysis when ready
+export function useAnalysis(resumeId: string | null) {
+  const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data } = await api.get<Resume[]>('/resumes');
-      setResumes(data);
-    } catch (e: any) {
-      setError(e.response?.data?.message ?? (e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: resume, mutate: mutateResume } = useSWR<Resume>(
+    resumeId ? `/resumes/${resumeId}` : null,
+    fetcher,
+    {
+      refreshInterval: (cur: Resume | undefined) =>
+        cur?.status === 'processing' ? 5_000 : cur?.status === 'analyzed' ? 30_000 : 8_000,
+      revalidateOnFocus: true,
+    },
+  );
 
-  useEffect(() => { void load(); }, [load]);
-
-  return { resumes, loading, error, reload: load };
-}
-
-// ── useAnalysis ───────────────────────────────────────────────────────────────
-
-export function useAnalysis(resumeId: string | null) {
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [status,   setStatus]   = useState<ResumeStatus | null>(null);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  const pollStatus = useCallback(async (id: string) => {
-    try {
-      const { data: resume } = await api.get<Resume>(`/resumes/${id}`);
-      setStatus(resume.status);
-
-      if (resume.status === 'analyzed') {
-        stopPolling();
-        const { data: a } = await api.get<Analysis>(`/resumes/${id}/analysis`);
-        setAnalysis(a);
-        setLoading(false);
-      } else if (resume.status === 'failed') {
-        stopPolling();
-        setError('Analysis failed — please try again');
-        setLoading(false);
-      }
-    } catch (e: any) {
-      setError(e.response?.data?.message ?? (e as Error).message);
-      stopPolling();
-      setLoading(false);
-    }
-  }, [stopPolling]);
+  const { data: analysis, mutate: mutateAnalysis } = useSWR<ResumeAnalysis>(
+    resume?.status === 'analyzed' && resumeId ? `/resumes/${resumeId}/analysis` : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
 
   const triggerAnalysis = useCallback(async (id: string) => {
     setLoading(true);
     setError(null);
-    setAnalysis(null);
-
     try {
       await api.post(`/resumes/${id}/analyse`);
-      setStatus('processing');
-      pollRef.current = setInterval(() => { void pollStatus(id); }, 4_000);
-    } catch (e: any) {
-      setError(e.response?.data?.message ?? (e as Error).message);
+      await mutateResume();
+      await mutateAnalysis();
+    } catch (err: any) {
+      setError(err.response?.data?.message ?? 'Failed to start analysis');
+    } finally {
       setLoading(false);
     }
-  }, [pollStatus]);
+  }, [mutateResume, mutateAnalysis]);
 
-  useEffect(() => {
-    if (!resumeId) {
-      setAnalysis(null);
-      setStatus(null);
-      return;
-    }
-
-    void api.get<Resume>(`/resumes/${resumeId}`).then(({ data: r }) => {
-      setStatus(r.status);
-      if (r.status === 'analyzed') {
-        void api.get<Analysis>(`/resumes/${resumeId}/analysis`).then(({ data }) => setAnalysis(data));
-      }
-    }).catch(() => null);
-
-    return stopPolling;
-  }, [resumeId, stopPolling]);
-
-  return { analysis, status, loading, error, triggerAnalysis };
+  return {
+    analysis,
+    status:  resume?.status ?? null,
+    loading,
+    error,
+    triggerAnalysis,
+  };
 }
