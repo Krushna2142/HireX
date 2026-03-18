@@ -1,14 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // frontend/lib/resumes.ts
-import { getToken } from '@/lib/auth';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// ✅ Uses axios (lib/axios.ts) — token + baseURL handled automatically by interceptor
+import api from '@/lib/axios';
 
 export type ResumeStatus =
-  | 'uploaded'    // file saved, analysis not started
-  | 'processing'  // analysis job running
-  | 'analyzed'    // complete
-  | 'failed';     // analysis failed
+  | 'uploaded'
+  | 'processing'
+  | 'analyzed'
+  | 'failed';
 
 export interface Resume {
   id:        string;
@@ -38,83 +37,59 @@ export interface ResumeAnalysis {
   processedAt:     string | null;
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-// ── Upload resume file (no analysis triggered) ────────────────────────────────
+// ── Upload resume file ────────────────────────────────────────────────────────
 
 export async function uploadResume(file: File): Promise<Resume> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${API_URL}/resumes/upload-raw`, {
-    method:  'POST',
-    headers: authHeaders(),
-    body:    formData,
+  // ✅ no /api/ prefix — axios baseURL already includes it
+  const { data } = await api.post<Resume>('/resumes/upload-raw', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
   });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ message: 'Upload failed' }));
-    throw new Error(data.message || `Upload failed: ${res.status}`);
-  }
-
-  return res.json();
+  return data;
 }
 
-// ── Trigger analysis for an uploaded resume ───────────────────────────────────
-// Called when user clicks "Analyse Resume" in the sidebar.
+// ── Trigger Groq analysis ─────────────────────────────────────────────────────
 
 export async function triggerAnalysis(resumeId: string): Promise<{
   resumeId: string;
   status:   string;
   message:  string;
 }> {
-  const res = await fetch(`${API_URL}/resumes/${resumeId}/analyse`, {
-    method:  'POST',
-    headers: authHeaders(),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ message: 'Failed to trigger analysis' }));
-    throw new Error(data.message || `Analysis trigger failed: ${res.status}`);
-  }
-
-  return res.json();
+  // ✅ no /api/ prefix
+  const { data } = await api.post(`/resumes/${resumeId}/analyse`);
+  return data;
 }
 
-// ── Get the user's latest resume ──────────────────────────────────────────────
+// ── Get latest resume ─────────────────────────────────────────────────────────
 
 export async function getLatestResume(): Promise<Resume | null> {
-  const res = await fetch(`${API_URL}/resumes/latest`, {
-    headers: authHeaders(),
-  });
-
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error('Failed to fetch latest resume');
-  return res.json();
+  try {
+    // ✅ no /api/ prefix
+    const { data } = await api.get<Resume>('/resumes/latest');
+    return data;
+  } catch (err: any) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 }
 
 // ── Get resume by ID ──────────────────────────────────────────────────────────
 
 export async function getResume(id: string): Promise<Resume> {
-  const res = await fetch(`${API_URL}/resumes/${id}`, {
-    headers: authHeaders(),
-  });
-
-  if (!res.ok) throw new Error('Failed to fetch resume');
-  return res.json();
+  // ✅ no /api/ prefix
+  const { data } = await api.get<Resume>(`/resumes/${id}`);
+  return data;
 }
 
-// ── Poll resume status until terminal ─────────────────────────────────────────
-// Used after triggerAnalysis() to track progress.
+// ── Poll resume status ────────────────────────────────────────────────────────
 
 export async function pollResumeStatus(
-  resumeId:       string,
+  resumeId:        string,
   onStatusChange?: (status: ResumeStatus) => void,
-  maxAttempts     = 40,
-  intervalMs      = 5_000,
+  maxAttempts      = 40,
+  intervalMs       = 5_000,
 ): Promise<Resume> {
   return new Promise((resolve, reject) => {
     let attempts = 0;
@@ -142,11 +117,12 @@ export async function pollResumeStatus(
 // ── Get analysis result ───────────────────────────────────────────────────────
 
 export async function getResumeAnalysis(resumeId: string): Promise<ResumeAnalysis | null> {
-  const res = await fetch(`${API_URL}/resumes/${resumeId}/analysis`, {
-    headers: authHeaders(),
-  });
-
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error('Failed to fetch analysis');
-  return res.json();
+  try {
+    // ✅ no /api/ prefix
+    const { data } = await api.get<ResumeAnalysis>(`/resumes/${resumeId}/analysis`);
+    return data;
+  } catch (err: any) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
 }

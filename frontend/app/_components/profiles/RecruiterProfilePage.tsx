@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import api from '@/lib/axios';   // ← your axios instance with jc_token interceptor
+import api from '@/lib/axios';
 
 interface Job {
   id: string;
@@ -68,10 +68,10 @@ export default function RecruiterDashboard() {
   const [postSuccess, setSuccess]   = useState(false);
 
   useEffect(() => {
-    api.get<Job[]>('/api/jobs/mine')
+    // ✅ no /api/ prefix
+    api.get<Job[]>('/jobs/mine')
       .then(({ data }) => {
         setJobs(data);
-        // Cache stats for sidebar quick-view
         const activeJobs    = data.filter(j => j.status === 'active').length;
         const newApplicants = data.reduce((n, j) => n + (j._count?.applications ?? 0), 0);
         try { localStorage.setItem('jc_recruiter_stats', JSON.stringify({ activeJobs, newApplicants })); } catch {}
@@ -83,7 +83,8 @@ export default function RecruiterDashboard() {
   useEffect(() => {
     if (!selectedJob) return;
     setLoadApps(true);
-    api.get<Applicant[]>(`/api/jobs/${selectedJob.id}/applicants`)
+    // ✅ no /api/ prefix
+    api.get<Applicant[]>(`/jobs/${selectedJob.id}/applicants`)
       .then(({ data }) => setApplicants(data))
       .catch(() => setApplicants([]))
       .finally(() => setLoadApps(false));
@@ -97,7 +98,8 @@ export default function RecruiterDashboard() {
     }
     setPosting(true);
     try {
-      const { data: newJob } = await api.post<Job>('/api/jobs', {
+      // ✅ no /api/ prefix
+      const { data: newJob } = await api.post<Job>('/jobs', {
         title:           form.title.trim(),
         location:        form.location.trim(),
         work_mode:       form.work_mode,
@@ -121,7 +123,8 @@ export default function RecruiterDashboard() {
 
   const updateAppStatus = async (appId: string, status: string) => {
     try {
-      await api.patch(`/api/jobs/applications/${appId}/status`, { status });
+      // ✅ no /api/ prefix
+      await api.patch(`/jobs/applications/${appId}/status`, { status });
       setApplicants(prev => prev.map(a => a.id === appId ? { ...a, status: status as Applicant['status'] } : a));
     } catch {}
   };
@@ -129,7 +132,8 @@ export default function RecruiterDashboard() {
   const toggleJobStatus = async (job: Job) => {
     const newStatus = job.status === 'active' ? 'closed' : 'active';
     try {
-      await api.patch(`/api/jobs/${job.id}/status`, { status: newStatus });
+      // ✅ no /api/ prefix
+      await api.patch(`/jobs/${job.id}/status`, { status: newStatus });
       setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: newStatus } : j));
       if (selectedJob?.id === job.id) setJob(prev => prev ? { ...prev, status: newStatus } : prev);
     } catch {}
@@ -137,30 +141,24 @@ export default function RecruiterDashboard() {
 
   const f = (key: keyof PostJobForm, val: string) => setForm(prev => ({ ...prev, [key]: val }));
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const fmtSalary = (n: number) => n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : `₹${n.toLocaleString('en-IN')}`;
 
   const totalApplicants = jobs.reduce((n, j) => n + (j._count?.applications ?? 0), 0);
   const activeJobs      = jobs.filter(j => j.status === 'active').length;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-background-tertiary)' }}>
-
-      {/* Header */}
       <div style={{ background: 'var(--color-background-primary)', borderBottom: '0.5px solid var(--color-border-tertiary)', padding: '1.5rem 2rem' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 500, margin: 0, color: 'var(--color-text-primary)' }}>Recruitment</h1>
             <p style={{ fontSize: 14, color: 'var(--color-text-secondary)', margin: '4px 0 0' }}>Manage job postings and review applicants</p>
           </div>
-          <button
-            onClick={() => { setTab('post'); setJob(null); }}
-            style={{ padding: '0.625rem 1.25rem', background: 'var(--color-text-primary)', color: 'var(--color-background-primary)', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-          >
+          <button onClick={() => { setTab('post'); setJob(null); }}
+            style={{ padding: '0.625rem 1.25rem', background: 'var(--color-text-primary)', color: 'var(--color-background-primary)', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Post a Job
           </button>
         </div>
 
-        {/* Stats */}
         <div style={{ display: 'flex', gap: 12, marginBottom: '1.25rem' }}>
           {[{ label: 'Total posted', value: jobs.length }, { label: 'Active', value: activeJobs }, { label: 'Total applicants', value: totalApplicants }].map(({ label, value }) => (
             <div key={label} style={{ background: 'var(--color-background-secondary)', borderRadius: 8, padding: '0.75rem 1.25rem' }}>
@@ -170,7 +168,6 @@ export default function RecruiterDashboard() {
           ))}
         </div>
 
-        {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
           {(['jobs', 'post'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{ padding: '0.625rem 1.25rem', background: 'none', border: 'none', borderBottom: tab === t ? '2px solid var(--color-text-primary)' : '2px solid transparent', fontSize: 14, fontWeight: tab === t ? 500 : 400, color: tab === t ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', marginBottom: -1 }}>
@@ -180,11 +177,8 @@ export default function RecruiterDashboard() {
         </div>
       </div>
 
-      {/* ── JOBS TAB ── */}
       {tab === 'jobs' && (
         <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', minHeight: 'calc(100vh - 220px)' }}>
-
-          {/* Job list */}
           <div style={{ background: 'var(--color-background-primary)', borderRight: '0.5px solid var(--color-border-tertiary)', overflowY: 'auto' }}>
             {loadingJobs ? (
               <div style={{ padding: '2rem', textAlign: 'center', fontSize: 14, color: 'var(--color-text-secondary)' }}>Loading...</div>
@@ -214,7 +208,6 @@ export default function RecruiterDashboard() {
             })}
           </div>
 
-          {/* Job detail + applicants */}
           <div style={{ padding: '2rem', overflowY: 'auto' }}>
             {!selectedJob ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-secondary)' }}>
@@ -222,7 +215,6 @@ export default function RecruiterDashboard() {
               </div>
             ) : (
               <div style={{ maxWidth: 740 }}>
-                {/* Job card */}
                 <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 12, padding: '1.5rem', marginBottom: '1.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                     <div>
@@ -233,31 +225,23 @@ export default function RecruiterDashboard() {
                       {selectedJob.status === 'active' ? 'Close listing' : 'Reopen listing'}
                     </button>
                   </div>
-
                   {selectedJob.required_skills?.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: '1rem' }}>
                       {selectedJob.required_skills.map(s => <span key={s} style={{ fontSize: 12, padding: '3px 10px', background: '#E6F1FB', color: '#0C447C', borderRadius: 20 }}>{s}</span>)}
                     </div>
                   )}
-
                   <p style={{ margin: '1rem 0 0', fontSize: 14, lineHeight: 1.7, color: 'var(--color-text-secondary)' }}>
                     {selectedJob.description.slice(0, 300)}{selectedJob.description.length > 300 && '...'}
                   </p>
                 </div>
 
-                {/* Applicants */}
-                <p style={{ margin: '0 0 1rem', fontSize: 16, fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                  Applicants ({applicants.length})
-                </p>
-
+                <p style={{ margin: '0 0 1rem', fontSize: 16, fontWeight: 500, color: 'var(--color-text-primary)' }}>Applicants ({applicants.length})</p>
                 {loadingApps && <div style={{ fontSize: 14, color: 'var(--color-text-secondary)' }}>Loading applicants...</div>}
-
                 {!loadingApps && applicants.length === 0 && (
                   <div style={{ textAlign: 'center', padding: '2.5rem', background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 12 }}>
                     <p style={{ fontSize: 14, color: 'var(--color-text-secondary)', margin: 0 }}>No applications yet</p>
                   </div>
                 )}
-
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {applicants.map(app => {
                     const ast = APP_STATUS_STYLE[app.status] ?? APP_STATUS_STYLE.applied;
@@ -270,11 +254,8 @@ export default function RecruiterDashboard() {
                           <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary)' }}>{app.candidate.name}</p>
                           <p style={{ margin: '1px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>{app.candidate.email} · Applied {formatDate(app.applied_at)}</p>
                         </div>
-                        <select
-                          value={app.status}
-                          onChange={e => updateAppStatus(app.id, e.target.value)}
-                          style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '0.5px solid var(--color-border-secondary)', background: ast.bg, color: ast.color, cursor: 'pointer' }}
-                        >
+                        <select value={app.status} onChange={e => updateAppStatus(app.id, e.target.value)}
+                          style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '0.5px solid var(--color-border-secondary)', background: ast.bg, color: ast.color, cursor: 'pointer' }}>
                           {['applied','reviewing','shortlisted','rejected','hired'].map(s => (
                             <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
                           ))}
@@ -289,21 +270,17 @@ export default function RecruiterDashboard() {
         </div>
       )}
 
-      {/* ── POST JOB TAB ── */}
       {tab === 'post' && (
         <div style={{ padding: '2rem', maxWidth: 680, margin: '0 auto' }}>
           <div style={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 12, padding: '2rem' }}>
             <p style={{ margin: '0 0 1.5rem', fontSize: 18, fontWeight: 500, color: 'var(--color-text-primary)' }}>Post a New Job</p>
-
             {formError && <div style={{ background: '#FCEBEB', border: '0.5px solid #F09595', borderRadius: 8, padding: '0.75rem 1rem', fontSize: 14, color: '#A32D2D', marginBottom: '1.25rem' }}>{formError}</div>}
             {postSuccess && <div style={{ background: '#EAF3DE', border: '0.5px solid #C0DD97', borderRadius: 8, padding: '0.75rem 1rem', fontSize: 14, color: '#3B6D11', marginBottom: '1.25rem' }}>Job posted! Candidates can now see it in their Jobs tab.</div>}
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Job title *</label>
                 <input type="text" value={form.title} onChange={e => f('title', e.target.value)} placeholder="e.g. Senior Frontend Engineer" style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
-
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Location *</label>
@@ -318,7 +295,6 @@ export default function RecruiterDashboard() {
                   </select>
                 </div>
               </div>
-
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Employment type</label>
                 <select value={form.employment_type} onChange={e => f('employment_type', e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }}>
@@ -328,7 +304,6 @@ export default function RecruiterDashboard() {
                   <option value="internship">Internship</option>
                 </select>
               </div>
-
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Salary min (₹)</label>
@@ -339,23 +314,18 @@ export default function RecruiterDashboard() {
                   <input type="number" value={form.salary_max} onChange={e => f('salary_max', e.target.value)} placeholder="e.g. 2500000" style={{ width: '100%', boxSizing: 'border-box' }} />
                 </div>
               </div>
-
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Required skills (comma separated)</label>
                 <input type="text" value={form.required_skills} onChange={e => f('required_skills', e.target.value)} placeholder="e.g. React, TypeScript, Node.js" style={{ width: '100%', boxSizing: 'border-box' }} />
               </div>
-
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>Job description *</label>
-                <textarea value={form.description} onChange={e => f('description', e.target.value)} placeholder="Describe the role, responsibilities, and what you're looking for..." rows={6} style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }} />
+                <textarea value={form.description} onChange={e => f('description', e.target.value)} rows={6} placeholder="Describe the role, responsibilities…" style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }} />
               </div>
-
               <button onClick={handlePost} disabled={posting} style={{ width: '100%', padding: '0.875rem', background: posting ? 'var(--color-background-secondary)' : 'var(--color-text-primary)', color: posting ? 'var(--color-text-secondary)' : 'var(--color-background-primary)', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 500, cursor: posting ? 'not-allowed' : 'pointer' }}>
                 {posting ? 'Posting...' : 'Post Job'}
               </button>
-              <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', textAlign: 'center', margin: 0 }}>
-                Once posted, candidates immediately see this in their Jobs tab
-              </p>
+              <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', textAlign: 'center', margin: 0 }}>Once posted, candidates immediately see this in their Jobs tab</p>
             </div>
           </div>
         </div>
