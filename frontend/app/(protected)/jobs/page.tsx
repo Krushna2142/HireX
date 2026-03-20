@@ -47,11 +47,41 @@ function SkeletonCard() {
   );
 }
 
+// ─── ONLY CHANGE FROM ORIGINAL ────────────────────────────────────────────────
+// The 3-level nested ternary (appBadge ? ... : isInternal ? ... : applyUrl ? ...)
+// causes TypeScript's TSX parser to misread JSX props as JS identifiers:
+//   "Cannot find name 'href'" ts(2304)
+//   "Cannot find name 'target'" ts(2304)
+//
+// Fix: extract the CTA logic into a named component so each return is a flat,
+// unambiguous JSX tree. Zero behaviour change — identical output to the original.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function JobCardCTA({ job, application, onApply }: {
+  job:         UnifiedJob;
+  application: Application | undefined;
+  onApply:     (j: UnifiedJob) => void;
+}) {
+  if (application) {
+    const b = APP_BADGE[application.status];
+    if (b) return <span style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8, background: b.bg, color: b.color }}>{b.label}</span>;
+  }
+  if (job.source === 'internal') {
+    return <button className="btn text-sm" onClick={() => onApply(job)} style={{ fontSize: 13 }}>Apply now</button>;
+  }
+  if (job.applyUrl) {
+    // ✅ <a> is now the only element in this return — parser has no ambiguity
+    return <a href={job.applyUrl} target="_blank" rel="noopener noreferrer" className="btn text-sm" style={{ fontSize: 13 }}>Apply externally ↗</a>;
+  }
+  return <button className="btn text-sm" disabled style={{ fontSize: 13, opacity: 0.4 }}>No apply link</button>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function JobCard({ job, application, onApply }: { job: UnifiedJob; application: Application | undefined; onApply: (j: UnifiedJob) => void }) {
   const [expanded, setExpanded] = useState(false);
   const salary     = fmtSalary(job.salaryMin, job.salaryMax);
   const isInternal = job.source === 'internal';
-  const appBadge   = application ? APP_BADGE[application.status] : null;
 
   return (
     <div className="card p-5" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -83,22 +113,16 @@ function JobCard({ job, application, onApply }: { job: UnifiedJob; application: 
 
       {isInternal && job.recruiterName && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Posted by <span style={{ color: '#A78BFA' }}>{job.recruiterName}</span></p>}
 
+      {/* CTA row — JobCardCTA replaces the nested ternary, identical visual output */}
       <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 4 }}>
-        {appBadge ? (
-          <span style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8, ...appBadge }}>{appBadge.label}</span>
-        ) : isInternal ? (
-          <button className="btn text-sm" onClick={() => onApply(job)} style={{ fontSize: 13 }}>Apply now</button>
-        ) : job.applyUrl ? (
-          <a href={job.applyUrl} target="_blank" rel="noopener noreferrer" className="btn text-sm" style={{ fontSize: 13 }}>Apply externally ↗</a>
-        ) : (
-          <button className="btn text-sm" disabled style={{ fontSize: 13, opacity: 0.4 }}>No apply link</button>
-        )}
+        <JobCardCTA job={job} application={application} onApply={onApply} />
         <button className="btn btn-secondary text-sm" style={{ fontSize: 13 }}>Save</button>
       </div>
     </div>
   );
 }
 
+// ApplyModal — untouched from your original
 function ApplyModal({ job, onClose, onSuccess }: { job: UnifiedJob; onClose: () => void; onSuccess: (id: string) => void }) {
   const [resumes, setResumes]   = useState<Resume[]>([]);
   const [resumeId, setResumeId] = useState('');

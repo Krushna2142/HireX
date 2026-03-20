@@ -40,7 +40,6 @@ export interface UnifiedJob {
   matchScore?:    number;
 }
 
-// GET /jobs/mine returns these extra pipeline fields
 export interface RecruiterJob extends UnifiedJob {
   status: 'active' | 'closed' | 'draft';
   _count: { applications: number };
@@ -137,7 +136,11 @@ export function useRecommendations() {
     '/jobs/recommendations', fetcher,
     { refreshInterval: INTERVALS.recommendations, revalidateOnFocus: true, revalidateOnReconnect: true },
   );
-  return { recommendations: data ?? [], loading: isLoading, error: error?.message ?? null };
+  return {
+    recommendations: data ?? [],
+    loading:         isLoading,
+    error:           error?.message ?? null,
+  };
 }
 
 export function useMyApplications() {
@@ -146,12 +149,18 @@ export function useMyApplications() {
     { refreshInterval: INTERVALS.applications, revalidateOnFocus: true, revalidateOnReconnect: true },
   );
 
+  // Optimistic apply — adds a temp entry immediately, then revalidates
   const applyOptimistic = async (jobId: string) => {
-    const next: Application[] = [
+    const optimistic: Application[] = [
       ...(data ?? []),
-      { id: `temp_${jobId}`, job_id: jobId, status: 'applied', applied_at: new Date().toISOString() },
+      {
+        id:         `temp_${jobId}`,
+        job_id:     jobId,
+        status:     'applied',
+        applied_at: new Date().toISOString(),
+      },
     ];
-    await mutate(next, false);
+    await mutate(optimistic, false);
     try { await api.post(`/jobs/${jobId}/apply`); }
     catch { await mutate(); }
     await mutate();
@@ -191,7 +200,6 @@ export function useJobApplicants(jobId: string | null) {
   };
 }
 
-// Returns RecruiterJob[] — includes status + _count fields
 export function useRecruiterJobs() {
   const { data, error, isLoading, isValidating, mutate } = useSWR<RecruiterJob[]>(
     '/jobs/mine', fetcher,
@@ -207,9 +215,11 @@ export function useRecruiterJobs() {
   const toggleStatus = async (jobId: string, current: RecruiterJob['status']) => {
     const next = current === 'active' ? 'closed' : 'active';
     await api.patch(`/jobs/${jobId}/status`, { status: next });
-    await mutate((data ?? []).map((j: RecruiterJob) =>
-      j.id === jobId ? { ...j, status: next as RecruiterJob['status'] } : j,
-    ));
+    await mutate(
+      (data ?? []).map((j: RecruiterJob) =>
+        j.id === jobId ? { ...j, status: next as RecruiterJob['status'] } : j,
+      ),
+    );
   };
 
   // Cache stats for sidebar live pill
@@ -217,9 +227,11 @@ export function useRecruiterJobs() {
     try {
       localStorage.setItem('jc_recruiter_stats', JSON.stringify({
         activeJobs:    data.filter((j: RecruiterJob) => j.status === 'active').length,
-        newApplicants: data.reduce((n: number, j: RecruiterJob) => n + j._count.applications, 0),
+        // ✅ Fix: _count?.applications — safe even if backend omits _count
+        newApplicants: data.reduce((n: number, j: RecruiterJob) =>
+          n + (j._count?.applications ?? 0), 0),
       }));
-    } catch { /* ignore */ }
+    } catch { /* quota exceeded or SSR — ignore */ }
   }
 
   return {
@@ -238,7 +250,12 @@ export function useResumes() {
     '/resumes', fetcher,
     { refreshInterval: INTERVALS.resumes, revalidateOnFocus: true, revalidateOnReconnect: true },
   );
-  return { resumes: data ?? [], loading: isLoading, error: error?.message ?? null, refresh: () => mutate() };
+  return {
+    resumes:  data ?? [],
+    loading:  isLoading,
+    error:    error?.message ?? null,
+    refresh:  () => mutate(),
+  };
 }
 
 export function useLatestResume() {
@@ -246,12 +263,18 @@ export function useLatestResume() {
     '/resumes/latest', fetcher,
     { refreshInterval: INTERVALS.resumes, revalidateOnFocus: true, revalidateOnReconnect: true },
   );
-  return { resume: data ?? null, loading: isLoading, error: error?.message ?? null, refresh: () => mutate() };
+  return {
+    resume:  data ?? null,
+    loading: isLoading,
+    error:   error?.message ?? null,
+    refresh: () => mutate(),
+  };
 }
 
 export function useResumeAnalysis(resumeId: string | null) {
   const { data: resume } = useSWR<Resume>(
-    resumeId ? `/resumes/${resumeId}` : null, fetcher,
+    resumeId ? `/resumes/${resumeId}` : null,
+    fetcher,
     {
       refreshInterval: (cur: Resume | undefined) => {
         if (!cur || cur.status === 'uploaded' || cur.status === 'failed') return 10_000;
@@ -263,7 +286,9 @@ export function useResumeAnalysis(resumeId: string | null) {
   );
 
   const { data: analysis } = useSWR<ResumeAnalysis>(
-    resume?.status === 'analyzed' && resumeId ? `/resumes/${resumeId}/analysis` : null,
+    resume?.status === 'analyzed' && resumeId
+      ? `/resumes/${resumeId}/analysis`
+      : null,
     fetcher,
   );
 
@@ -286,16 +311,30 @@ export function useAlerts() {
   const unreadCount = (data ?? []).filter((a: Alert) => !a.read).length;
 
   const markRead = async (alertId: string) => {
-    await mutate((data ?? []).map((a: Alert) => a.id === alertId ? { ...a, read: true } : a), false);
+    await mutate(
+      (data ?? []).map((a: Alert) => a.id === alertId ? { ...a, read: true } : a),
+      false,
+    );
     try { await api.patch(`/alerts/${alertId}/read`); }
     catch { await mutate(); }
   };
 
   const markAllRead = async () => {
-    await mutate((data ?? []).map((a: Alert) => ({ ...a, read: true })), false);
+    await mutate(
+      (data ?? []).map((a: Alert) => ({ ...a, read: true })),
+      false,
+    );
     try { await api.patch('/alerts/read-all'); }
     catch { await mutate(); }
   };
 
-  return { alerts: data ?? [], unreadCount, loading: isLoading, error: error?.message ?? null, markRead, markAllRead, refresh: () => mutate() };
+  return {
+    alerts:      data ?? [],
+    unreadCount,
+    loading:     isLoading,
+    error:       error?.message ?? null,
+    markRead,
+    markAllRead,
+    refresh:     () => mutate(),
+  };
 }

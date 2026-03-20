@@ -1,17 +1,16 @@
-// frontend/lib/axios.ts
+// lib/axios.ts — THE SINGLE HTTP CLIENT
+// Every hook and page imports `api` from here.
+// baseURL already includes /api — never append /api in call sites.
+
 import axios from 'axios';
 
-// NEXT_PUBLIC_API_URL already includes /api
-// e.g. https://job-crawler-ts-api-t9r0.onrender.com/api
-// So call sites just use: api.get('/resumes'), api.post('/auth/login') etc.
-// DO NOT add /api in baseURL here or in call sites — it's already in the env var.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 const api = axios.create({
-  baseURL: API_URL,  // ← no /api appended — already in the env var
+  baseURL: API_URL,
 });
 
-// Attach JWT token from localStorage to every request
+// Attach JWT on every outbound request
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('jc_token');
@@ -22,7 +21,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Auto-logout on 401
+// Auto-logout on 401 — fires for EVERY request in the app
 api.interceptors.response.use(
   (response) => response,
   (error) => {

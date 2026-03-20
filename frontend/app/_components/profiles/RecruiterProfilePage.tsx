@@ -2,14 +2,19 @@
 
 import { useState } from 'react';
 import {
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
+import {
   useRecruiterJobs,
   useJobApplicants,
   type RecruiterJob,
   type ApplicationStatus,
+  type Application,
 } from '@/hooks/useRealTimeAlerts';
-import { Application } from '@/hooks/useRealTimeAlerts';
+import { useRecruiterAnalytics } from '@/hooks/useAnalytics';
 
-// ── Skill taxonomy ────────────────────────────────────────────────────────────
+// ── Skill taxonomy ─────────────────────────────────────────────────────────
 
 const SKILL_CATEGORIES: Record<string, string[]> = {
   'Frontend':       ['React', 'Next.js', 'Vue', 'Angular', 'TypeScript', 'JavaScript', 'Tailwind CSS', 'CSS', 'HTML'],
@@ -17,23 +22,13 @@ const SKILL_CATEGORIES: Record<string, string[]> = {
   'Database':       ['PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Elasticsearch', 'Supabase', 'Prisma'],
   'Cloud & DevOps': ['AWS', 'GCP', 'Azure', 'Docker', 'Kubernetes', 'Terraform', 'CI/CD', 'Linux'],
   'AI / ML':        ['Python', 'TensorFlow', 'PyTorch', 'LangChain', 'OpenAI API', 'Hugging Face', 'MLOps'],
-  'Tools':          ['Git', 'GraphQL', 'REST', 'gRPC', 'Kafka', 'RabbitMQ', 'Figma', 'Jira'],
-  'Mobile Applications Development': ['Flutter', 'React Native', 'Swift', 'Kotlin', 'iOS', 'Android'],
-  'Data Science & Analytics': ['Python', 'R', 'SQL', 'Tableau', 'Power BI', 'Data Visualization', 'Statistics'],
-  'Cybersecurity': ['Network Security', 'Penetration Testing', 'Ethical Hacking', 'Firewalls', 'SIEM', 'Cryptography'],
-  'Project Management': ['Agile', 'Scrum', 'Kanban', 'Jira', 'Asana', 'Trello', 'Leadership'],
-  'Other': ['Communication', 'Problem Solving', 'Time Management', 'Critical Thinking', 'Teamwork'],
-  'Languages': ['English', 'Spanish', 'Mandarin', 'French', 'German', 'Japanese', 'Hindi'],
-  'Certifications': ['AWS Certified Solutions Architect', 'Certified Scrum Master', 'PMP', 'Cisco CCNA', 'Google Professional Data Engineer'],
-  'Soft Skills': ['Communication', 'Problem Solving', 'Time Management', 'Critical Thinking', 'Teamwork'],
-  'Frameworks & Libraries': ['React', 'Angular', 'Vue', 'Django', 'Flask', 'Spring Boot', 'Express', 'TensorFlow', 'PyTorch'],
-  'Programming Languages': ['JavaScript', 'TypeScript', 'Python', 'Java', 'Go', 'Rust', 'C#', 'C++'],
-  'Cloud Platforms': ['AWS', 'Google Cloud', 'Microsoft Azure', 'Heroku', 'DigitalOcean'],
+  'Mobile':         ['Flutter', 'React Native', 'Swift', 'Kotlin', 'iOS', 'Android'],
+  'Tools':          ['Git', 'GraphQL', 'REST', 'gRPC', 'Kafka', 'Figma', 'Jira'],
 };
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
-type Tab = 'jobs' | 'post';
+type Tab = 'dashboard' | 'jobs' | 'post';
 
 interface PostJobForm {
   title:           string;
@@ -48,19 +43,14 @@ interface PostJobForm {
 }
 
 const EMPTY_FORM: PostJobForm = {
-  title: '', company: '', location: '', work_mode: 'hybrid', employment_type: 'full_time',
-  description: '', required_skills: [], salary_min: '', salary_max: '',
+  title: '', company: '', location: '', work_mode: 'hybrid',
+  employment_type: 'full_time', description: '',
+  required_skills: [], salary_min: '', salary_max: '',
 };
 
-// ── Style maps ────────────────────────────────────────────────────────────────
+// ── Style constants ────────────────────────────────────────────────────────
 
-const JOB_STATUS_STYLE: Record<RecruiterJob['status'], { bg: string; color: string; border: string }> = {
-  active: { bg: 'rgba(52,211,153,0.1)',   color: '#34D399', border: 'rgba(52,211,153,0.25)'   },
-  closed: { bg: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)', border: 'rgba(255,255,255,0.1)' },
-  draft:  { bg: 'rgba(251,191,36,0.1)',   color: '#FBBF24', border: 'rgba(251,191,36,0.25)'   },
-};
-
-const APP_STATUS: Record<ApplicationStatus, { bg: string; color: string; label: string }> = {
+const STATUS_META: Record<ApplicationStatus, { bg: string; color: string; label: string }> = {
   applied:     { bg: 'rgba(96,165,250,0.1)',  color: '#60A5FA', label: 'Applied'     },
   reviewed:    { bg: 'rgba(251,191,36,0.1)',  color: '#FBBF24', label: 'Reviewed'    },
   reviewing:   { bg: 'rgba(251,191,36,0.1)',  color: '#FBBF24', label: 'Reviewing'   },
@@ -71,7 +61,11 @@ const APP_STATUS: Record<ApplicationStatus, { bg: string; color: string; label: 
   hired:       { bg: 'rgba(52,211,153,0.2)',  color: '#059669', label: 'Hired'       },
 };
 
-// ── Shared input style ────────────────────────────────────────────────────────
+const JOB_STATUS_STYLE: Record<RecruiterJob['status'], { bg: string; color: string; border: string }> = {
+  active: { bg: 'rgba(52,211,153,0.1)',   color: '#34D399', border: 'rgba(52,211,153,0.25)'   },
+  closed: { bg: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)', border: 'rgba(255,255,255,0.1)' },
+  draft:  { bg: 'rgba(251,191,36,0.1)',   color: '#FBBF24', border: 'rgba(251,191,36,0.25)'   },
+};
 
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '10px 14px',
@@ -82,25 +76,296 @@ const inputStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   display: 'block', fontSize: 11, fontWeight: 600,
-  color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase',
+  color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' as const,
   letterSpacing: '0.08em', marginBottom: 7,
 };
 
-// ── SkillPicker ───────────────────────────────────────────────────────────────
+// ── Chart tooltip ──────────────────────────────────────────────────────────
 
-function SkillPicker({
-  selected,
-  onChange,
+const ChartTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: '#141929', border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 10, padding: '10px 14px', fontSize: 12,
+    }}>
+      <p style={{ margin: '0 0 6px', color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{label}</p>
+      {payload.map((p: any) => (
+        <p key={p.name} style={{ margin: '2px 0', color: p.color, fontWeight: 600 }}>
+          {p.name}: {p.value}
+        </p>
+      ))}
+    </div>
+  );
+};
+
+// ── KPI Card ───────────────────────────────────────────────────────────────
+
+function KpiCard({
+  label, value, sub, color, icon, loading,
 }: {
-  selected: string[];
-  onChange: (v: string[]) => void;
+  label: string; value: number | string; sub?: string;
+  color: string; icon: string; loading?: boolean;
 }) {
-  const [custom,  setCustom]  = useState('');
+  return (
+    <div style={{
+      padding: '1.25rem 1.5rem', borderRadius: 14,
+      background: '#0D1220', border: '1px solid rgba(255,255,255,0.07)',
+      display: 'flex', alignItems: 'flex-start', gap: 14,
+    }}>
+      <div style={{
+        width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+        background: `${color}18`, border: `1px solid ${color}30`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 20,
+      }}>
+        {icon}
+      </div>
+      <div style={{ flex: 1 }}>
+        <p style={{ margin: 0, fontSize: 11, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          {label}
+        </p>
+        {loading ? (
+          <div style={{ height: 28, width: 60, borderRadius: 6, background: 'rgba(255,255,255,0.06)', marginTop: 4, animation: 'raPulse 1.4s ease infinite' }} />
+        ) : (
+          <p style={{ margin: '4px 0 0', fontSize: 26, fontWeight: 700, color, fontFamily: 'monospace', lineHeight: 1 }}>
+            {value}
+          </p>
+        )}
+        {sub && (
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{sub}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Chart Card wrapper ─────────────────────────────────────────────────────
+
+function ChartCard({ title, children, span = 1 }: {
+  title: string; children: React.ReactNode; span?: number;
+}) {
+  return (
+    <div style={{
+      padding: '1.25rem 1.5rem', borderRadius: 14,
+      background: '#0D1220', border: '1px solid rgba(255,255,255,0.07)',
+      gridColumn: span > 1 ? `span ${span}` : undefined,
+    }}>
+      <p style={{ margin: '0 0 1.25rem', fontSize: 13, fontWeight: 700, color: '#F1F5F9' }}>{title}</p>
+      {children}
+    </div>
+  );
+}
+
+// ── Dashboard Analytics Tab ────────────────────────────────────────────────
+
+function DashboardTab() {
+  const { analytics, loading } = useRecruiterAnalytics();
+  const { kpis, applicationsByStatus, applicationsOverTime, topJobs, recentApplications, skillDemand } = analytics;
+
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+  return (
+    <div style={{ padding: '1.5rem 2rem', overflowY: 'auto', animation: 'rdFade 0.3s ease' }}>
+
+      {/* ── KPI Row ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: '1.5rem' }}>
+        <KpiCard label="Total Jobs Posted"  value={kpis.totalJobs}       color="#A78BFA" icon="💼" loading={loading} />
+        <KpiCard label="Active Listings"    value={kpis.activeJobs}      color="#34D399" icon="✅" loading={loading} />
+        <KpiCard label="Total Applicants"   value={kpis.totalApplicants} color="#60A5FA" icon="👥" loading={loading} />
+        <KpiCard label="Shortlisted"        value={kpis.shortlisted}     color="#FBBF24" icon="⭐" loading={loading} />
+        <KpiCard label="Hired"              value={kpis.hired}           color="#10B981" icon="🎉" loading={loading} />
+        <KpiCard
+          label="Avg. Time to Fill"
+          value={kpis.avgTimeToFill ? `${kpis.avgTimeToFill}d` : '—'}
+          color="#F87171" icon="⏱️"
+          sub="days from post to hire"
+          loading={loading}
+        />
+      </div>
+
+      {/* ── Charts Row 1 ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
+
+        {/* Applications over time */}
+        <ChartCard title="Applications Over Time">
+          {applicationsOverTime.length === 0 && !loading ? (
+            <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>No data yet</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={applicationsOverTime} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="appGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#A78BFA" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#A78BFA" stopOpacity={0}   />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Area type="monotone" dataKey="count" name="Applications" stroke="#A78BFA" strokeWidth={2} fill="url(#appGrad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        {/* Applications by status — donut */}
+        <ChartCard title="By Status">
+          {applicationsByStatus.length === 0 && !loading ? (
+            <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>No data yet</p>
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie
+                    data={applicationsByStatus}
+                    cx="50%" cy="50%"
+                    innerRadius={45} outerRadius={70}
+                    paddingAngle={3}
+                    dataKey="count"
+                    nameKey="status"
+                  >
+                    {applicationsByStatus.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginTop: 4 }}>
+                {applicationsByStatus.map((s) => (
+                  <span key={s.status} style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, display: 'inline-block' }} />
+                    {s.status} ({s.count})
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* ── Charts Row 2 ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+
+        {/* Top jobs by applicants */}
+        <ChartCard title="Top Jobs by Applicants">
+          {topJobs.length === 0 && !loading ? (
+            <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>No data yet</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={topJobs} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="title" tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.4)' }} tickLine={false} axisLine={false} width={90} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="applicants"  name="Applicants"  fill="#60A5FA" radius={[0, 4, 4, 0]} barSize={8} />
+                <Bar dataKey="shortlisted" name="Shortlisted" fill="#34D399" radius={[0, 4, 4, 0]} barSize={8} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        {/* Skill demand */}
+        <ChartCard title="Most Required Skills">
+          {skillDemand.length === 0 && !loading ? (
+            <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>No data yet</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {skillDemand.slice(0, 6).map((s, i) => {
+                const max = skillDemand[0]?.count || 1;
+                const pct = Math.round((s.count / max) * 100);
+                return (
+                  <div key={s.skill}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>{s.skill}</span>
+                      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{s.count} jobs</span>
+                    </div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.06)' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 3,
+                        width: `${pct}%`,
+                        background: `hsl(${260 - i * 20}, 70%, 70%)`,
+                        transition: 'width 0.6s ease',
+                      }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* ── Recent Applications ── */}
+      <ChartCard title="Recent Applications">
+        {recentApplications.length === 0 && !loading ? (
+          <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', margin: 0, textAlign: 'center', padding: '1.5rem 0' }}>
+            No applications yet
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recentApplications.slice(0, 8).map((app) => {
+              const meta = STATUS_META[app.status as ApplicationStatus] ?? STATUS_META.applied;
+              return (
+                <div key={app.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 12px', borderRadius: 10,
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                    background: 'rgba(167,139,250,0.12)', color: '#A78BFA',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 700,
+                  }}>
+                    {app.candidateName?.slice(0, 2).toUpperCase() ?? 'C'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>
+                      {app.candidateName}
+                    </p>
+                    <p style={{ margin: '1px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+                      {app.jobTitle} · {fmtDate(app.appliedAt)}
+                    </p>
+                  </div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 20,
+                    background: meta.bg, color: meta.color,
+                    border: `1px solid ${meta.color}30`,
+                  }}>
+                    {meta.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </ChartCard>
+    </div>
+  );
+}
+
+// ── SkillPicker (unchanged) ────────────────────────────────────────────────
+
+function SkillPicker({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
+  const [custom, setCustom] = useState('');
   const [openCat, setOpenCat] = useState<string | null>('Frontend');
 
   const toggle = (skill: string) =>
     onChange(selected.includes(skill)
-      ? selected.filter((s: string) => s !== skill)
+      ? selected.filter((s) => s !== skill)
       : [...selected, skill]);
 
   const addCustom = () => {
@@ -111,23 +376,16 @@ function SkillPicker({
   return (
     <div>
       {Object.entries(SKILL_CATEGORIES).map(([cat, skills]) => {
-        const count  = skills.filter((s: string) => selected.includes(s)).length;
+        const count  = skills.filter((s) => selected.includes(s)).length;
         const isOpen = openCat === cat;
-
         return (
           <div key={cat} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, marginBottom: 6, overflow: 'hidden' }}>
-            <button
-              type="button"
-              onClick={() => setOpenCat(isOpen ? null : cat)}
-              style={{
-                width: '100%', padding: '10px 14px', background: isOpen ? 'rgba(255,255,255,0.04)' : 'transparent',
-                border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center',
-                justifyContent: 'space-between', fontFamily: 'Sora, sans-serif',
-              }}
-            >
-              <span style={{ fontSize: 12, fontWeight: 600, color: isOpen ? '#A78BFA' : 'rgba(255,255,255,0.55)' }}>
-                {cat}
-              </span>
+            <button type="button" onClick={() => setOpenCat(isOpen ? null : cat)} style={{
+              width: '100%', padding: '10px 14px', background: isOpen ? 'rgba(255,255,255,0.04)' : 'transparent',
+              border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', fontFamily: 'Sora, sans-serif',
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: isOpen ? '#A78BFA' : 'rgba(255,255,255,0.55)' }}>{cat}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {count > 0 && (
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: 'rgba(167,139,250,0.15)', color: '#A78BFA', border: '1px solid rgba(167,139,250,0.25)' }}>
@@ -137,32 +395,24 @@ function SkillPicker({
                 <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', display: 'inline-block', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
               </div>
             </button>
-
             {isOpen && (
               <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {skills.map((skill: string) => {
+                {skills.map((skill) => {
                   const checked = selected.includes(skill);
                   return (
-                    <button
-                      key={skill}
-                      type="button"
-                      onClick={() => toggle(skill)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
-                        border: `1px solid ${checked ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                        background: checked ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
-                        color: checked ? '#C4B5FD' : 'rgba(255,255,255,0.45)',
-                        fontSize: 12, fontWeight: checked ? 600 : 400,
-                        fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
-                      }}
-                    >
+                    <button key={skill} type="button" onClick={() => toggle(skill)} style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px',
+                      borderRadius: 8, cursor: 'pointer', fontSize: 12, fontFamily: 'Sora, sans-serif',
+                      border: `1px solid ${checked ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                      background: checked ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
+                      color: checked ? '#C4B5FD' : 'rgba(255,255,255,0.45)',
+                      fontWeight: checked ? 600 : 400, transition: 'all 0.15s',
+                    }}>
                       <span style={{
-                        width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+                        width: 14, height: 14, borderRadius: 4, flexShrink: 0, display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
                         border: `1.5px solid ${checked ? '#A78BFA' : 'rgba(255,255,255,0.2)'}`,
                         background: checked ? '#A78BFA' : 'transparent',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'all 0.15s',
                       }}>
                         {checked && (
                           <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
@@ -179,36 +429,26 @@ function SkillPicker({
           </div>
         );
       })}
-
-      {/* Custom skill */}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        <input
-          value={custom}
-          onChange={e => setCustom(e.target.value)}
+        <input value={custom} onChange={e => setCustom(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } }}
-          placeholder="Add custom skill and press Enter"
-          style={{ ...inputStyle, flex: 1 }}
-        />
+          placeholder="Add custom skill…" style={{ ...inputStyle, flex: 1 }} />
         <button type="button" onClick={addCustom} style={{
           padding: '9px 16px', borderRadius: 10, background: 'rgba(124,58,237,0.12)',
           border: '1px solid rgba(124,58,237,0.3)', color: '#A78BFA',
           fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Sora, sans-serif',
-        }}>
-          Add
-        </button>
+        }}>Add</button>
       </div>
-
-      {/* Selected preview */}
       {selected.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <p style={{ margin: '0 0 8px', fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             Selected ({selected.length})
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {selected.map((skill: string) => (
+            {selected.map((skill) => (
               <span key={skill} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+                borderRadius: 20, fontSize: 11, fontWeight: 600,
                 background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.3)', color: '#C4B5FD',
               }}>
                 {skill}
@@ -225,24 +465,25 @@ function SkillPicker({
   );
 }
 
-// ── Main dashboard ────────────────────────────────────────────────────────────
+// ── Main Component ─────────────────────────────────────────────────────────
 
 export default function RecruiterDashboard() {
-  const [tab,          setTab]     = useState<Tab>('jobs');
-  const [selectedJobId, setJobId]  = useState<string | null>(null);
-  const [form,         setForm]    = useState<PostJobForm>(EMPTY_FORM);
-  const [formError,    setErr]     = useState<string | null>(null);
-  const [postSuccess,  setSuccess] = useState(false);
-  const [posting,      setPosting] = useState(false);
+  // ── Tab: dashboard is the default ───────────────────────────────────────
+  const [tab,          setTab]    = useState<Tab>('dashboard');
+  const [selectedJobId, setJobId] = useState<string | null>(null);
+  const [form,         setForm]   = useState<PostJobForm>(EMPTY_FORM);
+  const [formError,    setErr]    = useState<string | null>(null);
+  const [postSuccess,  setOk]     = useState(false);
+  const [posting,      setPosting]= useState(false);
 
-  // ── Real-time hooks ───────────────────────────────────────────────────────
   const { jobs, loading: loadingJobs, validating, postJob, toggleStatus } = useRecruiterJobs();
   const { applicants, loading: loadingApps, updateStatus } = useJobApplicants(selectedJobId);
 
-  // selectedJob is typed as RecruiterJob | undefined — no 'as any' needed
-  const selectedJob: RecruiterJob | undefined = jobs.find((j: RecruiterJob) => j.id === selectedJobId);
+  const selectedJob = jobs.find((j) => j.id === selectedJobId);
 
-  // ── Post job handler ──────────────────────────────────────────────────────
+  const totalApplicants = jobs.reduce((n, j) => n + (j._count?.applications ?? 0), 0);
+  const activeJobs      = jobs.filter((j) => j.status === 'active').length;
+
   const handlePost = async () => {
     setErr(null);
     if (!form.title.trim() || !form.company.trim() || !form.location.trim() || !form.description.trim()) {
@@ -264,25 +505,28 @@ export default function RecruiterDashboard() {
         salaryMin:      form.salary_min ? parseInt(form.salary_min, 10) : undefined,
         salaryMax:      form.salary_max ? parseInt(form.salary_max, 10) : undefined,
       });
-      setSuccess(true);
+      setOk(true);
       setForm(EMPTY_FORM);
-      setTimeout(() => { setSuccess(false); setTab('jobs'); }, 2000);
+      setTimeout(() => { setOk(false); setTab('jobs'); }, 2000);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to post job.';
-      setErr(msg);
+      setErr(e instanceof Error ? e.message : 'Failed to post job.');
     } finally {
       setPosting(false);
     }
   };
 
   const f = <K extends keyof PostJobForm>(key: K, val: PostJobForm[K]) =>
-    setForm(prev => ({ ...prev, [key]: val }));
+    setForm((p) => ({ ...p, [key]: val }));
 
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
-  const totalApplicants = jobs.reduce((n: number, j: RecruiterJob) => n + j._count.applications, 0);
-  const activeJobs      = jobs.filter((j: RecruiterJob) => j.status === 'active').length;
+  // ── Tab definitions — dashboard is index 0 ───────────────────────────────
+  const TABS: { key: Tab; label: string }[] = [
+    { key: 'dashboard', label: '📊 Dashboard'   },
+    { key: 'jobs',      label: '💼 My Jobs'     },
+    { key: 'post',      label: '+ Post a Job'   },
+  ];
 
   return (
     <>
@@ -294,27 +538,31 @@ export default function RecruiterDashboard() {
         select option { background: #0F1526; color: #F1F5F9; }
       `}</style>
 
-      <div style={{ minHeight: '100vh', background: '#080C14', fontFamily: "'Sora', sans-serif", color: '#E2E8F0' }}>
+      <div style={{ minHeight: '100vh', background: '#080C14', fontFamily: "'Sora', sans-serif", color: '#E2E8F0', display: 'flex', flexDirection: 'column' }}>
 
         {/* ── Header ── */}
-        <div style={{ background: '#0D1220', borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '1.25rem 2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+        <div style={{ background: '#0D1220', borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '1.25rem 2rem', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1rem' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#F1F5F9', letterSpacing: '-0.02em' }}>Recruitment</h1>
+                <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#F1F5F9', letterSpacing: '-0.02em' }}>
+                  Recruitment
+                </h1>
                 <span style={{
-                  width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
+                  width: 7, height: 7, borderRadius: '50%',
                   background: validating ? '#34D399' : 'rgba(52,211,153,0.3)',
                   boxShadow: validating ? '0 0 5px #34D399' : 'none',
-                  transition: 'background 0.3s',
+                  transition: 'background 0.3s', display: 'inline-block',
                 }} />
               </div>
               <p style={{ margin: '2px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
-                Manage postings and review applicants · live
+                {jobs.length} jobs · {totalApplicants} applicants · {activeJobs} active · live
               </p>
             </div>
+
+            {/* Quick action — always visible */}
             <button
-              onClick={() => { setTab('post'); setJobId(null); }}
+              onClick={() => setTab('post')}
               style={{
                 padding: '9px 20px', background: 'rgba(124,58,237,0.15)',
                 border: '1px solid rgba(124,58,237,0.4)', borderRadius: 10,
@@ -323,47 +571,38 @@ export default function RecruiterDashboard() {
                 fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
               }}
             >
-              <span style={{ fontSize: 16 }}>+</span> Post a Job
+              <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Post a Job
             </button>
           </div>
 
-          {/* Stats */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: '1.25rem' }}>
-            {([ 
-              { label: 'Total posted',     value: jobs.length,      color: '#A78BFA' },
-              { label: 'Active',           value: activeJobs,       color: '#34D399' },
-              { label: 'Total applicants', value: totalApplicants,  color: '#60A5FA' },
-            ] as const).map(({ label, value, color }) => (
-              <div key={label} style={{ padding: '12px 18px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <p style={{ margin: 0, fontSize: 22, fontWeight: 700, color, fontFamily: 'monospace' }}>{value}</p>
-                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Tab switcher */}
-          <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
-            {(['jobs', 'post'] as const).map(t => (
+          {/* ── Tabs — dashboard first ── */}
+          <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
+            {TABS.map(({ key, label }) => (
               <button
-                key={t}
-                onClick={() => setTab(t)}
+                key={key}
+                onClick={() => setTab(key)}
                 style={{
-                  padding: '7px 18px', borderRadius: 7, fontSize: 12, fontWeight: tab === t ? 700 : 400,
-                  background: tab === t ? 'rgba(167,139,250,0.2)' : 'transparent',
-                  color: tab === t ? '#A78BFA' : 'rgba(255,255,255,0.4)',
-                  border: tab === t ? '1px solid rgba(167,139,250,0.3)' : '1px solid transparent',
+                  padding: '7px 18px', borderRadius: 7, fontSize: 12,
+                  fontWeight: tab === key ? 700 : 400,
+                  background: tab === key ? 'rgba(167,139,250,0.2)' : 'transparent',
+                  color: tab === key ? '#A78BFA' : 'rgba(255,255,255,0.4)',
+                  border: tab === key ? '1px solid rgba(167,139,250,0.3)' : '1px solid transparent',
                   cursor: 'pointer', fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                {t === 'jobs' ? 'My Jobs' : 'Post New Job'}
+                {label}
               </button>
             ))}
           </div>
         </div>
 
+        {/* ── DASHBOARD TAB (analytics) ── */}
+        {tab === 'dashboard' && <DashboardTab />}
+
         {/* ── JOBS TAB ── */}
         {tab === 'jobs' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', minHeight: 'calc(100vh - 220px)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', flex: 1, minHeight: 0 }}>
 
             {/* Job list */}
             <div style={{ borderRight: '1px solid rgba(255,255,255,0.06)', background: '#0B0F1C', overflowY: 'auto' }}>
@@ -382,21 +621,17 @@ export default function RecruiterDashboard() {
                 </div>
               ) : (
                 <div style={{ padding: '0.75rem' }}>
-                  {jobs.map((job: RecruiterJob) => {
+                  {jobs.map((job) => {
                     const isSel = selectedJobId === job.id;
                     const st    = JOB_STATUS_STYLE[job.status];
                     return (
-                      <button
-                        key={job.id}
-                        onClick={() => setJobId(job.id)}
-                        style={{
-                          width: '100%', textAlign: 'left', padding: '12px 14px',
-                          borderRadius: 10, marginBottom: 6, cursor: 'pointer',
-                          border: `1px solid ${isSel ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.07)'}`,
-                          background: isSel ? 'rgba(124,58,237,0.1)' : 'rgba(255,255,255,0.02)',
-                          fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
-                        }}
-                      >
+                      <button key={job.id} onClick={() => setJobId(job.id)} style={{
+                        width: '100%', textAlign: 'left', padding: '12px 14px',
+                        borderRadius: 10, marginBottom: 6, cursor: 'pointer',
+                        border: `1px solid ${isSel ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.07)'}`,
+                        background: isSel ? 'rgba(124,58,237,0.1)' : 'rgba(255,255,255,0.02)',
+                        fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
+                      }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: isSel ? '#C4B5FD' : 'rgba(255,255,255,0.8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -411,8 +646,8 @@ export default function RecruiterDashboard() {
                           </span>
                         </div>
                         <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                          <span style={{ fontSize: 11, color: job._count.applications > 0 ? '#60A5FA' : 'rgba(255,255,255,0.25)' }}>
-                            {job._count.applications} applicants
+                          <span style={{ fontSize: 11, color: (job._count?.applications ?? 0) > 0 ? '#60A5FA' : 'rgba(255,255,255,0.25)' }}>
+                            {job._count?.applications ?? 0} applicants
                           </span>
                           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>
                             {new Date(job.postedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
@@ -439,8 +674,7 @@ export default function RecruiterDashboard() {
                 </div>
               ) : (
                 <div style={{ maxWidth: 740, animation: 'rdFade 0.3s ease' }}>
-
-                  {/* Job summary card */}
+                  {/* Job summary */}
                   <div style={{ padding: '1.25rem 1.5rem', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: '#0D1220', marginBottom: '1.5rem' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                       <div>
@@ -449,29 +683,24 @@ export default function RecruiterDashboard() {
                           {selectedJob.location} · {selectedJob.workMode} · {selectedJob.employmentType?.replace('_', ' ')}
                         </p>
                       </div>
-                      <button
-                        onClick={() => toggleStatus(selectedJob.id, selectedJob.status)}
-                        style={{
-                          flexShrink: 0, fontSize: 12, padding: '7px 16px',
-                          background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.5)',
-                          fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
-                        }}
-                      >
+                      <button onClick={() => toggleStatus(selectedJob.id, selectedJob.status)} style={{
+                        flexShrink: 0, fontSize: 12, padding: '7px 16px',
+                        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.5)',
+                        fontFamily: 'Sora, sans-serif',
+                      }}>
                         {selectedJob.status === 'active' ? 'Close listing' : 'Reopen listing'}
                       </button>
                     </div>
-
                     {selectedJob.requiredSkills.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: '1rem' }}>
-                        {selectedJob.requiredSkills.map((s: string) => (
+                        {selectedJob.requiredSkills.map((s) => (
                           <span key={s} style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, background: 'rgba(167,139,250,0.1)', color: '#C4B5FD', border: '1px solid rgba(167,139,250,0.2)' }}>
                             {s}
                           </span>
                         ))}
                       </div>
                     )}
-
                     <p style={{ margin: '1rem 0 0', fontSize: 13, lineHeight: 1.7, color: 'rgba(255,255,255,0.45)' }}>
                       {selectedJob.description.slice(0, 300)}{selectedJob.description.length > 300 && '…'}
                     </p>
@@ -499,12 +728,14 @@ export default function RecruiterDashboard() {
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {applicants.map((app: Application) => {
-                      const ast = APP_STATUS[app.status] ?? APP_STATUS.applied;
+                      const ast = STATUS_META[app.status] ?? STATUS_META.applied;
                       return (
-                        <div
-                          key={app.id}
-                          style={{ padding: '1rem 1.25rem', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)', display: 'flex', alignItems: 'center', gap: 12 }}
-                        >
+                        <div key={app.id} style={{
+                          padding: '1rem 1.25rem', borderRadius: 10,
+                          border: '1px solid rgba(255,255,255,0.07)',
+                          background: 'rgba(255,255,255,0.02)',
+                          display: 'flex', alignItems: 'center', gap: 12,
+                        }}>
                           <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(167,139,250,0.15)', color: '#A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
                             {app.candidate?.name?.slice(0, 2).toUpperCase() ?? 'C'}
                           </div>
@@ -519,7 +750,7 @@ export default function RecruiterDashboard() {
                             onChange={e => updateStatus(app.id, e.target.value as ApplicationStatus)}
                             style={{ fontSize: 11, fontWeight: 600, padding: '5px 10px', borderRadius: 8, border: `1px solid ${ast.color}40`, background: ast.bg, color: ast.color, cursor: 'pointer', fontFamily: 'Sora, sans-serif' }}
                           >
-                            {(Object.entries(APP_STATUS) as [ApplicationStatus, typeof APP_STATUS[ApplicationStatus]][]).map(([val, cfg]) => (
+                            {(Object.entries(STATUS_META) as [ApplicationStatus, typeof STATUS_META[ApplicationStatus]][]).map(([val, cfg]) => (
                               <option key={val} value={val}>{cfg.label}</option>
                             ))}
                           </select>
@@ -535,7 +766,7 @@ export default function RecruiterDashboard() {
 
         {/* ── POST JOB TAB ── */}
         {tab === 'post' && (
-          <div style={{ padding: '2rem', maxWidth: 760, margin: '0 auto', animation: 'rdFade 0.3s ease' }}>
+          <div style={{ padding: '2rem', maxWidth: 760, margin: '0 auto', width: '100%', animation: 'rdFade 0.3s ease' }}>
             <div style={{ padding: '2rem', borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: '#0D1220' }}>
               <p style={{ margin: '0 0 1.75rem', fontSize: 18, fontWeight: 700, color: '#F1F5F9', letterSpacing: '-0.02em' }}>
                 Post a New Job
@@ -546,33 +777,28 @@ export default function RecruiterDashboard() {
                   <p style={{ margin: 0, fontSize: 12, color: '#FCA5A5' }}>{formError}</p>
                 </div>
               )}
-
               {postSuccess && (
                 <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 18 }}>🎉</span>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: '#34D399' }}>Job posted! Candidates can now see and apply.</p>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: '#34D399' }}>Job posted! Candidates will be notified.</p>
                 </div>
               )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-
-                {/* Title + Company */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Job title *</label>
-                    <input type="text" value={form.title} onChange={e => f('title', e.target.value)} placeholder="e.g. Senior Frontend Engineer" style={inputStyle} />
+                    <input value={form.title} onChange={e => f('title', e.target.value)} placeholder="e.g. Senior Frontend Engineer" style={inputStyle} />
                   </div>
                   <div>
                     <label style={labelStyle}>Company name *</label>
-                    <input type="text" value={form.company} onChange={e => f('company', e.target.value)} placeholder="e.g. Razorpay" style={inputStyle} />
+                    <input value={form.company} onChange={e => f('company', e.target.value)} placeholder="e.g. Razorpay" style={inputStyle} />
                   </div>
                 </div>
-
-                {/* Location + Work mode */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Location *</label>
-                    <input type="text" value={form.location} onChange={e => f('location', e.target.value)} placeholder="e.g. Bangalore, India" style={inputStyle} />
+                    <input value={form.location} onChange={e => f('location', e.target.value)} placeholder="e.g. Bangalore, India" style={inputStyle} />
                   </div>
                   <div>
                     <label style={labelStyle}>Work mode</label>
@@ -583,8 +809,6 @@ export default function RecruiterDashboard() {
                     </select>
                   </div>
                 </div>
-
-                {/* Employment type toggle */}
                 <div>
                   <label style={labelStyle}>Employment type</label>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -592,26 +816,19 @@ export default function RecruiterDashboard() {
                       const labels: Record<string, string> = { full_time: 'Full-time', contract: 'Contract', part_time: 'Part-time', internship: 'Internship' };
                       const sel = form.employment_type === val;
                       return (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => f('employment_type', val)}
-                          style={{
-                            padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: sel ? 700 : 400,
-                            border: `1px solid ${sel ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                            background: sel ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
-                            color: sel ? '#A78BFA' : 'rgba(255,255,255,0.45)', cursor: 'pointer',
-                            fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
-                          }}
-                        >
+                        <button key={val} type="button" onClick={() => f('employment_type', val)} style={{
+                          padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: sel ? 700 : 400,
+                          border: `1px solid ${sel ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                          background: sel ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
+                          color: sel ? '#A78BFA' : 'rgba(255,255,255,0.45)', cursor: 'pointer',
+                          fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
+                        }}>
                           {labels[val]}
                         </button>
                       );
                     })}
                   </div>
                 </div>
-
-                {/* Salary */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label style={labelStyle}>Salary min (₹)</label>
@@ -622,48 +839,25 @@ export default function RecruiterDashboard() {
                     <input type="number" value={form.salary_max} onChange={e => f('salary_max', e.target.value)} placeholder="e.g. 2500000" style={inputStyle} />
                   </div>
                 </div>
-
-                {/* Description */}
                 <div>
                   <label style={labelStyle}>Job description *</label>
-                  <textarea
-                    value={form.description}
-                    onChange={e => f('description', e.target.value)}
-                    rows={5}
-                    placeholder="Describe the role, responsibilities, and ideal candidate…"
-                    style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties}
-                  />
+                  <textarea value={form.description} onChange={e => f('description', e.target.value)} rows={5} placeholder="Describe the role, responsibilities, and ideal candidate…" style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 } as React.CSSProperties} />
                 </div>
-
-                {/* Skills */}
                 <div>
                   <label style={labelStyle}>Required skills *</label>
-                  <SkillPicker
-                    selected={form.required_skills}
-                    onChange={skills => f('required_skills', skills)}
-                  />
+                  <SkillPicker selected={form.required_skills} onChange={skills => f('required_skills', skills)} />
                 </div>
-
-                {/* Submit */}
-                <button
-                  onClick={handlePost}
-                  disabled={posting}
-                  style={{
-                    width: '100%', padding: '13px',
-                    background: posting ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, rgba(124,58,237,0.9), rgba(109,40,217,0.9))',
-                    border: posting ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(124,58,237,0.5)',
-                    borderRadius: 12, color: posting ? 'rgba(255,255,255,0.3)' : '#fff',
-                    fontSize: 14, fontWeight: 700, cursor: posting ? 'not-allowed' : 'pointer',
-                    fontFamily: 'Sora, sans-serif', transition: 'all 0.15s',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  }}
-                >
-                  {posting && (
-                    <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#fff', animation: 'raSpin 0.7s linear infinite', display: 'inline-block' }} />
-                  )}
+                <button onClick={handlePost} disabled={posting} style={{
+                  width: '100%', padding: '13px', borderRadius: 12,
+                  background: posting ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, rgba(124,58,237,0.9), rgba(109,40,217,0.9))',
+                  border: posting ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(124,58,237,0.5)',
+                  color: posting ? 'rgba(255,255,255,0.3)' : '#fff', fontSize: 14, fontWeight: 700,
+                  cursor: posting ? 'not-allowed' : 'pointer', fontFamily: 'Sora, sans-serif',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'all 0.15s',
+                }}>
+                  {posting && <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#fff', animation: 'raSpin 0.7s linear infinite', display: 'inline-block' }} />}
                   {posting ? 'Posting…' : 'Post Job → Notify Candidates'}
                 </button>
-
                 <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', textAlign: 'center', margin: 0 }}>
                   Candidates matching your required skills will be notified automatically
                 </p>
