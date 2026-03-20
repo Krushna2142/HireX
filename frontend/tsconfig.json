@@ -16,12 +16,7 @@
     "baseUrl": ".",
     "plugins": [{ "name": "next" }],
     "paths": {
-        "@/*": ["./*"],
-  "@/app/*": ["app/*"],
-  "@/components/*": ["components/*"],
-  "@/features/*": ["features/*"],
-  "@/lib/*": ["lib/*"],
-  "@/hooks/*": ["hooks/*"]
+      "@/*": ["./*"]
     }
   },
   "include": [
