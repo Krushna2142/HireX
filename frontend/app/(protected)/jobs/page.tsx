@@ -2,7 +2,8 @@
 // frontend/app/(protected)/jobs/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import api from '@/lib/axios';
 import {
   useJobs,
@@ -11,7 +12,7 @@ import {
   type Application,
   type JobSource,
 } from '@/hooks/useRealTimeAlerts';
-import style from 'styled-jsx/style';
+import Pagination from '@/components/jobs/Pagination';
 import React from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,8 +26,13 @@ interface Resume {
   isDefault?: boolean;
 }
 
-// ✅ All four platforms + 'all'
 type SourceFilter = 'all' | 'internal' | 'serpapi' | 'linkedin' | 'indeed';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 12; // fills a 3-column grid evenly (12 = 3×4 or 4×3)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers
@@ -60,8 +66,6 @@ const APP_BADGE: Record<string, { bg: string; color: string; label: string }> = 
   hired:       { bg: 'rgba(52,211,153,0.2)',   color: '#059669', label: 'Hired'          },
 };
 
-// ✅ All four platforms mapped — 'linkedin' and 'indeed' now included
-// This fixes ts(2353): 'linkedin' not in Record<"internal" | "serpapi", ...>
 const SOURCE_META: Record<JobSource, {
   bg: string; color: string; border: string; label: string;
 }> = {
@@ -72,11 +76,10 @@ const SOURCE_META: Record<JobSource, {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Small components
+// Small components (SourceBadge, MatchBadge, SkeletonCard — unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SourceBadge({ source }: { source: JobSource }) {
-  // Safe fallback — if unknown source arrives, use serpapi style
   const s = SOURCE_META[source] ?? SOURCE_META.serpapi;
   return (
     <span style={{
@@ -131,16 +134,7 @@ function SkeletonCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JobCardCTA
-//
-// Extracted from JobCard to prevent TSX parser ambiguity errors:
-//   - 3-level nested ternary made parser misread JSX props as JS identifiers
-//   - "Cannot find name 'href'" ts(2304) was a cascade from that misparse
-//
-// Explicit return type React.ReactElement | null is required because:
-//   - Without it, TypeScript infers a union including object shapes
-//   - That union is not assignable to (props: any) => ReactNode
-//   - Explicit type forces every branch to return a valid element or null
+// JobCardCTA (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function JobCardCTA({
@@ -172,7 +166,6 @@ function JobCardCTA({
   }
 
   if (job.applyUrl) {
-    // The tag below opens with the letter a inside angle brackets
     const url = job.applyUrl;
     return React.createElement(
       'a',
@@ -195,7 +188,7 @@ function JobCardCTA({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JobCard
+// JobCard (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function JobCard({
@@ -208,7 +201,7 @@ function JobCard({
   onApply:     (j: UnifiedJob) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const salary     = fmtSalary(job.salaryMin, job.salaryMax);
+  const salary     = fmtSalary(job.salaryMin ?? null, job.salaryMax ?? null);
   const isInternal = job.source === 'internal';
 
   return (
@@ -337,7 +330,7 @@ function JobCard({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ApplyModal
+// ApplyModal (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ApplyModal({
@@ -439,7 +432,6 @@ function ApplyModal({
         @keyframes mPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
       `}</style>
 
-      {/* Backdrop */}
       <div
         onClick={() => onClose()}
         style={{
@@ -453,7 +445,6 @@ function ApplyModal({
           animation:      'mFade 0.2s ease',
         }}
       >
-        {/* Panel */}
         <div
           onClick={e => e.stopPropagation()}
           className="card p-6 w-full"
@@ -465,8 +456,6 @@ function ApplyModal({
             boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
           }}
         >
-
-          {/* ── Success ── */}
           {success ? (
             <div style={{ textAlign: 'center', padding: '2rem 0' }}>
               <div style={{ fontSize: 44, marginBottom: 12 }}>🎉</div>
@@ -479,7 +468,6 @@ function ApplyModal({
             </div>
           ) : (
             <>
-              {/* ── Header ── */}
               <div style={{
                 display: 'flex', alignItems: 'flex-start',
                 justifyContent: 'space-between', marginBottom: '1.25rem',
@@ -494,10 +482,7 @@ function ApplyModal({
                       APPLYING
                     </span>
                   </div>
-                  <h2 style={{
-                    margin: 0, fontSize: 16, fontWeight: 700,
-                    color: 'var(--text-primary)', lineHeight: 1.3,
-                  }}>
+                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>
                     {job.title}
                   </h2>
                   <p style={{ margin: '3px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
@@ -508,33 +493,20 @@ function ApplyModal({
                 </div>
                 <button
                   onClick={() => onClose()}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 4,
-                  }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 4 }}
                 >
                   ✕
                 </button>
               </div>
 
-              {/* ── Required skills ── */}
               {job.requiredSkills.length > 0 && (
                 <div style={{ marginBottom: '1.25rem' }}>
-                  <p style={{
-                    margin: '0 0 7px', fontSize: 11, fontWeight: 600,
-                    color: 'rgba(255,255,255,0.35)',
-                    textTransform: 'uppercase', letterSpacing: '0.07em',
-                  }}>
+                  <p style={{ margin: '0 0 7px', fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                     Required skills
                   </p>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                     {job.requiredSkills.map(s => (
-                      <span key={s} style={{
-                        fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                        background: 'rgba(124,58,237,0.08)',
-                        color: '#A78BFA',
-                        border: '1px solid rgba(124,58,237,0.2)',
-                      }}>
+                      <span key={s} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(124,58,237,0.08)', color: '#A78BFA', border: '1px solid rgba(124,58,237,0.2)' }}>
                         {s}
                       </span>
                     ))}
@@ -543,79 +515,40 @@ function ApplyModal({
               )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-
-                {/* ── Resume picker ── */}
                 <div>
-                  <label style={{
-                    display: 'block', fontSize: 12, fontWeight: 500,
-                    color: 'var(--text-muted)', marginBottom: 6,
-                  }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
                     Select resume *
                   </label>
-
                   {fetching ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {[1, 2].map(i => (
-                        <div key={i} style={{
-                          height: 48, borderRadius: 8,
-                          background: 'rgba(255,255,255,0.05)',
-                          animation: 'mPulse 1.4s ease infinite',
-                        }} />
+                        <div key={i} style={{ height: 48, borderRadius: 8, background: 'rgba(255,255,255,0.05)', animation: 'mPulse 1.4s ease infinite' }} />
                       ))}
                     </div>
                   ) : resumes.length === 0 ? (
-                    <div style={{
-                      padding: '10px 14px', borderRadius: 8,
-                      background: 'rgba(248,113,113,0.08)',
-                      border: '1px solid rgba(248,113,113,0.2)',
-                      fontSize: 13, color: '#F87171',
-                    }}>
+                    <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', fontSize: 13, color: '#F87171' }}>
                       No resumes uploaded yet.{' '}
-                      <a href="/resumes" style={{ color: '#F87171', textDecoration: 'underline' }}>
-                        Upload one →
-                      </a>
+                      <a href="/resumes" style={{ color: '#F87171', textDecoration: 'underline' }}>Upload one →</a>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {resumes.map(r => (
-                        <label
-                          key={r.id}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
-                            border: `1px solid ${resumeId === r.id
-                              ? 'rgba(167,139,250,0.5)'
-                              : 'rgba(255,255,255,0.08)'}`,
-                            background: resumeId === r.id
-                              ? 'rgba(167,139,250,0.08)'
-                              : 'rgba(255,255,255,0.02)',
-                            transition: 'all 0.15s',
-                          }}
-                        >
-                          <input
-                            type="radio"
-                            name="resume"
-                            value={r.id}
-                            checked={resumeId === r.id}
-                            onChange={() => setResumeId(r.id)}
-                            style={{ accentColor: '#A78BFA', flexShrink: 0 }}
-                          />
+                        <label key={r.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
+                          border: `1px solid ${resumeId === r.id ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                          background: resumeId === r.id ? 'rgba(167,139,250,0.08)' : 'rgba(255,255,255,0.02)',
+                          transition: 'all 0.15s',
+                        }}>
+                          <input type="radio" name="resume" value={r.id} checked={resumeId === r.id} onChange={() => setResumeId(r.id)} style={{ accentColor: '#A78BFA', flexShrink: 0 }} />
                           <span style={{ fontSize: 15, flexShrink: 0 }}>📄</span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{
-                              margin: 0, fontSize: 13, fontWeight: 500,
-                              color: resumeId === r.id ? '#A78BFA' : 'var(--text-primary)',
-                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            }}>
+                            <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: resumeId === r.id ? '#A78BFA' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {r.fileName ?? `Resume ${r.id.slice(0, 8)}`}
                             </p>
                             <p style={{ margin: '1px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                              {new Date(r.createdAt).toLocaleDateString('en-IN', {
-                                day: 'numeric', month: 'short', year: 'numeric',
-                              })}
-                              {r.isDefault && (
-                                <span style={{ marginLeft: 6, color: '#34D399' }}>· default</span>
-                              )}
+                              {new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {r.isDefault && <span style={{ marginLeft: 6, color: '#34D399' }}>· default</span>}
                             </p>
                           </div>
                         </label>
@@ -624,30 +557,17 @@ function ApplyModal({
                   )}
                 </div>
 
-                {/* ── Cover note ── */}
                 <div>
-                  <label style={{
-                    display: 'block', fontSize: 12, fontWeight: 500,
-                    color: 'var(--text-muted)', marginBottom: 6,
-                  }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
                     Cover note{' '}
-                    <span style={{ fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>
-                      (optional)
-                    </span>
+                    <span style={{ fontWeight: 400, color: 'rgba(255,255,255,0.25)' }}>(optional)</span>
                   </label>
                   <textarea
                     value={cover}
                     onChange={e => setCover(e.target.value)}
                     rows={4}
                     placeholder={`Why are you a great fit for ${job.title} at ${job.company}?`}
-                    style={{
-                      width: '100%', boxSizing: 'border-box',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.09)',
-                      borderRadius: 8, padding: '10px 14px',
-                      fontSize: 13, color: 'var(--text-primary)',
-                      resize: 'vertical', outline: 'none', fontFamily: 'inherit',
-                    }}
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--text-primary)', resize: 'vertical', outline: 'none', fontFamily: 'inherit' }}
                   />
                   {cover.length > 0 && (
                     <p style={{ margin: '4px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>
@@ -656,45 +576,23 @@ function ApplyModal({
                   )}
                 </div>
 
-                {/* ── Error ── */}
                 {error && (
-                  <p style={{
-                    margin: 0, fontSize: 13, color: '#F87171',
-                    background: 'rgba(248,113,113,0.08)',
-                    border: '1px solid rgba(248,113,113,0.2)',
-                    borderRadius: 8, padding: '8px 12px',
-                  }}>
+                  <p style={{ margin: 0, fontSize: 13, color: '#F87171', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, padding: '8px 12px' }}>
                     {error}
                   </p>
                 )}
 
-                {/* ── Actions ── */}
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => onClose()} style={cancelStyle}>
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => void submit()}
-                    disabled={isDisabled}
-                    style={submitStyle(isDisabled)}
-                  >
+                  <button onClick={() => onClose()} style={cancelStyle}>Cancel</button>
+                  <button onClick={() => void submit()} disabled={isDisabled} style={submitStyle(isDisabled)}>
                     {loading ? (
                       <>
-                        <span style={{
-                          width: 13, height: 13, borderRadius: '50%',
-                          border: '2px solid rgba(255,255,255,0.2)',
-                          borderTopColor: '#fff',
-                          animation: 'mSpin 0.7s linear infinite',
-                          display: 'inline-block', flexShrink: 0,
-                        }} />
+                        <span style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#fff', animation: 'mSpin 0.7s linear infinite', display: 'inline-block', flexShrink: 0 }} />
                         Submitting…
                       </>
-                    ) : (
-                      'Submit application'
-                    )}
+                    ) : 'Submit application'}
                   </button>
                 </div>
-
               </div>
             </>
           )}
@@ -705,33 +603,98 @@ function ApplyModal({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JobsPage
+// JobsPage — with URL-synced pagination
+//
+// URL state strategy:
+//   /jobs?page=2&search=react&workMode=remote&source=linkedin
+//
+// Why URL state?
+//   - Browser back/forward navigation works correctly
+//   - Shareable / bookmarkable pages
+//   - Refresh stays on the same page
+//   - Free SSR-compatible without extra libraries
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function JobsPage() {
-  const [search,       setSearch]       = useState('');
-  const [workMode,     setWorkMode]     = useState('');
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  const [applyTarget,  setApplyTarget]  = useState<UnifiedJob | null>(null);
-  const [debounced,    setDebounced]    = useState('');
+  const router       = useRouter();
+  const pathname     = usePathname();
+  const searchParams = useSearchParams();
 
-  // Debounce search — prevents a network request on every keystroke
+  // ── Read initial state from URL params ──────────────────────────────────────
+  const [search,       setSearch]       = useState(searchParams.get('search')   ?? '');
+  const [workMode,     setWorkMode]     = useState(searchParams.get('workMode') ?? '');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>(
+    (searchParams.get('source') as SourceFilter) ?? 'all'
+  );
+  const [page,         setPage]         = useState(
+    Math.max(1, parseInt(searchParams.get('page') ?? '1', 10))
+  );
+  const [applyTarget,  setApplyTarget]  = useState<UnifiedJob | null>(null);
+  const [debounced,    setDebounced]    = useState(search);
+
+  // ── Debounce search input ────────────────────────────────────────────────────
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(search), 350);
+    const t = setTimeout(() => {
+      setDebounced(search);
+      setPage(1); // reset to page 1 on new search
+    }, 350);
     return () => clearTimeout(t);
   }, [search]);
 
-  const { jobs, total, sources, loading, validating, error, refresh } = useJobs({
+  // ── Reset page to 1 whenever filters change ──────────────────────────────────
+  // (search reset is handled above in its debounce handler)
+  const handleWorkModeChange = (val: string) => {
+    setWorkMode(val);
+    setPage(1);
+  };
+  const handleSourceChange = (val: SourceFilter) => {
+    setSourceFilter(val);
+    setPage(1);
+  };
+
+  // ── Sync state → URL (shallow push — no full reload) ─────────────────────────
+  const syncUrl = useCallback((
+    p: number, s: string, wm: string, src: SourceFilter
+  ) => {
+    const params = new URLSearchParams();
+    if (p  > 1)    params.set('page',     String(p));
+    if (s)         params.set('search',   s);
+    if (wm)        params.set('workMode', wm);
+    if (src !== 'all') params.set('source', src);
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
+  }, [router, pathname]);
+
+  useEffect(() => {
+    syncUrl(page, debounced, workMode, sourceFilter);
+  }, [page, debounced, workMode, sourceFilter, syncUrl]);
+
+  // ── Data fetching ─────────────────────────────────────────────────────────────
+  const {
+    jobs, total, totalPages, sources,
+    loading, validating, error, refresh,
+  } = useJobs({
     search:   debounced,
     workMode: workMode || undefined,
     source:   sourceFilter,
+    page,
+    limit:    PAGE_SIZE,
   });
 
   const { applications, applyOptimistic } = useMyApplications();
   const getApp = (jobId: string) => applications.find(a => a.job_id === jobId);
 
-  // ✅ Total live jobs across all external platforms
+  // ── Scroll to top on page change ─────────────────────────────────────────────
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [page]);
+
   const totalLive = sources.serpapi + sources.linkedin + sources.indeed;
+
+  // ── Page change handler ───────────────────────────────────────────────────────
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+  };
 
   return (
     <section style={{ padding: '2rem 2rem 4rem', maxWidth: 1200, margin: '0 auto' }}>
@@ -745,18 +708,17 @@ export default function JobsPage() {
           <span
             title="Live — updates in real time via SSE"
             style={{
-              width:      8,
-              height:     8,
+              width:        8,
+              height:       8,
               borderRadius: '50%',
-              background:  validating ? '#34D399' : 'rgba(52,211,153,0.3)',
-              boxShadow:   validating ? '0 0 6px #34D399' : 'none',
-              transition:  'background 0.3s',
-              display:     'inline-block',
+              background:   validating ? '#34D399' : 'rgba(52,211,153,0.3)',
+              boxShadow:    validating ? '0 0 6px #34D399' : 'none',
+              transition:   'background 0.3s',
+              display:      'inline-block',
             }}
           />
         </div>
 
-        {/* ✅ Per-platform source counts — uses all four sources fields */}
         {!loading && (
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
             {total} openings ·{' '}
@@ -793,7 +755,7 @@ export default function JobsPage() {
 
         <select
           value={workMode}
-          onChange={e => setWorkMode(e.target.value)}
+          onChange={e => handleWorkModeChange(e.target.value)}
           style={{
             background: 'rgba(255,255,255,0.03)',
             border: '1px solid rgba(255,255,255,0.09)',
@@ -808,7 +770,7 @@ export default function JobsPage() {
           <option value="onsite">Onsite</option>
         </select>
 
-        {/* ✅ Source filter — all five options including LinkedIn + Indeed */}
+        {/* Source filter */}
         <div style={{
           display: 'flex', borderRadius: 8,
           border: '1px solid rgba(255,255,255,0.09)', overflow: 'hidden',
@@ -822,7 +784,7 @@ export default function JobsPage() {
           ] as { key: SourceFilter; label: string }[]).map(({ key, label }, i, arr) => (
             <button
               key={key}
-              onClick={() => setSourceFilter(key)}
+              onClick={() => handleSourceChange(key)}
               style={{
                 padding:     '7px 14px',
                 fontSize:    12,
@@ -853,11 +815,7 @@ export default function JobsPage() {
             display: 'flex', alignItems: 'center', gap: 5,
           }}
         >
-          <span style={{
-            display: 'inline-block',
-            animation: validating ? 'spin 0.8s linear infinite' : 'none',
-            fontSize: 14,
-          }}>
+          <span style={{ display: 'inline-block', animation: validating ? 'spin 0.8s linear infinite' : 'none', fontSize: 14 }}>
             ↻
           </span>
           {validating ? 'Updating…' : 'Refresh'}
@@ -881,11 +839,7 @@ export default function JobsPage() {
             return (
               <span
                 key={status}
-                style={{
-                  fontSize: 11, fontWeight: 600,
-                  padding: '3px 10px', borderRadius: 20,
-                  background: b.bg, color: b.color,
-                }}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: b.bg, color: b.color }}
               >
                 {b.label} ({count})
               </span>
@@ -903,12 +857,8 @@ export default function JobsPage() {
           </button>
         </div>
       ) : loading ? (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-          gap: 20,
-        }}>
-          {Array.from({ length: 9 }).map((_, i) => <SkeletonCard key={i} />)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
+          {Array.from({ length: PAGE_SIZE }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : jobs.length === 0 ? (
         <div className="card p-10" style={{ textAlign: 'center' }}>
@@ -917,23 +867,31 @@ export default function JobsPage() {
           </p>
         </div>
       ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-          gap: 20,
-        }}>
-          {jobs.map(job => (
-            <JobCard
-              key={job.id}
-              job={job}
-              application={getApp(job.id)}
-              onApply={setApplyTarget}
-            />
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
+            {jobs.map(job => (
+              <JobCard
+                key={job.id}
+                job={job}
+                application={getApp(job.id)}
+                onApply={setApplyTarget}
+              />
+            ))}
+          </div>
+
+          {/* ── Pagination ── */}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            totalItems={total}
+            pageSize={PAGE_SIZE}
+            onPageChange={handlePageChange}
+            loading={validating}
+          />
+        </>
       )}
 
-      {/* ── Apply modal — portal-style fixed overlay ── */}
+      {/* ── Apply modal ── */}
       {applyTarget && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50 }}>
           <ApplyModal

@@ -16,15 +16,44 @@ const INTERVALS = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// toArray — defensive envelope normaliser
+//
+// Why this exists:
+//   Several API endpoints were changed server-side to return envelopes like
+//   { alerts: [...] } or { data: [...] } instead of plain arrays.
+//   Calling .filter() on a plain object throws:
+//     "TypeError: (e ?? []).filter is not a function"
+//   which crashed the entire React tree.
+//
+//   This utility makes every consumer of array data resilient to that drift.
+//   It checks:
+//     1. Is it already a plain array?          → return as-is
+//     2. Does it have a 'data' / 'items' key?  → unwrap
+//     3. Does it have a custom fallback key?   → unwrap (e.g. 'alerts')
+//     4. Anything else                         → return []
+// ─────────────────────────────────────────────────────────────────────────────
+
+function toArray<T>(raw: unknown, fallbackKey?: string): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as T[];
+
+  const obj = raw as Record<string, unknown>;
+  for (const key of ['data', 'items', 'results', fallbackKey].filter(Boolean) as string[]) {
+    if (Array.isArray(obj[key])) return obj[key] as T[];
+  }
+
+  return [];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ✅ All four platforms — matches backend JobSource expansion
 export type JobSource = 'internal' | 'serpapi' | 'linkedin' | 'indeed';
 
 export interface UnifiedJob {
   id:             string;
-  source:         JobSource;   // ✅ was 'internal' | 'serpapi' — caused images 3, 5
+  source:         JobSource;
   title:          string;
   company:        string;
   location:       string | null;
@@ -95,66 +124,104 @@ export interface ResumeAnalysis {
   status:          string;
 }
 
-// ✅ Sources shape including all four platforms
 export interface JobSources {
   internal: number;
   serpapi:  number;
-  linkedin: number;   // ← caused image 4
-  indeed:   number;   // ← caused image 4
+  linkedin: number;
+  indeed:   number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hooks
+// useJobs — with pagination (page, limit, totalPages, currentPage)
 // ─────────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_PAGE_SIZE = 12;
 
 export function useJobs(params?: {
   search?:   string;
   workMode?: string;
-  // ✅ All platform filters — was missing linkedin/indeed, caused image 5
   source?:   'all' | 'internal' | 'serpapi' | 'linkedin' | 'indeed';
+  page?:     number;
+  limit?:    number;
 }) {
+  const page  = params?.page  ?? 1;
+  const limit = params?.limit ?? DEFAULT_PAGE_SIZE;
+
   const query = new URLSearchParams();
   if (params?.search   && params.search   !== '') query.set('search',   params.search);
   if (params?.workMode && params.workMode !== '') query.set('workMode', params.workMode);
-  // Always forward source — backend uses it to filter by platform
-  if (params?.source) query.set('source', params.source);
+  if (params?.source)                             query.set('source',   params.source);
+  query.set('page',  String(page));
+  query.set('limit', String(limit));
 
-  const key = `/jobs${query.toString() ? `?${query}` : ''}`;
+  const key = `/jobs?${query.toString()}`;
 
   const { data, error, isLoading, isValidating } = useSWR<{
     jobs:    UnifiedJob[];
     total:   number;
-    sources: JobSources;   // ✅ typed with all four fields
+    sources: JobSources;
   }>(key, fetcher, {
     refreshInterval:       INTERVALS.jobs,
     revalidateOnFocus:     true,
     revalidateOnReconnect: true,
     dedupingInterval:      5_000,
+    keepPreviousData:      true,
   });
 
+  const total      = data?.total ?? 0;
+  const totalPages = Math.ceil(total / limit) || 1;
+
   return {
-    jobs:       data?.jobs    ?? [],
-    total:      data?.total   ?? 0,
-    // ✅ Safe defaults for all four sources
-    sources:    data?.sources ?? { internal: 0, serpapi: 0, linkedin: 0, indeed: 0 },
-    loading:    isLoading,
-    validating: isValidating,
-    error:      error?.message ?? null,
-    refresh:    () => globalMutate(key),
+    jobs:        data?.jobs    ?? [],
+    total,
+    sources:     data?.sources ?? { internal: 0, serpapi: 0, linkedin: 0, indeed: 0 },
+    loading:     isLoading,
+    validating:  isValidating,
+    error:       error?.message ?? null,
+    refresh:     () => globalMutate(key),
+    totalPages,
+    currentPage: page,
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// useRecommendations
+//
+// FIX: /jobs/recommendations returns 500 server-side.
+//   • Added onErrorRetry to stop hammering a broken endpoint — backs off after
+//     3 attempts instead of retrying on a tight 60s loop.
+//   • toArray() added so a partial/envelope response doesn't cause a crash
+//     while the backend issue is being fixed.
+//
+// The 500 itself is a backend bug — check your Render logs. Most common cause:
+//   Prisma include on a missing relation, or a null matchScore computation.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function useRecommendations() {
-  const { data, error, isLoading } = useSWR<UnifiedJob[]>(
+  const { data, error, isLoading } = useSWR<unknown>(
     '/jobs/recommendations', fetcher,
-    { refreshInterval: INTERVALS.recommendations, revalidateOnFocus: true, revalidateOnReconnect: true },
+    {
+      refreshInterval:       INTERVALS.recommendations,
+      revalidateOnFocus:     true,
+      revalidateOnReconnect: true,
+      onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
+        // Stop retrying 500s after 3 attempts to avoid log spam on Render
+        if (err?.response?.status >= 500 && retryCount >= 3) return;
+        setTimeout(() => revalidate({ retryCount }), 10_000);
+      },
+    },
   );
+
   return {
-    recommendations: data ?? [],
+    recommendations: toArray<UnifiedJob>(data),
     loading:         isLoading,
     error:           error?.message ?? null,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useMyApplications
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function useMyApplications() {
   const { data, error, isLoading, mutate } = useSWR<Application[]>(
@@ -187,6 +254,10 @@ export function useMyApplications() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// useJobApplicants
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function useJobApplicants(jobId: string | null) {
   const { data, error, isLoading, mutate } = useSWR<Application[]>(
     jobId ? `/jobs/${jobId}/applicants` : null, fetcher,
@@ -211,6 +282,10 @@ export function useJobApplicants(jobId: string | null) {
     refresh:      () => mutate(),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useRecruiterJobs
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function useRecruiterJobs() {
   const { data, error, isLoading, isValidating, mutate } = useSWR<RecruiterJob[]>(
@@ -255,6 +330,10 @@ export function useRecruiterJobs() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// useResumes
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function useResumes() {
   const { data, error, isLoading, mutate } = useSWR<Resume[]>(
     '/resumes', fetcher,
@@ -268,6 +347,10 @@ export function useResumes() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// useLatestResume
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function useLatestResume() {
   const { data, error, isLoading, mutate } = useSWR<Resume | null>(
     '/resumes/latest', fetcher,
@@ -280,6 +363,10 @@ export function useLatestResume() {
     refresh: () => mutate(),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useResumeAnalysis
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function useResumeAnalysis(resumeId: string | null) {
   const { data: resume } = useSWR<Resume>(
@@ -312,17 +399,38 @@ export function useResumeAnalysis(resumeId: string | null) {
   return { resume, analysis, status: resume?.status ?? null, triggerAnalysis };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// useAlerts
+//
+// FIX: Crash "TypeError: (e ?? []).filter is not a function"
+//
+// Root cause:
+//   The /alerts endpoint returned an envelope object, e.g.:
+//     { alerts: [...], unreadCount: 3 }
+//   instead of a plain array.
+//   Calling .filter() on {} always throws this TypeError.
+//
+// Fix:
+//   1. SWR data type widened to `unknown` — we don't assume the shape
+//   2. toArray(raw, 'alerts') normalises any response into a guaranteed
+//      Alert[] — checking for plain array first, then data/items/alerts keys
+//   3. All downstream .filter() / .map() calls now operate on the safe array
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function useAlerts() {
-  const { data, error, isLoading, mutate } = useSWR<Alert[]>(
+  const { data: raw, error, isLoading, mutate } = useSWR<unknown>(
     '/alerts', fetcher,
     { refreshInterval: INTERVALS.alerts, revalidateOnFocus: true, revalidateOnReconnect: true },
   );
 
-  const unreadCount = (data ?? []).filter((a: Alert) => !a.read).length;
+  // Normalise to a guaranteed Alert[] — safe regardless of what the API returns
+  const data = toArray<Alert>(raw, 'alerts');
+
+  const unreadCount = data.filter((a: Alert) => !a.read).length;
 
   const markRead = async (alertId: string) => {
     await mutate(
-      (data ?? []).map((a: Alert) => a.id === alertId ? { ...a, read: true } : a),
+      data.map((a: Alert) => a.id === alertId ? { ...a, read: true } : a),
       false,
     );
     try { await api.patch(`/alerts/${alertId}/read`); }
@@ -331,7 +439,7 @@ export function useAlerts() {
 
   const markAllRead = async () => {
     await mutate(
-      (data ?? []).map((a: Alert) => ({ ...a, read: true })),
+      data.map((a: Alert) => ({ ...a, read: true })),
       false,
     );
     try { await api.patch('/alerts/read-all'); }
@@ -339,7 +447,7 @@ export function useAlerts() {
   };
 
   return {
-    alerts:      data ?? [],
+    alerts:      data,
     unreadCount,
     loading:     isLoading,
     error:       error?.message ?? null,

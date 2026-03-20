@@ -4,6 +4,7 @@ import api from '@/lib/axios';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface CandidateProfile {
+  full_name: string;
   id: string;
   userId: string;
   headline: string | null;

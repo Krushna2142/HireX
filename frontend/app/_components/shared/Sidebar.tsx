@@ -1,22 +1,39 @@
 'use client';
 
-import Link             from 'next/link';
-import { useState }     from 'react';
-import { usePathname, useRouter } from 'next/navigation';
-import { useAuth }      from '@/components/providers/AuthProvider';
-import { useResumeAnalysis, AnalysisState } from '@/hooks/useAnalyseResume';
-import ResumeAnalysisTab from '@/components/resumes/ResumeAnalysisTab';
+// ─────────────────────────────────────────────────────────────────────────────
+// components/Sidebar.tsx
+//
+// Architecture:
+//   - Settings REMOVED from nav entirely — lives inside ProfilePanel drawer
+//   - Username card at bottom calls openPanel() from ProfilePanelContext
+//     instead of navigating to /profile — no page transition, instant drawer
+//   - Alerts live badge driven by useAlerts() — live unread count
+//   - AnalysisState is type-only import to prevent runtime crash
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Nav structure ─────────────────────────────────────────────────────────────
+import Link                       from 'next/link';
+import { useState }               from 'react';
+import { usePathname }            from 'next/navigation';
+import { useAuth }                from '@/components/providers/AuthProvider';
+import { useResumeAnalysis }      from '@/hooks/useAnalyseResume';
+import type { AnalysisState }     from '@/hooks/useAnalyseResume';
+import ResumeAnalysisTab          from '@/components/resumes/ResumeAnalysisTab';
+import { useAlerts }              from '@/hooks/useRealTimeAlerts';
+import { useProfilePanel }        from '@/components/context/ProfilePanelContext';
 
-const CANDIDATE_NAV_GROUPS = [
+// ─────────────────────────────────────────────────────────────────────────────
+// Nav definitions — Settings intentionally absent from both roles
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CANDIDATE_NAV = [
   {
-    label: 'Menu',
+    label: 'Workspace',
     items: [
-      { href: '/dashboard',         icon: '⊞', label: 'Dashboard'      },
-      { href: '/jobs',              icon: '💼', label: 'Jobs'           },
-      { href: '/resumes',           icon: '📄', label: 'Resume'         },
-      { href: '/resume-analysis',   icon: '🧠', label: 'AI Analysis'    },
+      { href: '/dashboard',       icon: '⊞',  label: 'Dashboard'      },
+      { href: '/jobs',            icon: '💼',  label: 'Jobs'           },
+      { href: '/resumes',         icon: '📄',  label: 'Resume'         },
+      { href: '/resume-analysis', icon: '🧠',  label: 'AI Analysis'    },
+      { href: '/alerts',          icon: '🔔',  label: 'Alerts'         },
     ],
   },
   {
@@ -26,224 +43,126 @@ const CANDIDATE_NAV_GROUPS = [
       { href: '/mock-interview',  icon: '🎤', label: 'Mock Interview'  },
     ],
   },
+] as const;
+
+const RECRUITER_NAV = [
   {
-    label: 'Account',
+    label: 'Workspace',
     items: [
-      { href: '/alerts',   icon: '🔔', label: 'Alerts'   },
-      { href: '/settings', icon: '⚙',  label: 'Settings' },
+      { href: '/dashboard',           icon: '⊞',  label: 'Overview'   },
+      { href: '/recruiter/dashboard', icon: '📊',  label: 'Recruitment'},
+      { href: '/jobs',                icon: '💼',  label: 'All Jobs'   },
+      { href: '/alerts',              icon: '🔔',  label: 'Alerts'     },
     ],
   },
 ] as const;
 
-const RECRUITER_NAV_GROUPS = [
-  {
-    label: 'Menu',
-    items: [
-      { href: '/dashboard',            icon: '⊞', label: 'Overview'   },
-      { href: '/recruiter/dashboard',  icon: '🏢', label: 'Recruitment' },
-      { href: '/jobs',                 icon: '💼', label: 'All Jobs'   },
-    ],
-  },
-  {
-    label: 'Account',
-    items: [
-      { href: '/recruiter/profile', icon: '👤', label: 'Profile'  },
-      { href: '/settings',          icon: '⚙',  label: 'Settings' },
-    ],
-  },
-] as const;
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Analyse button states
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Analyse button config ─────────────────────────────────────────────────────
-
-interface AnalyseBtnConfig {
+interface AnalyseBtnCfg {
   label: string; sublabel: string; disabled: boolean;
   color: string; bg: string; border: string; icon: string;
 }
 
-const ANALYSE_CONFIG: Record<AnalysisState, AnalyseBtnConfig> = {
-  idle: {
-    label: 'No resume yet', sublabel: 'Upload a resume first',
-    disabled: true, icon: '📄',
-    color: 'rgba(255,255,255,0.15)', bg: 'rgba(255,255,255,0.03)', border: 'rgba(255,255,255,0.07)',
-  },
-  uploaded: {
-    label: 'Analyse Resume', sublabel: 'Run AI analysis on your CV',
-    disabled: false, icon: '⚡',
-    color: '#A78BFA', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.25)',
-  },
-  triggering: {
-    label: 'Starting…', sublabel: 'Queuing analysis job',
-    disabled: true, icon: '⚡',
-    color: '#A78BFA', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.25)',
-  },
-  processing: {
-    label: 'Analysing…', sublabel: 'AI is reading your resume',
-    disabled: true, icon: '⚡',
-    color: '#38BDF8', bg: 'rgba(56,189,248,0.06)', border: 'rgba(56,189,248,0.2)',
-  },
-  analyzed: {
-    label: 'Analysis complete', sublabel: 'Resume fully analysed ✓',
-    disabled: true, icon: '✓',
-    color: '#10B981', bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.2)',
-  },
-  failed: {
-    label: 'Retry Analysis', sublabel: 'Previous attempt failed',
-    disabled: false, icon: '↺',
-    color: '#F87171', bg: 'rgba(239,68,68,0.06)', border: 'rgba(239,68,68,0.2)',
-  },
+const ANALYSE_CFG: Record<AnalysisState, AnalyseBtnCfg> = {
+  idle:       { label: 'No resume yet',     sublabel: 'Upload a resume first',      disabled: true,  icon: '📄', color: 'rgba(255,255,255,0.15)', bg: 'rgba(255,255,255,0.03)',  border: 'rgba(255,255,255,0.07)' },
+  uploaded:   { label: 'Analyse Resume',    sublabel: 'Run AI analysis on your CV', disabled: false, icon: '⚡', color: '#A78BFA',               bg: 'rgba(124,58,237,0.08)',   border: 'rgba(124,58,237,0.25)' },
+  triggering: { label: 'Starting…',         sublabel: 'Queuing analysis job',       disabled: true,  icon: '⚡', color: '#A78BFA',               bg: 'rgba(124,58,237,0.08)',   border: 'rgba(124,58,237,0.25)' },
+  processing: { label: 'Analysing…',        sublabel: 'AI is reading your resume',  disabled: true,  icon: '⚡', color: '#38BDF8',               bg: 'rgba(56,189,248,0.06)',   border: 'rgba(56,189,248,0.2)'  },
+  analyzed:   { label: 'Analysis complete', sublabel: 'Resume fully analysed ✓',    disabled: true,  icon: '✓', color: '#10B981',               bg: 'rgba(16,185,129,0.06)',   border: 'rgba(16,185,129,0.2)'  },
+  failed:     { label: 'Retry Analysis',    sublabel: 'Previous attempt failed',    disabled: false, icon: '↺', color: '#F87171',               bg: 'rgba(239,68,68,0.06)',    border: 'rgba(239,68,68,0.2)'   },
 };
 
-// ── Spinner ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-components
+// ─────────────────────────────────────────────────────────────────────────────
 
 function Spinner({ color }: { color: string }) {
   return (
-    <span style={{
-      display: 'inline-block', width: '12px', height: '12px',
-      borderRadius: '50%', border: `2px solid ${color}33`,
-      borderTopColor: color, animation: 'sbSpin 0.7s linear infinite', flexShrink: 0,
-    }} />
+    <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', border: `2px solid ${color}33`, borderTopColor: color, animation: 'sbSpin 0.7s linear infinite', flexShrink: 0 }} />
   );
 }
 
-// ── Resume Analysis inline section ────────────────────────────────────────────
-
 function ResumeAnalysisSection() {
-  const [expanded, setExpanded] = useState(false);
-
+  const [open, setOpen] = useState(false);
   return (
-    <div style={{
-      borderTop:    '1px solid rgba(255,255,255,0.05)',
-      borderBottom: '1px solid rgba(255,255,255,0.05)',
-      margin:       '4px 0',
-    }}>
-      <button
-        onClick={() => setExpanded(p => !p)}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', padding: '8px 12px',
-          background: 'none', border: 'none', cursor: 'pointer',
-          fontFamily: 'Sora, sans-serif',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '14px' }}>🧠</span>
+    <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)', margin: '4px 0' }}>
+      <button onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'Sora, sans-serif' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>🧠</span>
           <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'rgba(255,255,255,0.75)' }}>
-              Resume Analysis
-            </div>
-            <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '1px' }}>
-              Upload, analyse, get matched
-            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.75)' }}>Resume Analysis</div>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>Upload, analyse, get matched</div>
           </div>
         </div>
-        <span style={{
-          fontSize: '10px', color: 'rgba(255,255,255,0.25)',
-          transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-          transition: 'transform 0.2s ease', display: 'inline-block',
-        }}>
-          ▾
-        </span>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
       </button>
-
-      <div style={{
-        maxHeight: expanded ? '600px' : '0px',
-        overflow: 'hidden', transition: 'max-height 0.3s ease',
-      }}>
+      <div style={{ maxHeight: open ? 600 : 0, overflow: 'hidden', transition: 'max-height 0.3s ease' }}>
         <div style={{ padding: '0 8px 12px' }}>
-          <style>{`
-            .sb-analysis-panel .text-gray-800,
-            .sb-analysis-panel .text-gray-900 { color: rgba(255,255,255,0.85) !important; }
-            .sb-analysis-panel .text-gray-500,
-            .sb-analysis-panel .text-gray-600 { color: rgba(255,255,255,0.4) !important; }
-            .sb-analysis-panel .text-gray-400 { color: rgba(255,255,255,0.3) !important; }
-            .sb-analysis-panel .border-gray-200 { border-color: rgba(255,255,255,0.08) !important; }
-            .sb-analysis-panel .bg-white       { background: rgba(255,255,255,0.04) !important; }
-            .sb-analysis-panel .bg-gray-50     { background: rgba(255,255,255,0.03) !important; }
-            .sb-analysis-panel .bg-gray-100    { background: rgba(255,255,255,0.06) !important; }
-            .sb-analysis-panel .rounded-xl     { border-radius: 10px !important; }
-            .sb-analysis-panel .text-sm        { font-size: 12px !important; }
-            .sb-analysis-panel .text-xs        { font-size: 11px !important; }
-          `}</style>
-          <div className="sb-analysis-panel">
-            <ResumeAnalysisTab />
-          </div>
+          <style>{`.sb-ap .text-gray-800,.sb-ap .text-gray-900{color:rgba(255,255,255,.85)!important}.sb-ap .text-gray-500,.sb-ap .text-gray-600{color:rgba(255,255,255,.4)!important}.sb-ap .border-gray-200{border-color:rgba(255,255,255,.08)!important}.sb-ap .bg-white,.sb-ap .bg-gray-50{background:rgba(255,255,255,.03)!important}.sb-ap .rounded-xl{border-radius:10px!important}`}</style>
+          <div className="sb-ap"><ResumeAnalysisTab /></div>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Recruiter quick-stats pill ────────────────────────────────────────────────
-// Shown in the sidebar under "Recruitment" for recruiters as a nudge
-// to visit the dashboard. Reads from localStorage cache set by the dashboard.
-
-function RecruiterQuickStats() {
+function RecruiterStats() {
   if (typeof window === 'undefined') return null;
   try {
-    const raw   = localStorage.getItem('jc_recruiter_stats');
+    const raw = localStorage.getItem('jc_recruiter_stats');
     if (!raw) return null;
-    const stats = JSON.parse(raw) as { activeJobs: number; newApplicants: number };
-    if (!stats.newApplicants) return null;
+    const s = JSON.parse(raw) as { activeJobs: number; newApplicants: number };
+    if (!s.activeJobs && !s.newApplicants) return null;
     return (
-      <div style={{
-        margin:       '2px 10px 6px',
-        padding:      '8px 10px',
-        borderRadius: '8px',
-        background:   'rgba(244,114,182,0.07)',
-        border:       '1px solid rgba(244,114,182,0.18)',
-        display:      'flex',
-        gap:          '12px',
-      }}>
+      <div style={{ margin: '2px 10px 6px', padding: '8px 10px', borderRadius: 8, background: 'rgba(244,114,182,0.07)', border: '1px solid rgba(244,114,182,0.18)', display: 'flex', gap: 16 }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#F472B6', lineHeight: 1 }}>
-            {stats.activeJobs}
-          </div>
-          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>active</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#F472B6', lineHeight: 1 }}>{s.activeJobs}</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>active</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#38BDF8', lineHeight: 1 }}>
-            {stats.newApplicants}
-          </div>
-          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>new apps</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#38BDF8', lineHeight: 1 }}>{s.newApplicants}</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>applicants</div>
         </div>
       </div>
     );
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ── Main sidebar ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Sidebar
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
-  const { user, logout } = useAuth();
-  const pathname         = usePathname();
-  const router           = useRouter();
+  const { user, logout }   = useAuth();
+  const pathname           = usePathname();
+  const { openPanel }      = useProfilePanel(); // ← opens the profile drawer
 
-  const { analysisState, canAnalyse, trigger, error } = useResumeAnalysis();
+  const { analysisState = 'idle', canAnalyse = false, trigger, error } = useResumeAnalysis();
+  const { unreadCount = 0 } = useAlerts();
 
-  const isCandidate   = user?.role === 'candidate';
-  const isRecruiter   = user?.role === 'recruiter';
-  const navGroups     = isCandidate ? CANDIDATE_NAV_GROUPS : RECRUITER_NAV_GROUPS;
-  const cfg           = ANALYSE_CONFIG[analysisState];
-  const isSpinning    = analysisState === 'triggering' || analysisState === 'processing';
-  const avatarInitial = user?.full_name
-    ? user.full_name.charAt(0).toUpperCase()
-    : user?.email?.charAt(0).toUpperCase() ?? 'U';
+  const isCandidate = user?.role === 'candidate';
+  const isRecruiter = user?.role === 'recruiter';
+  const navGroups   = isCandidate ? CANDIDATE_NAV : RECRUITER_NAV;
+  const cfg         = ANALYSE_CFG[analysisState] ?? ANALYSE_CFG.idle;
+  const isSpinning  = analysisState === 'triggering' || analysisState === 'processing';
+  const initial     = user?.full_name?.charAt(0).toUpperCase()
+    ?? user?.email?.charAt(0).toUpperCase()
+    ?? 'U';
 
   return (
     <>
       <style>{`
         @keyframes sbSpin  { to { transform: rotate(360deg); } }
-        @keyframes sbPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes sbPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
         .sb-root {
-          width: 240px; min-height: 100vh;
-          background: #0D1117;
-          border-right: 1px solid rgba(255,255,255,0.06);
-          display: flex; flex-direction: column;
+          width: 240px; height: 100vh; position: sticky; top: 0;
+          background: #0D1117; border-right: 1px solid rgba(255,255,255,0.06);
+          display: flex; flex-direction: column; flex-shrink: 0;
           font-family: 'Sora', sans-serif;
-          flex-shrink: 0;
         }
         .sb-logo {
           display: flex; align-items: center; gap: 10px;
@@ -251,93 +170,82 @@ export function Sidebar() {
           border-bottom: 1px solid rgba(255,255,255,0.05);
           flex-shrink: 0;
         }
-        .sb-logo-mark { font-size: 18px; font-weight: 800; color: #38BDF8; letter-spacing: 0.06em; }
+        .sb-logo-mark { font-size: 18px; font-weight: 800; color: #38BDF8; }
         .sb-logo-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); }
 
-        .sb-nav { flex: 1; padding: 0.5rem 0.75rem 0; overflow-y: auto; }
+        .sb-nav { flex: 1; padding: .5rem .75rem 0; overflow-y: auto; min-height: 0; }
+        .sb-nav::-webkit-scrollbar { width: 3px; }
+        .sb-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 2px; }
 
-        .sb-section-label {
-          font-size: 10px; font-weight: 600;
-          color: rgba(255,255,255,0.2);
-          letter-spacing: 0.1em; text-transform: uppercase;
-          padding: 0 0.5rem;
-          margin: 0.6rem 0 0.3rem;
-        }
-        .sb-nav-item {
+        .sb-grp { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.2); padding: 0 .5rem; margin: .6rem 0 .3rem; }
+
+        .sb-link {
           display: flex; align-items: center; gap: 10px;
-          padding: 8px 10px; border-radius: 8px;
-          font-size: 13px; font-weight: 500;
-          color: rgba(255,255,255,0.45);
-          text-decoration: none;
-          transition: all 0.15s;
-          margin-bottom: 2px;
-          border: 1px solid transparent;
+          padding: 8px 10px; border-radius: 8px; margin-bottom: 2px;
+          font-size: 13px; font-weight: 500; text-decoration: none;
+          color: rgba(255,255,255,.45); border: 1px solid transparent;
+          transition: all .15s; position: relative;
         }
-        .sb-nav-item:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
+        .sb-link:hover { background: rgba(255,255,255,.05); color: rgba(255,255,255,.8); }
+        .sb-link.ac { background: rgba(56,189,248,.08);  color: #38BDF8; border-color: rgba(56,189,248,.15); }
+        .sb-link.ar { background: rgba(244,114,182,.08); color: #F472B6; border-color: rgba(244,114,182,.15); }
+        .sb-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
 
-        /* Candidate active — sky blue */
-        .sb-nav-item.active-candidate {
-          background: rgba(56,189,248,0.08);
-          color: #38BDF8;
-          border-color: rgba(56,189,248,0.15);
-        }
-        /* Recruiter active — pink */
-        .sb-nav-item.active-recruiter {
-          background: rgba(244,114,182,0.08);
-          color: #F472B6;
-          border-color: rgba(244,114,182,0.15);
+        .sb-badge {
+          margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px;
+          border-radius: 9px; background: rgba(167,139,250,.2); color: #A78BFA;
+          font-size: 10px; font-weight: 700; display: flex; align-items: center;
+          justify-content: center; border: 1px solid rgba(167,139,250,.3);
         }
 
-        .sb-nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
-
-        .sb-analyse-wrap {
-          padding: 0.75rem;
-          border-top: 1px solid rgba(255,255,255,0.05);
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-          margin: 0.5rem 0;
-        }
-        .sb-analyse-btn {
+        .sb-ai { padding: .75rem; border-top: 1px solid rgba(255,255,255,.05); flex-shrink: 0; }
+        .sb-ai-btn {
           width: 100%; padding: 10px 12px; border-radius: 10px;
           font-family: 'Sora', sans-serif; font-size: 13px; font-weight: 600;
-          cursor: pointer; transition: all 0.15s ease;
-          display: flex; align-items: center; gap: 10px;
-          text-align: left; border: 1px solid;
+          cursor: pointer; transition: all .15s; display: flex; align-items: center;
+          gap: 10px; text-align: left; border: 1px solid;
         }
-        .sb-analyse-btn:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
-        .sb-analyse-btn:disabled { cursor: default; }
-        .sb-analyse-text  { flex: 1; min-width: 0; }
-        .sb-analyse-label { display: block; line-height: 1.3; }
-        .sb-analyse-sub   { display: block; font-size: 10px; font-weight: 400; opacity: 0.6; margin-top: 1px; }
-        .sb-analyse-error { font-size: 11px; color: #FCA5A5; padding: 4px 2px 0; line-height: 1.4; }
+        .sb-ai-btn:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+        .sb-ai-btn:disabled { cursor: default; }
+        .sb-ai-lbl { display: block; line-height: 1.3; }
+        .sb-ai-sub { display: block; font-size: 10px; font-weight: 400; opacity: .6; margin-top: 1px; }
+        .sb-ai-err { font-size: 11px; color: #FCA5A5; padding: 4px 2px 0; line-height: 1.4; }
 
-        .sb-user { padding: 0.75rem; flex-shrink: 0; }
-        .sb-user-card {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px; border-radius: 10px;
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.06);
-          cursor: pointer; transition: all 0.15s;
+        .sb-rec-cta {
+          margin: .5rem .75rem .25rem; padding: 10px; border-radius: 10px;
+          text-decoration: none; background: rgba(244,114,182,.08);
+          border: 1px solid rgba(244,114,182,.2); color: #F472B6;
+          font-size: 12px; font-weight: 600; display: flex; align-items: center;
+          justify-content: center; gap: 6px; transition: all .15s; flex-shrink: 0;
         }
-        .sb-user-card:hover { background: rgba(255,255,255,0.06); }
+        .sb-rec-cta:hover { background: rgba(244,114,182,.14); }
+
+        /* ── User card — clicking opens ProfilePanel drawer ── */
+        .sb-foot { padding: .75rem; border-top: 1px solid rgba(255,255,255,.07); flex-shrink: 0; }
+        .sb-ucard {
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px; border-radius: 10px; cursor: pointer;
+          background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+          transition: all .15s; width: 100%; text-align: left;
+          font-family: 'Sora', sans-serif;
+        }
+        .sb-ucard:hover { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.13); }
         .sb-avatar {
-          width: 32px; height: 32px; border-radius: 50%;
+          width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
           background: linear-gradient(135deg,#6366F1,#8B5CF6);
           display: flex; align-items: center; justify-content: center;
-          font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
+          font-size: 13px; font-weight: 700; color: #fff;
         }
-        .sb-user-info  { flex: 1; min-width: 0; }
-        .sb-user-name  { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sb-user-role  { font-size: 10px; color: rgba(255,255,255,0.3); text-transform: capitalize; }
-        .sb-logout-btn {
-          background: none; border: none; cursor: pointer;
-          color: rgba(255,255,255,0.25); font-size: 14px;
-          padding: 4px; border-radius: 4px; transition: color 0.15s; line-height: 1;
+        .sb-uinfo { flex: 1; min-width: 0; }
+        .sb-uname { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sb-urole { font-size: 10px; color: rgba(255,255,255,.3); text-transform: capitalize; margin-top: 1px; }
+        .sb-uhint { font-size: 9px; color: rgba(255,255,255,.18); margin-top: 2px; }
+        .sb-logout {
+          background: none; border: none; cursor: pointer; flex-shrink: 0;
+          color: rgba(255,255,255,.22); font-size: 14px; padding: 4px;
+          border-radius: 4px; transition: color .15s; line-height: 1;
         }
-        .sb-logout-btn:hover { color: #F87171; }
-
-        .sb-nav::-webkit-scrollbar       { width: 4px; }
-        .sb-nav::-webkit-scrollbar-track { background: transparent; }
-        .sb-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+        .sb-logout:hover { color: #F87171; }
       `}</style>
 
       <aside className="sb-root" aria-label="Sidebar navigation">
@@ -348,83 +256,56 @@ export function Sidebar() {
           <span className="sb-logo-name">JobCrawler</span>
         </div>
 
-        {/* Navigation */}
-        <nav className="sb-nav" aria-label="Main navigation">
+        {/* Nav */}
+        <nav className="sb-nav">
           {navGroups.map((group, gi) => (
             <div key={gi}>
-              <div className="sb-section-label">{group.label}</div>
+              <div className="sb-grp">{group.label}</div>
 
               {group.items.map(item => {
-                const isActive = pathname === item.href ||
-                  (item.href !== '/dashboard' && pathname.startsWith(item.href));
-                const activeClass = isActive
-                  ? isRecruiter ? 'active-recruiter' : 'active-candidate'
-                  : '';
+                const active = pathname === item.href
+                  || (item.href !== '/dashboard' && item.href !== '/recruiter/dashboard' && pathname.startsWith(item.href));
+                const cls = active ? (isRecruiter ? 'ar' : 'ac') : '';
 
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`sb-nav-item ${activeClass}`}
-                  >
-                    <span className="sb-nav-icon" aria-hidden="true">{item.icon}</span>
+                  <Link key={item.href} href={item.href} className={`sb-link ${cls}`}>
+                    <span className="sb-icon">{item.icon}</span>
                     {item.label}
+                    {item.href === '/alerts' && unreadCount > 0 && (
+                      <span className="sb-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+                    )}
                   </Link>
                 );
               })}
 
-              {/* Recruiter quick stats after "Recruitment" link */}
-              {isRecruiter && gi === 0 && <RecruiterQuickStats />}
-
-              {/* Candidate: resume analysis panel after first group */}
+              {isRecruiter && gi === 0 && <RecruiterStats />}
               {isCandidate && gi === 0 && <ResumeAnalysisSection />}
             </div>
           ))}
         </nav>
 
-        {/* Candidate: AI analyse quick-trigger button */}
+        {/* Candidate: AI analyse trigger */}
         {isCandidate && (
-          <div className="sb-analyse-wrap">
-            <div className="sb-section-label" style={{ padding: '0 0.25rem', marginBottom: '0.5rem' }}>
-              AI Tools
-            </div>
-            <button
-              className="sb-analyse-btn"
+          <div className="sb-ai">
+            <div className="sb-grp" style={{ marginBottom: 8 }}>AI Tools</div>
+            <button className="sb-ai-btn"
               onClick={canAnalyse ? () => { void trigger(); } : undefined}
               disabled={cfg.disabled}
-              aria-label={cfg.label}
-              aria-busy={isSpinning}
               style={{ background: cfg.bg, borderColor: cfg.border, color: cfg.color }}
             >
               <span style={{ fontSize: 14, flexShrink: 0 }}>
                 {isSpinning ? <Spinner color={cfg.color} /> : cfg.icon}
               </span>
-              <div className="sb-analyse-text">
-                <span className="sb-analyse-label">{cfg.label}</span>
-                <span className="sb-analyse-sub">{cfg.sublabel}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span className="sb-ai-lbl">{cfg.label}</span>
+                <span className="sb-ai-sub">{cfg.sublabel}</span>
               </div>
               {analysisState === 'processing' && (
-                <span style={{
-                  width: '6px', height: '6px', borderRadius: '50%',
-                  background: '#38BDF8', flexShrink: 0,
-                  animation: 'sbPulse 1.5s ease infinite',
-                }} aria-hidden="true" />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38BDF8', flexShrink: 0, animation: 'sbPulse 1.5s ease infinite' }} />
               )}
             </button>
-            {error && analysisState === 'failed' && (
-              <p className="sb-analyse-error" role="alert">{error}</p>
-            )}
-
-            {/* Shortcut to full analysis page */}
-            <Link
-              href="/resume-analysis"
-              style={{
-                display: 'block', textAlign: 'center',
-                fontSize: '11px', color: 'rgba(255,255,255,0.25)',
-                textDecoration: 'none', marginTop: '8px',
-                transition: 'color 0.15s',
-              }}
-            >
+            {error && analysisState === 'failed' && <p className="sb-ai-err">{error}</p>}
+            <Link href="/resume-analysis" style={{ display: 'block', textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,.22)', textDecoration: 'none', marginTop: 8 }}>
               View full analysis →
             </Link>
           </div>
@@ -432,57 +313,43 @@ export function Sidebar() {
 
         {/* Recruiter: post job shortcut */}
         {isRecruiter && (
-          <div style={{ padding: '0.75rem' }}>
-            <Link
-              href="/recruiter/dashboard"
-              style={{
-                display:        'flex',
-                alignItems:     'center',
-                justifyContent: 'center',
-                gap:            '6px',
-                padding:        '10px',
-                borderRadius:   '10px',
-                background:     'rgba(244,114,182,0.08)',
-                border:         '1px solid rgba(244,114,182,0.2)',
-                color:          '#F472B6',
-                fontSize:       '12px',
-                fontWeight:     600,
-                textDecoration: 'none',
-                transition:     'all 0.15s',
-              }}
-            >
-              <span>+</span> Post a New Job
-            </Link>
-          </div>
+          <Link href="/recruiter/dashboard" className="sb-rec-cta">
+            <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> Post a New Job
+          </Link>
         )}
 
-        {/* User card */}
+        {/* ── Username card ──────────────────────────────────────────────────
+            Clicking this opens the ProfilePanel slide-in drawer.
+            No page navigation — the panel overlays the current page.
+            This means profile/settings are accessible from ANY route,
+            not just /dashboard.
+        ─────────────────────────────────────────────────────────────────── */}
         {user && (
-          <div className="sb-user">
-            <div
-              className="sb-user-card"
-              onClick={() => router.push(isRecruiter ? '/recruiter/profile' : '/profile')}
-              role="button"
-              tabIndex={0}
-              onKeyDown={e => e.key === 'Enter' && router.push(isRecruiter ? '/recruiter/profile' : '/profile')}
-              aria-label="Go to profile"
+          <div className="sb-foot">
+            <button
+              className="sb-ucard"
+              onClick={openPanel}
+              aria-label="Open profile and settings"
+              title="Profile & Settings"
             >
-              <div className="sb-avatar" aria-hidden="true">{avatarInitial}</div>
-              <div className="sb-user-info">
-                <div className="sb-user-name">{user.full_name ?? user.email}</div>
-                <div className="sb-user-role">{user.role}</div>
+              <div className="sb-avatar" aria-hidden="true">{initial}</div>
+              <div className="sb-uinfo">
+                <div className="sb-uname">{user.full_name ?? user.email}</div>
+                <div className="sb-urole">{user.role}</div>
+                <div className="sb-uhint">Profile &amp; Settings →</div>
               </div>
               <button
-                className="sb-logout-btn"
+                className="sb-logout"
                 onClick={e => { e.stopPropagation(); logout(); }}
                 aria-label="Log out"
                 title="Log out"
               >
                 ⏻
               </button>
-            </div>
+            </button>
           </div>
         )}
+
       </aside>
     </>
   );
