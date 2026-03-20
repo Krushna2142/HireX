@@ -552,103 +552,118 @@ export class JobsService {
 
   // ── On-demand LinkedIn fetch via RAPIDAPI_KEY ─────────────────────────────
 
-  async fetchLinkedInJobs(params: {
-    query:     string;
-    location?: string;
-  }): Promise<UnifiedJob[]> {
-    if (!this.rapidApiKey) return [];
+  // src/jobs/jobs.service.ts
+// REPLACE ONLY THESE TWO METHODS — everything else unchanged
 
-    try {
-      const { data } = await firstValueFrom(
-        this.http.get('https://linkedin-jobs-search.p.rapidapi.com/', {
-          params: {
-            query:        params.query,
-            location:     params.location ?? 'India',
-            distance:     '25',
-            page_number:  '0',
-          },
-          headers: {
-            'X-RapidAPI-Key':  this.rapidApiKey,   // ✅ RAPIDAPI_KEY
-            'X-RapidAPI-Host': 'linkedin-jobs-search.p.rapidapi.com',
-          },
-          timeout: 10_000,
-        }),
-      );
+// ── LinkedIn jobs via JSearch (RAPIDAPI_KEY) ──────────────────────────────
+// Old endpoint: linkedin-jobs-search.p.rapidapi.com → 403 Forbidden
+// New endpoint: jsearch.p.rapidapi.com              → ✅ works
+async fetchLinkedInJobs(params: {
+  query:     string;
+  location?: string;
+}): Promise<UnifiedJob[]> {
+  if (!this.rapidApiKey) return [];
 
-      return ((data ?? []) as any[]).map(job => ({
-        id:             `linkedin_${job.linkedin_job_url_cleaned ?? job.job_title}`,
-        source:         'linkedin' as JobSource,
-        title:          job.job_title      ?? '',
-        company:        job.company_name   ?? '',
-        location:       job.job_location   ?? '',
-        workMode:       this.inferWorkModeFromText(`${job.job_title} ${job.job_summary}`),
-        employmentType: this.inferEmpTypeFromText(job.job_employment_type ?? ''),
-        salaryMin:      null,
-        salaryMax:      null,
-        salaryCurrency: 'INR',
-        requiredSkills: [],
-        description:    (job.job_summary ?? '').slice(0, 5000),
-        postedAt:       new Date().toISOString(),
-        applyUrl:       job.linkedin_job_url_cleaned ?? null,
-        recruiterName:  null,
-        applicantCount: 0,
-        status:         'active',
-      }));
-    } catch {
-      return [];
-    }
+  try {
+    const { data } = await firstValueFrom(
+      this.http.get('https://jsearch.p.rapidapi.com/search', {
+        params: {
+          query:       `${params.query} in ${params.location ?? 'India'}`,
+          page:        '1',
+          num_pages:   '1',
+          date_posted: 'week',
+        },
+        headers: {
+          'X-RapidAPI-Key':  this.rapidApiKey,
+          'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',  // ✅ fixed
+        },
+        timeout: 10_000,
+      }),
+    );
+
+    return ((data?.data ?? []) as any[]).slice(0, 10).map(job => ({
+      id:             `linkedin_${job.job_id}`,
+      source:         'linkedin' as JobSource,
+      title:          job.job_title           ?? '',
+      company:        job.employer_name        ?? '',
+      location:       job.job_city
+        ? `${job.job_city}, ${job.job_country ?? ''}`
+        : (job.job_country ?? ''),
+      workMode:       job.job_is_remote ? 'remote' : 'hybrid',
+      employmentType: this.inferEmpTypeFromText(job.job_employment_type ?? ''),
+      salaryMin:      job.job_min_salary       ?? null,
+      salaryMax:      job.job_max_salary       ?? null,
+      salaryCurrency: 'INR',
+      requiredSkills: (job.job_required_skills ?? []).slice(0, 8),
+      description:    (job.job_description    ?? '').slice(0, 5000),
+      postedAt:       job.job_posted_at_datetime_utc
+        ? new Date(job.job_posted_at_datetime_utc).toISOString()
+        : new Date().toISOString(),
+      applyUrl:       job.job_apply_link       ?? null,
+      recruiterName:  null,
+      applicantCount: 0,
+      status:         'active',
+    }));
+  } catch (err: any) {
+    this.logger.error(`fetchLinkedInJobs failed: ${err.message}`);
+    return [];
   }
+}
 
-  // ── On-demand Indeed fetch via RAPIDAPI_KEY ───────────────────────────────
+// ── Indeed jobs via JSearch page 2 (RAPIDAPI_KEY) ────────────────────────
+// Old endpoint: indeed12.p.rapidapi.com → 403 Forbidden
+// New endpoint: jsearch.p.rapidapi.com  → ✅ works (page 2 = different results)
+async fetchIndeedJobs(params: {
+  query:     string;
+  location?: string;
+}): Promise<UnifiedJob[]> {
+  if (!this.rapidApiKey) return [];
 
-  async fetchIndeedJobs(params: {
-    query:     string;
-    location?: string;
-  }): Promise<UnifiedJob[]> {
-    if (!this.rapidApiKey) return [];
+  try {
+    const { data } = await firstValueFrom(
+      this.http.get('https://jsearch.p.rapidapi.com/search', {
+        params: {
+          query:       `${params.query} in ${params.location ?? 'India'}`,
+          page:        '2',        // page 2 avoids duplicate results vs LinkedIn
+          num_pages:   '1',
+          date_posted: 'week',
+        },
+        headers: {
+          'X-RapidAPI-Key':  this.rapidApiKey,
+          'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',  // ✅ fixed
+        },
+        timeout: 10_000,
+      }),
+    );
 
-    try {
-      const { data } = await firstValueFrom(
-        this.http.get('https://indeed12.p.rapidapi.com/jobs/search', {
-          params: {
-            query:    params.query,
-            location: params.location ?? 'India',
-            page_id:  '1',
-            locality: 'in',
-          },
-          headers: {
-            'X-RapidAPI-Key':  this.rapidApiKey,   // ✅ RAPIDAPI_KEY
-            'X-RapidAPI-Host': 'indeed12.p.rapidapi.com',
-          },
-          timeout: 10_000,
-        }),
-      );
-
-      return ((data?.hits ?? []) as any[]).map(job => ({
-        id:             `indeed_${job.id ?? job.trackingKey}`,
-        source:         'indeed' as JobSource,
-        title:          job.title             ?? '',
-        company:        job.company?.name     ?? '',
-        location:       job.location?.label   ?? '',
-        workMode:       job.remoteWorkModel?.text?.toLowerCase().includes('remote')
-                        ? 'remote' : 'hybrid',
-        employmentType: 'full_time',
-        salaryMin:      job.salary?.min       ?? null,
-        salaryMax:      job.salary?.max       ?? null,
-        salaryCurrency: 'INR',
-        requiredSkills: [],
-        description:    (job.description ?? job.snippet ?? '').slice(0, 5000),
-        postedAt:       job.pubDate ? new Date(job.pubDate).toISOString() : new Date().toISOString(),
-        applyUrl:       job.applyUrl ?? job.externalApplyUrl ?? null,
-        recruiterName:  null,
-        applicantCount: 0,
-        status:         'active',
-      }));
-    } catch {
-      return [];
-    }
+    return ((data?.data ?? []) as any[]).slice(0, 10).map(job => ({
+      id:             `indeed_${job.job_id}`,
+      source:         'indeed' as JobSource,
+      title:          job.job_title           ?? '',
+      company:        job.employer_name        ?? '',
+      location:       job.job_city
+        ? `${job.job_city}, ${job.job_country ?? ''}`
+        : (job.job_country ?? ''),
+      workMode:       job.job_is_remote ? 'remote' : 'hybrid',
+      employmentType: this.inferEmpTypeFromText(job.job_employment_type ?? ''),
+      salaryMin:      job.job_min_salary       ?? null,
+      salaryMax:      job.job_max_salary       ?? null,
+      salaryCurrency: 'INR',
+      requiredSkills: (job.job_required_skills ?? []).slice(0, 8),
+      description:    (job.job_description    ?? '').slice(0, 5000),
+      postedAt:       job.job_posted_at_datetime_utc
+        ? new Date(job.job_posted_at_datetime_utc).toISOString()
+        : new Date().toISOString(),
+      applyUrl:       job.job_apply_link       ?? null,
+      recruiterName:  null,
+      applicantCount: 0,
+      status:         'active',
+    }));
+  } catch (err: any) {
+    this.logger.error(`fetchIndeedJobs failed: ${err.message}`);
+    return [];
   }
-
+}
   // ── Private helpers ───────────────────────────────────────────────────────
 
   private mapRow(row: any): UnifiedJob {
