@@ -1,6 +1,5 @@
-// frontend/hooks/useRealtime.ts
+// frontend/hooks/useRealTimeAlerts.tsx
 // Central real-time data layer — SWR-backed, zero polling loops.
-// All hooks auto-revalidate on focus, reconnect, and at defined intervals.
 
 import useSWR, { mutate as globalMutate } from 'swr';
 import api from '@/lib/axios';
@@ -20,9 +19,12 @@ const INTERVALS = {
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ✅ All four platforms — matches backend JobSource expansion
+export type JobSource = 'internal' | 'serpapi' | 'linkedin' | 'indeed';
+
 export interface UnifiedJob {
   id:             string;
-  source:         'internal' | 'serpapi';
+  source:         JobSource;   // ✅ was 'internal' | 'serpapi' — caused images 3, 5
   title:          string;
   company:        string;
   location:       string | null;
@@ -93,6 +95,14 @@ export interface ResumeAnalysis {
   status:          string;
 }
 
+// ✅ Sources shape including all four platforms
+export interface JobSources {
+  internal: number;
+  serpapi:  number;
+  linkedin: number;   // ← caused image 4
+  indeed:   number;   // ← caused image 4
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Hooks
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,19 +110,21 @@ export interface ResumeAnalysis {
 export function useJobs(params?: {
   search?:   string;
   workMode?: string;
-  source?:   'all' | 'internal' | 'serpapi';
+  // ✅ All platform filters — was missing linkedin/indeed, caused image 5
+  source?:   'all' | 'internal' | 'serpapi' | 'linkedin' | 'indeed';
 }) {
   const query = new URLSearchParams();
   if (params?.search   && params.search   !== '') query.set('search',   params.search);
   if (params?.workMode && params.workMode !== '') query.set('workMode', params.workMode);
-  if (params?.source   && params.source   !== 'all') query.set('source', params.source);
+  // Always forward source — backend uses it to filter by platform
+  if (params?.source) query.set('source', params.source);
 
   const key = `/jobs${query.toString() ? `?${query}` : ''}`;
 
   const { data, error, isLoading, isValidating } = useSWR<{
     jobs:    UnifiedJob[];
     total:   number;
-    sources: { internal: number; serpapi: number };
+    sources: JobSources;   // ✅ typed with all four fields
   }>(key, fetcher, {
     refreshInterval:       INTERVALS.jobs,
     revalidateOnFocus:     true,
@@ -123,7 +135,8 @@ export function useJobs(params?: {
   return {
     jobs:       data?.jobs    ?? [],
     total:      data?.total   ?? 0,
-    sources:    data?.sources ?? { internal: 0, serpapi: 0 },
+    // ✅ Safe defaults for all four sources
+    sources:    data?.sources ?? { internal: 0, serpapi: 0, linkedin: 0, indeed: 0 },
     loading:    isLoading,
     validating: isValidating,
     error:      error?.message ?? null,
@@ -149,7 +162,6 @@ export function useMyApplications() {
     { refreshInterval: INTERVALS.applications, revalidateOnFocus: true, revalidateOnReconnect: true },
   );
 
-  // Optimistic apply — adds a temp entry immediately, then revalidates
   const applyOptimistic = async (jobId: string) => {
     const optimistic: Application[] = [
       ...(data ?? []),
@@ -222,12 +234,10 @@ export function useRecruiterJobs() {
     );
   };
 
-  // Cache stats for sidebar live pill
   if (typeof window !== 'undefined' && data) {
     try {
       localStorage.setItem('jc_recruiter_stats', JSON.stringify({
         activeJobs:    data.filter((j: RecruiterJob) => j.status === 'active').length,
-        // ✅ Fix: _count?.applications — safe even if backend omits _count
         newApplicants: data.reduce((n: number, j: RecruiterJob) =>
           n + (j._count?.applications ?? 0), 0),
       }));

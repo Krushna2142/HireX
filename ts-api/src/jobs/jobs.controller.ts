@@ -5,46 +5,65 @@
 
 import {
   Controller, Get, Post, Patch, Param,
-  Body, Query, Req, UseGuards,
+  Body, Query, Req, UseGuards, Sse, MessageEvent,
 } from '@nestjs/common';
-import { JwtAuthGuard }  from '../auth/guards/jwt-auth.guard';
-import { Public }        from '../auth/decorators/public.decorators';
-import { JobsService }   from './jobs.service';
-import { CreateJobDto }  from './dto/create-job.dto';
+import { Observable, map } from 'rxjs';
+import { JwtAuthGuard }    from '../auth/guards/jwt-auth.guard';
+import { Public }          from '../auth/decorators/public.decorators';
+import { JobsService }     from './jobs.service';
+import { JobsStreamService } from './jobs-stream.service';
+import { CreateJobDto }    from './dto/create-job.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
 
 @Controller('jobs')
 @UseGuards(JwtAuthGuard)
 export class JobsController {
-  constructor(private readonly jobs: JobsService) {}
+  constructor(
+    private readonly jobs:   JobsService,
+    private readonly stream: JobsStreamService,   // ← inject stream service
+  ) {}
 
-  // ── Public: browse all jobs (both sources) ────────────────────────────────
-  // ?source=all|internal|serpapi  controls which jobs are returned
-  // ?search=react&workMode=remote&skills=typescript,node
+  // ── SSE: real-time job + alert events ────────────────────────────────────
+  // Clients connect once — server pushes events as they happen.
+  // EventSource auto-reconnects on disconnect — no manual retry logic needed.
+  // @Public() because EventSource API cannot send Authorization headers.
+  // Token-based auth for SSE would require query param — acceptable tradeoff.
+
+  @Public()
+  @Sse('stream')
+  liveStream(): Observable<MessageEvent> {
+    return this.stream.stream.pipe(
+      map(event => ({
+        data: JSON.stringify(event),
+        type: event.type,
+      } as MessageEvent))
+    );
+  }
+
+  // ── Public: browse all jobs ───────────────────────────────────────────────
 
   @Public()
   @Get()
   browse(
     @Req() req: any,
-    @Query('search')          search?: string,
-    @Query('workMode')        workMode?: string,
-    @Query('salaryMin')       salaryMin?: string,
-    @Query('skills')          skills?: string,
-    @Query('page')            page?: string,
-    @Query('source')          source?: string,
+    @Query('search')    search?: string,
+    @Query('workMode')  workMode?: string,
+    @Query('salaryMin') salaryMin?: string,
+    @Query('skills')    skills?: string,
+    @Query('page')      page?: string,
+    @Query('source')    source?: string,
   ) {
     return this.jobs.browseJobs(req.user?.id ?? null, {
       search,
       workMode,
-      salaryMin:  salaryMin  ? parseInt(salaryMin,  10) : undefined,
-      skills:     skills     ? skills.split(',')        : undefined,
-      page:       page       ? parseInt(page,       10) : 1,
-      source:     (source as 'internal' | 'serpapi' | 'all') ?? 'all',
+      salaryMin: salaryMin ? parseInt(salaryMin, 10) : undefined,
+      skills:    skills    ? skills.split(',')       : undefined,
+      page:      page      ? parseInt(page, 10)      : 1,
+      source:    (source as 'internal' | 'serpapi' | 'all') ?? 'all',
     });
   }
 
   // ── Candidate: personalised recommendations ───────────────────────────────
-  // Returns skill-matched jobs from BOTH sources, scored and ranked
 
   @Get('recommendations')
   recommendations(@Req() req: any) {
@@ -58,7 +77,7 @@ export class JobsController {
     return this.jobs.getCandidateApplications(req.user.id);
   }
 
-  // ── Recruiter: own internal postings with pipeline stats ─────────────────
+  // ── Recruiter: own internal postings ─────────────────────────────────────
 
   @Get('mine')
   myJobs(@Req() req: any) {
@@ -102,7 +121,7 @@ export class JobsController {
     return this.jobs.updateApplicationStatus(appId, req.user.id, dto);
   }
 
-  // ── Recruiter: update job status (active/paused/closed) ──────────────────
+  // ── Recruiter: update job listing status ─────────────────────────────────
 
   @Patch(':id/status')
   updateJobStatus(
