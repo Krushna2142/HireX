@@ -9,7 +9,7 @@ import { PrismaService }          from '../../prisma/prisma.service';
 
 export interface ResumeAnalysisJob {
   resumeId: string;
-  buffer:   number[];   // Buffer serialised as number[] for BullMQ JSON transport
+  buffer:   number[];
   mimetype: string;
 }
 
@@ -27,35 +27,27 @@ export class ResumesProcessor extends WorkerHost {
   async process(job: Job<ResumeAnalysisJob>): Promise<void> {
     const { resumeId, buffer, mimetype } = job.data;
 
-    this.logger.log(`[processor] Starting job ${job.id} for resume ${resumeId}`);
+    this.logger.log(`[processor] Job ${job.id} started — resumeId: ${resumeId}`);
 
     const buf = Buffer.from(buffer);
 
-    // ── Step 1: Run Groq analysis ──────────────────────────────────────────
-    // analyzeResume saves the result to resume_analyses and marks
-    // resumes.status = 'analyzed'. It throws on failure — BullMQ will
-    // retry according to the job's backoff config.
-    await this.analysisService.analyzeResume(resumeId, buf, mimetype);
+    // ── Step 1: Run LLM analysis ───────────────────────────────────────────
+    // analyzeResume saves the ResumeAnalysis record, updates resume status to
+    // 'analyzed', and returns the extracted result directly.
+    // It throws on failure — BullMQ retries per the job's backoff config.
+    let extracted: Awaited<ReturnType<typeof this.analysisService.analyzeResume>>;
 
-    this.logger.log(`[processor] Groq analysis complete for resume ${resumeId}`);
-
-    // ── Step 2: Read the saved analysis result ─────────────────────────────
-    // We read it back from the DB rather than relying on the return value of
-    // analyzeResume, because the shape of that service may change independently.
-    const analysis = await this.prisma.resumeAnalysis.findUnique({
-      where: { resumeId },
-    });
-
-    if (!analysis) {
-      // analyzeResume should always create this record — if it's missing,
-      // log a warning but don't throw (the resume is still marked analyzed).
-      this.logger.warn(
-        `[processor] ResumeAnalysis record not found for ${resumeId} — skipping profile sync`,
-      );
-      return;
+    try {
+      extracted = await this.analysisService.analyzeResume(resumeId, buf, mimetype);
+    } catch (err) {
+      // analyzeResume already logged the error and set status='failed'.
+      // Re-throw so BullMQ records the failure and schedules a retry.
+      throw err;
     }
 
-    // ── Step 3: Resolve the userId from the resume ─────────────────────────
+    this.logger.log(`[processor] LLM extraction complete for resume ${resumeId}`);
+
+    // ── Step 2: Resolve userId ─────────────────────────────────────────────
     const resume = await this.prisma.resume.findUnique({
       where:  { id: resumeId },
       select: { userId: true },
@@ -66,50 +58,82 @@ export class ResumesProcessor extends WorkerHost {
       return;
     }
 
-    // ── Step 4: Sync extracted skills back to candidate_profiles ───────────
-    // THIS IS THE CRITICAL STEP that was missing.
+    // ── Step 3: Sync candidate_profiles ───────────────────────────────────
+    // This is the ONLY place profile sync happens.
+    // getRecommendations() reads candidate_profiles.top_skills — this row
+    // must exist before the frontend polls for recommendations.
     //
-    // getRecommendations() in both jobs.service.ts and recommendations.service.ts
-    // reads candidate_profiles.top_skills to score jobs.  If this row is absent
-    // or has an empty top_skills array, the recommendations endpoint returns 500.
+    // Fields synced from AI output:
+    //   topSkills, targetIndustries, experienceLevel, experienceYears
     //
-    // We upsert so:
-    //   • First-time users who never filled in their profile get a row created.
-    //   • Returning users who re-upload get their skills refreshed, not duplicated.
+    // Fields intentionally NOT touched (user-controlled):
+    //   targetRoles, salaryMin, workMode, bio, headline
 
-    // industryTags on ResumeAnalysis maps to targetIndustries on CandidateProfile
-    const topSkills:        string[] = (analysis.topSkills       as string[]) ?? [];
-    const targetIndustries: string[] = (analysis.industryTags    as string[]) ?? [];
-    const experienceLevel:  string   = (analysis.experienceLevel as string)   ?? 'junior';
-    const experienceYears:  number   = (analysis.experienceYears as number)   ?? 0;
+    const topSkills        = extracted.topSkills      ?? [];
+    const targetIndustries = extracted.industryTags   ?? [];
+    const experienceLevel  = extracted.experienceLevel ?? 'junior';
+    const experienceYears  = extracted.experienceYears ?? 0;
 
-    await this.prisma.candidateProfile.upsert({
-      where: { userId: resume.userId },
+    const currentRole =
+      extracted.workExperience?.find(w => w.isCurrent) ??
+      extracted.workExperience?.[0];
 
-      // Create: first-time user with no profile row yet
-      create: {
-        userId: resume.userId,
-        topSkills,
-        targetIndustries,
-        experienceLevel,
-        experienceYears,
-      },
+    const headline = currentRole
+      ? `${currentRole.title} at ${currentRole.company}`
+      : null;
 
-      // Update: refresh only AI-derived fields.
-      // User-controlled preferences (targetRoles, salaryMin, workMode etc.)
-      // are intentionally NOT touched.
-      update: {
-        topSkills,
-        targetIndustries,
-        experienceLevel,
-        experienceYears,
-        updatedAt: new Date(),
-      },
-    });
+    const profileCompletion = this.analysisService.calculateCompletion(extracted);
 
-    this.logger.log(
-      `[processor] candidate_profiles synced for user ${resume.userId} — ` +
-      `skills: [${topSkills.slice(0, 5).join(', ')}${topSkills.length > 5 ? '…' : ''}]`,
-    );
+    try {
+      await this.prisma.candidateProfile.upsert({
+        where: { userId: resume.userId },
+
+        create: {
+          userId:            resume.userId,
+          headline,
+          bio:               extracted.summary       ?? null,
+          currentTitle:      currentRole?.title       ?? null,
+          currentCompany:    currentRole?.company     ?? null,
+          topSkills,
+          targetIndustries,
+          experienceLevel,
+          experienceYears,
+          activeResumeId:    resumeId,
+          profileCompletion,
+        },
+
+        update: {
+          headline,
+          currentTitle:      currentRole?.title       ?? null,
+          currentCompany:    currentRole?.company     ?? null,
+          topSkills,
+          targetIndustries,
+          experienceLevel,
+          experienceYears,
+          activeResumeId:    resumeId,
+          profileCompletion,
+          updatedAt:         new Date(),
+        },
+      });
+
+      this.logger.log(
+        `[processor] ✅ candidate_profiles synced for user ${resume.userId} — ` +
+        `level: ${experienceLevel} | ` +
+        `skills: [${topSkills.slice(0, 5).join(', ')}${topSkills.length > 5 ? '…' : ''}]`,
+      );
+
+    } catch (profileErr) {
+      // Profile sync failure should NOT fail the job — analysis is already saved.
+      // Log the error with full detail so you can fix schema issues without
+      // forcing users to re-upload.
+      const err = profileErr as Error;
+      this.logger.error(
+        `[processor] ⚠️ Profile sync failed for user ${resume.userId}\n` +
+        `  This means recommendations won't work until the profile is re-synced.\n` +
+        `  Error: ${err.message}\n` +
+        `  Stack: ${err.stack?.split('\n')[1]?.trim() ?? 'N/A'}`,
+      );
+      // Don't re-throw — the resume is analyzed, don't mark it as failed
+    }
   }
 }

@@ -66,20 +66,24 @@ export class LlmService implements OnModuleInit {
   // Fail fast on missing config — better to crash at startup than
   // to let the first resume upload fail silently 30 seconds later.
 
-  async onModuleInit(): Promise<void> {
-    if (!this.apiKey) {
-      this.logger.error(
-        '❌ GROQ_API_KEY is not set.\n' +
-        '   1. Get a free key at console.groq.com\n' +
-        '   2. Add GROQ_API_KEY to your .env and Render environment variables',
-      );
-      // Don't throw — allow app to start so other features work.
-      // LLM calls will fail with a clear error when attempted.
-      return;
-    }
+async onModuleInit(): Promise<void> {
+  // Diagnose exactly what the runtime sees
+  this.logger.log(`[startup] GROQ_API_KEY present: ${!!this.apiKey}`);
+  this.logger.log(`[startup] GROQ_API_KEY length:  ${this.apiKey.length}`);
+  this.logger.log(`[startup] GROQ_MODEL:           ${this.model}`);
 
-    this.logger.log(`✅ Groq LLM service ready — model: ${this.model}`);
+  if (!this.apiKey) {
+    this.logger.error(
+      '❌ GROQ_API_KEY is not set.\n' +
+      '   1. Get a free key at console.groq.com\n' +
+      '   2. Add GROQ_API_KEY to Render → Environment → Environment Variables\n' +
+      '   3. Trigger a manual redeploy — env vars only apply after restart',
+    );
+    return;
   }
+
+  this.logger.log(`✅ Groq LLM service ready — model: ${this.model}`);
+}
 
   // ── Primary public interface ──────────────────────────────────────────────
   //

@@ -8,7 +8,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService }      from '../../prisma/prisma.service';
-import { LlmService }         from '../ollama/Llm.service';   // ← Groq, not Python
+import { LlmService }         from '../ollama/Llm.service';
 import { Prisma }             from '@prisma/client';
 
 const pdfParse = require('pdf-parse');
@@ -20,7 +20,7 @@ function toJson<T>(data: T): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
 }
 
-// ── What Groq returns — matches the system prompt schema exactly ──────────────
+// ── What Groq returns ─────────────────────────────────────────────────────────
 
 export interface ResumeAnalysisResult {
   personalInfo: {
@@ -79,7 +79,6 @@ export interface ResumeAnalysisResult {
 }
 
 // ── Groq system prompt ────────────────────────────────────────────────────────
-// Strict JSON-only instruction — mixtral-8x7b follows this reliably.
 
 const SYSTEM_PROMPT = `You are an expert resume parser. Extract structured data and return ONLY valid JSON.
 No markdown fences, no explanation, no preamble — raw JSON only.
@@ -128,7 +127,7 @@ export class ResumeAnalysisService {
   private readonly logger = new Logger(ResumeAnalysisService.name);
 
   constructor(
-    private readonly llm:    LlmService,     // ← Groq LLM
+    private readonly llm:    LlmService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -152,13 +151,15 @@ export class ResumeAnalysisService {
   }
 
   // ── Main analysis pipeline ────────────────────────────────────────────────
+  // Returns the extracted result so the processor can use it directly.
+  // Profile sync is intentionally NOT done here — the processor owns that step.
 
   async analyzeResume(
     resumeId: string,
     buffer:   Buffer,
     mimetype: string,
-  ): Promise<void> {
-    this.logger.log(`[${resumeId}] Starting Groq analysis — ${mimetype} — ${buffer.length} bytes`);
+  ): Promise<ResumeAnalysisResult> {
+    this.logger.log(`[${resumeId}] Starting analysis — ${mimetype} — ${buffer.length} bytes`);
 
     await this.prisma.resume.update({
       where: { id: resumeId },
@@ -166,7 +167,7 @@ export class ResumeAnalysisService {
     });
 
     try {
-      // Stage 1: Extract raw text
+      // ── Stage 1: Extract raw text ─────────────────────────────────────────
       this.logger.log(`[${resumeId}] Stage 1: text extraction`);
       const rawText = await this.extractText(buffer, mimetype);
       this.logger.log(`[${resumeId}] Extracted ${rawText.length} chars`);
@@ -178,8 +179,8 @@ export class ResumeAnalysisService {
         );
       }
 
-      // Stage 2: Groq extraction
-      this.logger.log(`[${resumeId}] Stage 2: sending to Groq (mixtral-8x7b)`);
+      // ── Stage 2: Groq LLM extraction ─────────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 2: sending to Groq`);
 
       const extracted = await this.llm.extractJson<ResumeAnalysisResult>(
         SYSTEM_PROMPT,
@@ -197,12 +198,30 @@ export class ResumeAnalysisService {
         throw new Error('Groq returned malformed response — missing personalInfo');
       }
 
-      // Stage 3: Persist analysis
-      this.logger.log(`[${resumeId}] Stage 3: persisting to database`);
+      // ── Stage 3: Persist analysis record ─────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 3: persisting analysis`);
 
-      await this.prisma.resumeAnalysis.create({
-        data: {
+      await this.prisma.resumeAnalysis.upsert({
+        where:  { resumeId },
+        create: {
           resumeId,
+          rawText,
+          personalInfo:    toJson(extracted.personalInfo),
+          workExperience:  toJson(extracted.workExperience  ?? []),
+          education:       toJson(extracted.education        ?? []),
+          skills:          toJson(extracted.skills           ?? []),
+          certifications:  toJson(extracted.certifications   ?? []),
+          projects:        toJson(extracted.projects         ?? []),
+          languages:       toJson(extracted.languages        ?? []),
+          experienceYears: extracted.experienceYears          ?? 0,
+          experienceLevel: extracted.experienceLevel          ?? 'junior',
+          topSkills:       extracted.topSkills                ?? [],
+          industryTags:    extracted.industryTags             ?? [],
+          trajectory:      extracted.trajectory               ?? '',
+          status:          'completed',
+          processedAt:     new Date(),
+        },
+        update: {
           rawText,
           personalInfo:    toJson(extracted.personalInfo),
           workExperience:  toJson(extracted.workExperience  ?? []),
@@ -221,19 +240,16 @@ export class ResumeAnalysisService {
         },
       });
 
-      // Stage 4: Sync candidate profile BEFORE marking as analyzed
-      // This is critical — frontend polls status and immediately calls
-      // GET /jobs/recommendations. Profile must be committed first.
-      this.logger.log(`[${resumeId}] Stage 4: syncing candidate profile`);
-      await this.syncCandidateProfile(resumeId, extracted);
-
-      // Stage 5: Mark as analyzed — only after profile is committed
+      // ── Stage 4: Mark resume as analyzed ─────────────────────────────────
+      // Profile sync is delegated to the processor — it runs after this returns.
       await this.prisma.resume.update({
         where: { id: resumeId },
         data:  { status: 'analyzed', content: rawText },
       });
 
-      this.logger.log(`[${resumeId}] ✅ Pipeline complete`);
+      this.logger.log(`[${resumeId}] ✅ Analysis complete — returning result to processor`);
+
+      return extracted; // ← processor uses this directly, no second DB read needed
 
     } catch (err) {
       const error = err as Error;
@@ -248,62 +264,13 @@ export class ResumeAnalysisService {
         data:  { status: 'failed' },
       });
 
-      throw err; // re-throw so BullMQ records failure and retries
+      throw err;
     }
-  }
-
-  // ── Sync extracted data into candidate_profiles ───────────────────────────
-
-  private async syncCandidateProfile(
-    resumeId: string,
-    data:     ResumeAnalysisResult,
-  ): Promise<void> {
-    const resume = await this.prisma.resume.findUnique({
-      where: { id: resumeId },
-    });
-
-    if (!resume) {
-      this.logger.warn(`[${resumeId}] Resume not found during profile sync`);
-      return;
-    }
-
-    const currentRole =
-      data.workExperience?.find(w => w.isCurrent) ??
-      data.workExperience?.[0];
-
-    await this.prisma.candidateProfile.upsert({
-      where:  { userId: resume.userId },
-      create: {
-        userId:            resume.userId,
-        headline:          currentRole
-          ? `${currentRole.title} at ${currentRole.company}`
-          : null,
-        bio:               data.summary           ?? null,
-        currentTitle:      currentRole?.title     ?? null,
-        currentCompany:    currentRole?.company   ?? null,
-        experienceYears:   data.experienceYears   ?? 0,
-        experienceLevel:   data.experienceLevel   ?? 'junior',
-        topSkills:         data.topSkills         ?? [],
-        activeResumeId:    resumeId,
-        profileCompletion: this.calculateCompletion(data),
-      },
-      update: {
-        currentTitle:      currentRole?.title     ?? null,
-        currentCompany:    currentRole?.company   ?? null,
-        experienceYears:   data.experienceYears   ?? 0,
-        experienceLevel:   data.experienceLevel   ?? 'junior',
-        topSkills:         data.topSkills         ?? [],
-        activeResumeId:    resumeId,
-        profileCompletion: this.calculateCompletion(data),
-      },
-    });
-
-    this.logger.log(`[${resumeId}] Profile synced — userId: ${resume.userId}`);
   }
 
   // ── Profile completion score (0–100) ─────────────────────────────────────
 
-  private calculateCompletion(data: ResumeAnalysisResult): number {
+  calculateCompletion(data: ResumeAnalysisResult): number {
     const checks = [
       !!data.personalInfo?.name,
       !!data.personalInfo?.email,
