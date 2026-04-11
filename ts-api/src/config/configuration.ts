@@ -15,15 +15,16 @@ export default () => ({
     serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
   },
 
-  groq: {
-    apiKey: process.env.GROQ_API_KEY ?? '',
-    model:  process.env.GROQ_MODEL   ?? 'mixtral-8x7b-32768',
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY ?? '',
+    model:  process.env.GEMINI_MODEL   ?? 'gemini-1.5-flash',
   },
 
   // Redis — supports both URL format (Upstash/Railway) and host/port (self-hosted)
   redis: {
+    enabled:  process.env.REDIS_ENABLED === 'true' || !!process.env.REDIS_URL || !!process.env.REDIS_HOST,
     url:      process.env.REDIS_URL      ?? null,  // ← primary, used by BullMQ
-    host:     process.env.REDIS_HOST     ?? 'localhost',
+    host:     process.env.REDIS_HOST     ?? null,
     port:     parseInt(process.env.REDIS_PORT ?? '6379', 10),
     password: process.env.REDIS_PASSWORD ?? undefined,
     tls:      process.env.REDIS_TLS      === 'true',

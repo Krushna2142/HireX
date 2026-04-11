@@ -5,14 +5,8 @@
 /* eslint-disable prettier/prettier */
 // src/ollama/llm.service.ts
 //
-// Production LLM service — Groq cloud only.
-// Uses mixtral-8x7b-32768 via Groq's OpenAI-compatible API.
-//
-// Why Groq:
-//   - Free tier: 14,400 requests/day, 5 req/min
-//   - Speed:     ~500ms vs ~60s local CPU inference
-//   - Zero infra: no GPU, no Ollama, no server management
-//   - Reliability: 99.9% uptime SLA
+// Production LLM service — Gemini cloud only.
+// Uses Gemini Generative AI via Google REST API.
 
 import {
   Injectable,
@@ -25,25 +19,8 @@ import { HttpService }   from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError }    from 'axios';
 
-// ── Groq model config ─────────────────────────────────────────────────────────
-//
-// mixtral-8x7b-32768 is the best choice for structured JSON extraction:
-//   - 32K context window handles even lengthy resumes in one shot
-//   - Mixture-of-Experts architecture = strong instruction following
-//   - Fastest model on Groq's infrastructure
-//
-// Other available Groq models (swap via GROQ_MODEL env var if needed):
-//   llama-3.1-70b-versatile  — highest quality, slower
-//   llama-3.1-8b-instant     — fastest, lower quality
-//   gemma2-9b-it             — Google's model, good for structured tasks
-
-const DEFAULT_MODEL    = 'mixtral-8x7b-32768';
-const GROQ_API_URL     = 'https://api.groq.com/openai/v1/chat/completions';
-
-// ── Rate limit config ─────────────────────────────────────────────────────────
-//
-// Groq free tier: 30 req/min, 14,400 req/day
-// We respect this with exponential backoff on 429s.
+const DEFAULT_MODEL = 'gemini-1.5-flash';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const RATE_LIMIT_BACKOFF_MS = 2_000;   // initial wait on 429
 const MAX_RETRIES           = 3;
@@ -58,32 +35,39 @@ export class LlmService implements OnModuleInit {
     private readonly config:      ConfigService,
     private readonly httpService: HttpService,
   ) {
-    this.apiKey = this.config.get<string>('GROQ_API_KEY') ?? '';
-    this.model  = this.config.get<string>('GROQ_MODEL')   ?? DEFAULT_MODEL;
+    this.apiKey =
+      this.config.get<string>('gemini.apiKey') ??
+      this.config.get<string>('GEMINI_API_KEY') ??
+      '';
+
+    this.model =
+      this.config.get<string>('gemini.model') ??
+      this.config.get<string>('GEMINI_MODEL') ??
+      DEFAULT_MODEL;
   }
 
   // ── Startup validation ────────────────────────────────────────────────────
   // Fail fast on missing config — better to crash at startup than
   // to let the first resume upload fail silently 30 seconds later.
 
-async onModuleInit(): Promise<void> {
+  async onModuleInit(): Promise<void> {
   // Diagnose exactly what the runtime sees
-  this.logger.log(`[startup] GROQ_API_KEY present: ${!!this.apiKey}`);
-  this.logger.log(`[startup] GROQ_API_KEY length:  ${this.apiKey.length}`);
-  this.logger.log(`[startup] GROQ_MODEL:           ${this.model}`);
+  this.logger.log(`[startup] GEMINI_API_KEY present: ${!!this.apiKey}`);
+  this.logger.log(`[startup] GEMINI_API_KEY length:  ${this.apiKey.length}`);
+  this.logger.log(`[startup] GEMINI_MODEL:           ${this.model}`);
 
   if (!this.apiKey) {
     this.logger.error(
-      '❌ GROQ_API_KEY is not set.\n' +
-      '   1. Get a free key at console.groq.com\n' +
-      '   2. Add GROQ_API_KEY to Render → Environment → Environment Variables\n' +
+      'GEMINI_API_KEY is not set.\n' +
+      '1. Get a key from Google AI Studio\n' +
+      '2. Add GEMINI_API_KEY to environment variables\n' +
       '   3. Trigger a manual redeploy — env vars only apply after restart',
     );
     return;
   }
 
-  this.logger.log(`✅ Groq LLM service ready — model: ${this.model}`);
-}
+  this.logger.log(`Gemini LLM service ready — model: ${this.model}`);
+  }
 
   // ── Primary public interface ──────────────────────────────────────────────
   //
@@ -107,11 +91,11 @@ async onModuleInit(): Promise<void> {
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       try {
-        const raw    = await this.callGroqApi(systemPrompt, userPrompt);
+        const raw    = await this.callGeminiApi(systemPrompt, userPrompt);
         const parsed = this.parseJson<T>(raw);
 
         if (attempt > 1) {
-          this.logger.log(`[groq] Succeeded on attempt ${attempt}`);
+          this.logger.log(`[gemini] Succeeded on attempt ${attempt}`);
         }
 
         return parsed;
@@ -123,9 +107,9 @@ async onModuleInit(): Promise<void> {
 
         // ── 4xx client errors: don't retry, throw immediately ──────────────
         if (status && status >= 400 && status < 500 && status !== 429) {
-          this.logger.error(`[groq] Client error ${status} — not retrying`);
+          this.logger.error(`[gemini] Client error ${status} — not retrying`);
           throw new InternalServerErrorException(
-            `Groq API error ${status}: ${this.extractErrorMessage(axiosErr)}`,
+            `Gemini API error ${status}: ${this.extractErrorMessage(axiosErr)}`,
           );
         }
 
@@ -136,7 +120,7 @@ async onModuleInit(): Promise<void> {
           : 1_000 * attempt;                                     // 1s → 2s → 3s
 
         this.logger.warn(
-          `[groq] Attempt ${attempt}/${maxRetries + 1} failed` +
+          `[gemini] Attempt ${attempt}/${maxRetries + 1} failed` +
           `${isRateLimit ? ' (rate limited)' : ''}: ${lastError.message}` +
           (attempt <= maxRetries ? ` — retrying in ${backoffMs}ms` : ''),
         );
@@ -148,7 +132,7 @@ async onModuleInit(): Promise<void> {
     }
 
     throw new InternalServerErrorException(
-      `Groq LLM failed after ${maxRetries + 1} attempts: ${lastError?.message}`,
+      `Gemini LLM failed after ${maxRetries + 1} attempts: ${lastError?.message}`,
     );
   }
 
@@ -161,9 +145,9 @@ async onModuleInit(): Promise<void> {
     return this.extractJson<T>(systemPrompt, userPrompt, maxRetries);
   }
 
-  // ── Groq API call ─────────────────────────────────────────────────────────
+  // ── Gemini API call ────────────────────────────────────────────────────────
 
-  private async callGroqApi(
+  private async callGeminiApi(
     systemPrompt: string,
     userPrompt:   string,
   ): Promise<string> {
@@ -171,35 +155,47 @@ async onModuleInit(): Promise<void> {
 
     const { data } = await firstValueFrom(
       this.httpService.post(
-        GROQ_API_URL,
+        `${GEMINI_API_URL}/${this.model}:generateContent?key=${this.apiKey}`,
         {
-          model:       this.model,
-          temperature: 0.1,      // low = deterministic, consistent JSON structure
-          max_tokens:  4096,
-          // response_format not forced — system prompt handles JSON instruction
-          // Groq's mixtral handles the "return only JSON" instruction reliably
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user',   content: userPrompt   },
+          systemInstruction: {
+            parts: [{ text: systemPrompt }],
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: userPrompt }],
+            },
           ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 4096,
+            responseMimeType: 'application/json',
+          },
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type':  'application/json',
           },
-          timeout: 30_000,   // 30s timeout — Groq rarely exceeds 3s
+          timeout: 30_000,
         },
       ),
     );
 
     const elapsedMs = Date.now() - startMs;
-    const content   = data.choices?.[0]?.message?.content ?? '';
+    const content =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((p: { text?: string }) => p.text ?? '')
+        .join('')
+        .trim() ?? '';
+
+    if (!content) {
+      throw new Error('Gemini returned empty response');
+    }
 
     this.logger.log(
-      `[groq] ${this.model} responded in ${elapsedMs}ms ` +
+      `[gemini] ${this.model} responded in ${elapsedMs}ms ` +
       `(${content.length} chars | ` +
-      `tokens: ${data.usage?.total_tokens ?? 'N/A'})`,
+      `tokens: ${data?.usageMetadata?.totalTokenCount ?? 'N/A'})`,
     );
 
     return content;
@@ -207,7 +203,7 @@ async onModuleInit(): Promise<void> {
 
   // ── JSON parsing ──────────────────────────────────────────────────────────
   //
-  // Mixtral reliably returns clean JSON when instructed, but occasionally
+  // Gemini usually returns clean JSON when instructed, but occasionally
   // wraps it in markdown fences. This handles both cases.
 
   private parseJson<T>(raw: string): T {
@@ -232,7 +228,7 @@ async onModuleInit(): Promise<void> {
       }
 
       throw new Error(
-        `Groq returned non-JSON output. ` +
+        `Gemini returned non-JSON output. ` +
         `Preview: "${cleaned.slice(0, 300)}"`,
       );
     }
@@ -243,8 +239,8 @@ async onModuleInit(): Promise<void> {
   private assertApiKeyConfigured(): void {
     if (!this.apiKey) {
       throw new InternalServerErrorException(
-        'GROQ_API_KEY is not configured. ' +
-        'Get a free key at console.groq.com and add it to your environment variables.',
+        'GEMINI_API_KEY is not configured. ' +
+        'Get a key from Google AI Studio and add it to your environment variables.',
       );
     }
   }

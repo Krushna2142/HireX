@@ -24,6 +24,11 @@ import { PrismaModule }              from '../prisma/prisma.module';
 import { JwtAuthGuard }              from './auth/guards/jwt-auth.guard';
 import { RolesGuard }                from './auth/guards/roles.guard';  // ← add this
 
+const REDIS_ENABLED =
+  process.env.REDIS_ENABLED === 'true' ||
+  !!process.env.REDIS_URL ||
+  !!process.env.REDIS_HOST;
+
 @Module({
   imports: [
     // ── Global config ───────────────────────────────────────────────────────
@@ -35,45 +40,47 @@ import { RolesGuard }                from './auth/guards/roles.guard';  // ← a
     // ── Cron scheduler — required for JobsSyncService @Cron ─────────────────
     ScheduleModule.forRoot(),
 
-    // ── BullMQ — Redis connection registered ONCE here ──────────────────────
-    BullModule.forRootAsync({
-      imports:    [ConfigModule],
-      inject:     [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redisUrl = config.get<string>('redis.url');
+    // ── BullMQ — enabled only when Redis is configured ──────────────────────
+    ...(REDIS_ENABLED
+      ? [
+          BullModule.forRootAsync({
+            imports: [ConfigModule],
+            inject:  [ConfigService],
+            useFactory: (config: ConfigService) => {
+              const redisUrl = config.get<string>('redis.url');
 
-        // Prefer connection URL (Upstash/Railway provide this)
-        // Falls back to host/port/password for self-hosted Redis
-        if (redisUrl) {
-          return {
-            connection: { url: redisUrl },
-            defaultJobOptions: {
-              attempts:         3,
-              backoff:          { type: 'exponential', delay: 5_000 },
-              removeOnComplete: 100,
-              removeOnFail:     50,
+              // Prefer connection URL (Upstash/Railway provide this)
+              if (redisUrl) {
+                return {
+                  connection: { url: redisUrl },
+                  defaultJobOptions: {
+                    attempts:         3,
+                    backoff:          { type: 'exponential', delay: 5_000 },
+                    removeOnComplete: 100,
+                    removeOnFail:     50,
+                  },
+                };
+              }
+
+              const redis = config.get('redis');
+              return {
+                connection: {
+                  host:     redis.host,
+                  port:     redis.port,
+                  password: redis.password,
+                  ...(redis.tls && { tls: { rejectUnauthorized: false } }),
+                },
+                defaultJobOptions: {
+                  attempts:         3,
+                  backoff:          { type: 'exponential', delay: 5_000 },
+                  removeOnComplete: 100,
+                  removeOnFail:     50,
+                },
+              };
             },
-          };
-        }
-
-        // Self-hosted Redis fallback
-        const redis = config.get('redis');
-        return {
-          connection: {
-            host:     redis.host,
-            port:     redis.port,
-            password: redis.password,
-            ...(redis.tls && { tls: { rejectUnauthorized: false } }),
-          },
-          defaultJobOptions: {
-            attempts:         3,
-            backoff:          { type: 'exponential', delay: 5_000 },
-            removeOnComplete: 100,
-            removeOnFail:     50,
-          },
-        };
-      },
-    }),
+          }),
+        ]
+      : []),
 
     // ── Feature modules ──────────────────────────────────────────────────────
     PrismaModule,

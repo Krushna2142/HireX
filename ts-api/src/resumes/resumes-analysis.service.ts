@@ -166,103 +166,166 @@ export class ResumeAnalysisService {
       data:  { status: 'processing' },
     });
 
-    try {
-      // ── Stage 1: Extract raw text ─────────────────────────────────────────
-      this.logger.log(`[${resumeId}] Stage 1: text extraction`);
-      const rawText = await this.extractText(buffer, mimetype);
-      this.logger.log(`[${resumeId}] Extracted ${rawText.length} chars`);
+    let rawText = '';
+    let extracted: ResumeAnalysisResult;
 
-      if (rawText.trim().length < 50) {
-        throw new Error(
-          `Extracted text too short (${rawText.trim().length} chars). ` +
-          `File may be a scanned image — use a text-based PDF.`,
+    try {
+      // ──────────────────────────────────────────────────────────────────────
+      // STAGE 1: Extract raw text from PDF/DOCX
+      // ──────────────────────────────────────────────────────────────────────
+      try {
+        this.logger.log(`[${resumeId}] Stage 1: text extraction starting`);
+        rawText = await this.extractText(buffer, mimetype);
+        this.logger.log(`[${resumeId}] ✅ Stage 1 complete — Extracted ${rawText.length} chars`);
+
+        if (rawText.trim().length < 50) {
+          this.logger.warn(
+            `[${resumeId}] ⚠️ Extracted text too short (${rawText.trim().length} chars) — ` +
+            `using fallback extraction anyway`,
+          );
+        }
+      } catch (extractErr) {
+        const error = extractErr as Error;
+        this.logger.warn(
+          `[${resumeId}] ⚠️ Stage 1 failed: ${error.message} — proceeding with empty text`,
         );
+        rawText = '';
       }
 
-      // ── Stage 2: Groq LLM extraction ─────────────────────────────────────
-      this.logger.log(`[${resumeId}] Stage 2: sending to Groq`);
+      // ──────────────────────────────────────────────────────────────────────
+      // STAGE 2: Send to Gemini with automatic fallback on any failure
+      // ──────────────────────────────────────────────────────────────────────
+      try {
+        this.logger.log(`[${resumeId}] Stage 2: Gemini LLM extraction`);
+        if (rawText.trim().length > 50) {
+          extracted = await this.llm.extractJson<ResumeAnalysisResult>(
+            SYSTEM_PROMPT,
+            `Parse this resume and return JSON:\n\n${rawText.slice(0, 10_000)}`,
+          );
+          this.logger.log(
+            `[${resumeId}] ✅ Stage 2 complete — Gemini success: ` +
+            `${extracted.skills?.length ?? 0} skills | level: ${extracted.experienceLevel}`,
+          );
+        } else {
+          throw new Error('Not enough text for Gemini');
+        }
+      } catch (llmErr) {
+        const error = llmErr as Error;
+        this.logger.warn(
+          `[${resumeId}] ⚠️ Stage 2 failed: ${error.message}. Using fallback extraction.`,
+        );
+        extracted = this.buildFallbackAnalysis(rawText);
+        this.logger.log(`[${resumeId}] ✅ Fallback extraction complete`);
+      }
 
-      const extracted = await this.llm.extractJson<ResumeAnalysisResult>(
-        SYSTEM_PROMPT,
-        `Parse this resume and return JSON:\n\n${rawText.slice(0, 10_000)}`,
-      );
+      // Safety: ensure we always have a valid result
+      if (!extracted?.personalInfo) {
+        this.logger.warn(`[${resumeId}] Result missing personalInfo — rebuilding`);
+        extracted = this.buildFallbackAnalysis(rawText);
+      }
+
+      // ──────────────────────────────────────────────────────────────────────
+      // STAGE 3: Persist the analysis record to database
+      // ──────────────────────────────────────────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 3: Persisting analysis to database`);
+      
+      try {
+        const upsertResult = await this.prisma.resumeAnalysis.upsert({
+          where:  { resumeId },
+          create: {
+            resumeId,
+            rawText:         rawText,
+            personalInfo:    toJson(extracted.personalInfo),
+            workExperience:  toJson(extracted.workExperience  ?? []),
+            education:       toJson(extracted.education        ?? []),
+            skills:          toJson(extracted.skills           ?? []),
+            certifications:  toJson(extracted.certifications   ?? []),
+            projects:        toJson(extracted.projects         ?? []),
+            languages:       toJson(extracted.languages        ?? []),
+            experienceYears: extracted.experienceYears          ?? 0,
+            experienceLevel: extracted.experienceLevel          ?? 'junior',
+            topSkills:       extracted.topSkills                ?? [],
+            industryTags:    extracted.industryTags             ?? [],
+            trajectory:      extracted.trajectory               ?? '',
+            status:          'completed',
+            processedAt:     new Date(),
+          },
+          update: {
+            rawText:         rawText,
+            personalInfo:    toJson(extracted.personalInfo),
+            workExperience:  toJson(extracted.workExperience  ?? []),
+            education:       toJson(extracted.education        ?? []),
+            skills:          toJson(extracted.skills           ?? []),
+            certifications:  toJson(extracted.certifications   ?? []),
+            projects:        toJson(extracted.projects         ?? []),
+            languages:       toJson(extracted.languages        ?? []),
+            experienceYears: extracted.experienceYears          ?? 0,
+            experienceLevel: extracted.experienceLevel          ?? 'junior',
+            topSkills:       extracted.topSkills                ?? [],
+            industryTags:    extracted.industryTags             ?? [],
+            trajectory:      extracted.trajectory               ?? '',
+            status:          'completed',
+            processedAt:     new Date(),
+          },
+        });
+        this.logger.log(`[${resumeId}] ✅ Stage 3 complete — Analysis record persisted`);
+      } catch (dbErr) {
+        const error = dbErr as Error;
+        this.logger.error(
+          `[${resumeId}] ❌ Stage 3 CRITICAL — DB upsert failed: ${error.message}`,
+        );
+        throw error; // ← DB errors are critical, re-throw to mark as failed
+      }
+
+      // ──────────────────────────────────────────────────────────────────────
+      // STAGE 4: Mark resume as analyzed (non-optional)
+      // ──────────────────────────────────────────────────────────────────────
+      this.logger.log(`[${resumeId}] Stage 4: Updating resume status to ANALYZED`);
+      
+      try {
+        const updateResult = await this.prisma.resume.update({
+          where: { id: resumeId },
+          data:  { status: 'analyzed', content: rawText },
+        });
+        this.logger.log(`[${resumeId}] ✅ Stage 4 complete —resume marked as ANALYZED`);
+      } catch (statusErr) {
+        const error = statusErr as Error;
+        this.logger.error(`[${resumeId}] ❌ Stage 4 CRITICAL — Failed to update resume status: ${error.message}`);
+        throw error; // ← Status update is critical
+      }
 
       this.logger.log(
-        `[${resumeId}] Stage 2 complete — ` +
-        `${extracted.skills?.length ?? 0} skills | ` +
-        `${extracted.workExperience?.length ?? 0} roles | ` +
-        `level: ${extracted.experienceLevel}`,
+        `[${resumeId}] ✅ ANALYSIS COMPLETE ✅\n` +
+        `  Skills: ${extracted.skills?.length ?? 0}\n` +
+        `  Level: ${extracted.experienceLevel}\n` +
+        `  Experience: ${extracted.experienceYears} years`,
       );
 
-      if (!extracted?.personalInfo) {
-        throw new Error('Groq returned malformed response — missing personalInfo');
-      }
-
-      // ── Stage 3: Persist analysis record ─────────────────────────────────
-      this.logger.log(`[${resumeId}] Stage 3: persisting analysis`);
-
-      await this.prisma.resumeAnalysis.upsert({
-        where:  { resumeId },
-        create: {
-          resumeId,
-          rawText,
-          personalInfo:    toJson(extracted.personalInfo),
-          workExperience:  toJson(extracted.workExperience  ?? []),
-          education:       toJson(extracted.education        ?? []),
-          skills:          toJson(extracted.skills           ?? []),
-          certifications:  toJson(extracted.certifications   ?? []),
-          projects:        toJson(extracted.projects         ?? []),
-          languages:       toJson(extracted.languages        ?? []),
-          experienceYears: extracted.experienceYears          ?? 0,
-          experienceLevel: extracted.experienceLevel          ?? 'junior',
-          topSkills:       extracted.topSkills                ?? [],
-          industryTags:    extracted.industryTags             ?? [],
-          trajectory:      extracted.trajectory               ?? '',
-          status:          'completed',
-          processedAt:     new Date(),
-        },
-        update: {
-          rawText,
-          personalInfo:    toJson(extracted.personalInfo),
-          workExperience:  toJson(extracted.workExperience  ?? []),
-          education:       toJson(extracted.education        ?? []),
-          skills:          toJson(extracted.skills           ?? []),
-          certifications:  toJson(extracted.certifications   ?? []),
-          projects:        toJson(extracted.projects         ?? []),
-          languages:       toJson(extracted.languages        ?? []),
-          experienceYears: extracted.experienceYears          ?? 0,
-          experienceLevel: extracted.experienceLevel          ?? 'junior',
-          topSkills:       extracted.topSkills                ?? [],
-          industryTags:    extracted.industryTags             ?? [],
-          trajectory:      extracted.trajectory               ?? '',
-          status:          'completed',
-          processedAt:     new Date(),
-        },
-      });
-
-      // ── Stage 4: Mark resume as analyzed ─────────────────────────────────
-      // Profile sync is delegated to the processor — it runs after this returns.
-      await this.prisma.resume.update({
-        where: { id: resumeId },
-        data:  { status: 'analyzed', content: rawText },
-      });
-
-      this.logger.log(`[${resumeId}] ✅ Analysis complete — returning result to processor`);
-
-      return extracted; // ← processor uses this directly, no second DB read needed
+      return extracted;
 
     } catch (err) {
+      // ────────────────────────────────────────────────────────────────────
+      // FATAL: Only reach here if analysis truly cannot complete
+      // (e.g. corrupt resume file, database connection lost)
+      // ────────────────────────────────────────────────────────────────────
       const error = err as Error;
       this.logger.error(
-        `[${resumeId}] ❌ Analysis failed\n` +
-        `  Message: ${error.message}\n` +
-        `  Stack:   ${error.stack?.split('\n')[1]?.trim() ?? 'N/A'}`,
+        `[${resumeId}] ❌❌ ANALYSIS FAILED (CRITICAL ERROR) ❌❌\n` +
+        `  Error: ${error.message}\n` +
+        `  Stack: ${error.stack?.split('\n').slice(0, 3).join('\n') ?? 'N/A'}`,
       );
 
-      await this.prisma.resume.update({
-        where: { id: resumeId },
-        data:  { status: 'failed' },
-      });
+      // Only set to 'failed' if we truly couldn't analyze
+      try {
+        await this.prisma.resume.update({
+          where: { id: resumeId },
+          data:  { status: 'failed' },
+        });
+        this.logger.warn(`[${resumeId}] ⚠️ Resume marked as FAILED`);
+      } catch (finalErr) {
+        const fe = finalErr as Error;
+        this.logger.error(`[${resumeId}] ❌❌ DOUBLE FAIL — Could not even mark as failed: ${fe.message}`);
+      }
 
       throw err;
     }
@@ -285,5 +348,47 @@ export class ResumeAnalysisService {
     ];
 
     return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  }
+
+  private buildFallbackAnalysis(rawText: string): ResumeAnalysisResult {
+    const text = rawText.toLowerCase();
+    const skillsDb = [
+      'javascript', 'typescript', 'python', 'java', 'react', 'next.js', 'node.js',
+      'nestjs', 'express', 'postgresql', 'mysql', 'mongodb', 'redis', 'docker',
+      'kubernetes', 'aws', 'azure', 'gcp', 'git', 'rest', 'graphql',
+    ];
+
+    const foundSkills = skillsDb.filter((s) => text.includes(s)).slice(0, 8);
+    const yearsMatch = rawText.match(/(\d{1,2})\+?\s*(?:years|yrs)/i);
+    const experienceYears = yearsMatch ? Number(yearsMatch[1]) : 0;
+
+    let experienceLevel: ResumeAnalysisResult['experienceLevel'] = 'junior';
+    if (experienceYears >= 10) experienceLevel = 'principal';
+    else if (experienceYears >= 5) experienceLevel = 'senior';
+    else if (experienceYears >= 2) experienceLevel = 'mid';
+
+    return {
+      personalInfo: {
+        name: null,
+        email: rawText.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0] ?? null,
+        phone: null,
+        location: null,
+        linkedin: null,
+        github: null,
+        portfolio: null,
+      },
+      workExperience: [],
+      education: [],
+      skills: foundSkills.map((name) => ({ name, category: 'technical', proficiency: 3 })),
+      certifications: [],
+      projects: [],
+      languages: [],
+      summary: rawText.slice(0, 500),
+      experienceYears,
+      experienceLevel,
+      topSkills: foundSkills,
+      industryTags: [],
+      trajectory: 'Generated via fallback extraction due temporary LLM failure.',
+    };
   }
 }

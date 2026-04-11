@@ -40,7 +40,10 @@ async function bootstrap() {
 
   logger.log(`🚀 Application running on port ${port}`);
   logger.log(`🌍 Environment: ${process.env.NODE_ENV ?? 'development'}`);
-  logger.log(`🔗 Public URL: https://${process.env.RAILWAY_PUBLIC_DOMAIN ?? 'localhost:' + port}`);
+  const publicUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : `http://localhost:${port}`;
+  logger.log(`🔗 Public URL: ${publicUrl}`);
 }
 
 bootstrap();

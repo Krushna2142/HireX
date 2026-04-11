@@ -11,11 +11,13 @@ import {Injectable,
   ForbiddenException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectQueue }   from '@nestjs/bullmq';
 import { Queue }         from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getSupabaseServiceClient } from '../lib/supabase';
+import { ResumeAnalysisService } from './resumes-analysis.service';
 
 @Injectable()
 export class ResumesService {
@@ -23,7 +25,10 @@ export class ResumesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('resume-analysis') private readonly analysisQueue: Queue,
+    private readonly analysisService: ResumeAnalysisService,
+    @Optional()
+    @InjectQueue('resume-analysis')
+    private readonly analysisQueue?: Queue,
   ) {}
 
   // ── POST /resumes/upload-raw ───────────────────────────────────────────────
@@ -35,7 +40,7 @@ export class ResumesService {
     this.logger.log(`[upload] userId: ${userId} | ${file.originalname} | ${file.mimetype} | ${file.size} bytes`);
     this.logger.log(`SUPABASE_URL: ${process.env.SUPABASE_URL ? '✅' : '❌ MISSING'}`);
     this.logger.log(`SUPABASE_SERVICE_ROLE_KEY: ${process.env.SUPABASE_SERVICE_ROLE_KEY ? '✅' : '❌ MISSING'}`);
-    this.logger.log(`GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '✅' : '❌ MISSING'}`);
+    this.logger.log(`GEMINI_API_KEY: ${process.env.GEMINI_API_KEY ? 'OK' : 'MISSING'}`);
 
     // Sanitise filename — strip spaces and special chars for safe Supabase path
     const sanitized = file.originalname
@@ -156,40 +161,128 @@ export class ResumesService {
     // not just the storage URL.
     const supabase = getSupabaseServiceClient();
 
-    const { data: fileData, error: downloadError } = await supabase
-      .storage
-      .from('resume-files')
-      .download(resume.fileName);  // ✅ string — null excluded by guard above
+    this.logger.log(`[analyse] Downloading file from Supabase: ${resume.fileName}`);
 
-    if (downloadError || !fileData) {
-      this.logger.error(`[analyse] File download failed: ${downloadError?.message}`);
+    let fileData;
+    try {
+      const result = await supabase
+        .storage
+        .from('resume-files')
+        .download(resume.fileName);
+
+      if (result.error) {
+        this.logger.error(`[analyse] Supabase download error: ${result.error.message}`);
+        throw new InternalServerErrorException(
+          `Supabase download failed: ${result.error.message}`,
+        );
+      }
+
+      fileData = result.data;
+      if (!fileData) {
+        this.logger.error(`[analyse] Download returned empty data`);
+        throw new InternalServerErrorException('Download returned empty file');
+      }
+
+      this.logger.log(`[analyse] File downloaded successfully — size: ${fileData.size} bytes`);
+    } catch (downloadErr: any) {
+      const errorMsg = downloadErr?.message ?? 'Unknown download error';
+      this.logger.error(`[analyse] File download failed: ${errorMsg}`);
+      
+      // Mark as failed so UI shows error
+      await this.prisma.resume.update({
+        where: { id: resumeId },
+        data:  { status: 'failed' },
+      });
+
       throw new InternalServerErrorException(
-        `Could not retrieve resume file for analysis: ${downloadError?.message ?? 'Unknown error'}`,
+        `Failed to download resume file: ${errorMsg}`,
       );
     }
 
     // Convert Blob → Buffer → number[] for BullMQ JSON serialisation
-    const arrayBuffer = await fileData.arrayBuffer();
-    const buffer      = Buffer.from(arrayBuffer);
+    let buffer: Buffer;
+    try {
+      this.logger.log(`[analyse] Converting Blob to Buffer`);
+      const arrayBuffer = await fileData.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      this.logger.log(`[analyse] Buffer conversion successful — size: ${buffer.length} bytes`);
+    } catch (convErr: any) {
+      const errorMsg = convErr?.message ?? 'Unknown conversion error';
+      this.logger.error(`[analyse] Buffer conversion failed: ${errorMsg}`);
+
+      await this.prisma.resume.update({
+        where: { id: resumeId },
+        data:  { status: 'failed' },
+      });
+
+      throw new InternalServerErrorException(
+        `Failed to convert file to buffer: ${errorMsg}`,
+      );
+    }
 
     // Infer mimetype from stored filename extension
     const mimetype = this.inferMimetype(resume.fileName);  // ✅ string — safe
+    this.logger.log(`[analyse] Detected mimetype: ${mimetype}`);
+
+    // ── If Redis/BullMQ is disabled, run analysis inline ─────────────────────
+    if (!this.analysisQueue) {
+      this.logger.warn('[analyse] BullMQ disabled (no Redis config) — running inline analysis');
+      
+      try {
+        await this.analysisService.analyzeResume(resume.id, buffer, mimetype);
+        this.logger.log(`[analyse] ✅ Inline analysis completed for ${resumeId}`);
+
+        return {
+          resumeId,
+          status:  'analyzed',
+          message: 'Analysis completed inline (queue disabled)',
+        };
+      } catch (inlineErr: any) {
+        // analyzeResume already set status to 'failed', just log and re-throw
+        const errorMsg = inlineErr?.message ?? 'Unknown analysis error';
+        this.logger.error(
+          `[analyse] ❌ Inline analysis failed for ${resumeId}: ${errorMsg}`,
+        );
+        throw new InternalServerErrorException(
+          `Resume analysis failed: ${errorMsg}`,
+        );
+      }
+    }
 
     // ── Enqueue analysis job ──────────────────────────────────────────────────
-    await this.analysisQueue.add(
-      'analyze',
-      {
-        resumeId: resume.id,
-        buffer:   Array.from(buffer),   // Buffer → number[] for JSON serialisation
-        mimetype,
-      },
-      {
-        attempts:         3,
-        backoff:          { type: 'exponential', delay: 5_000 },
-        removeOnComplete: 100,
-        removeOnFail:     50,
-      },
-    );
+    try {
+      this.logger.log(`[analyse] Enqueuing BullMQ job for resume: ${resumeId}`);
+      
+      await this.analysisQueue.add(
+        'analyze',
+        {
+          resumeId: resume.id,
+          buffer:   Array.from(buffer),   // Buffer → number[] for JSON serialisation
+          mimetype,
+        },
+        {
+          attempts:         3,
+          backoff:          { type: 'exponential', delay: 5_000 },
+          removeOnComplete: 100,
+          removeOnFail:     50,
+        },
+      );
+
+      this.logger.log(`[analyse] ✅ Job successfully enqueued for resume: ${resumeId}`);
+    } catch (queueErr: any) {
+      const errorMsg = queueErr?.message ?? 'Unknown queue error';
+      this.logger.error(`[analyse] ❌ Failed to enqueue job: ${errorMsg}`);
+
+      // Mark as failed since we couldn't even queue the job
+      await this.prisma.resume.update({
+        where: { id: resumeId },
+        data:  { status: 'failed' },
+      });
+
+      throw new InternalServerErrorException(
+        `Failed to queue analysis job: ${errorMsg}`,
+      );
+    }
 
     // Mark as processing immediately so frontend poll reflects current state
     await this.prisma.resume.update({
@@ -197,7 +290,7 @@ export class ResumesService {
       data:  { status: 'processing' },
     });
 
-    this.logger.log(`[analyse] Job enqueued for resume: ${resumeId}`);
+    this.logger.log(`[analyse] ✅ Resume marked as processing: ${resumeId}`);
 
     return {
       resumeId,

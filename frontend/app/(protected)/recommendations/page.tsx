@@ -195,7 +195,7 @@ export default function RecommendationsPage() {
           {!resumeLoading && isUploaded && (
             <Gate icon="⚡" color="#A78BFA"
               title="Resume not yet analysed"
-              body="Go to Resume Analysis and click Analyse with Groq to extract your skills and unlock matches."
+              body="Go to Resume Analysis and click Analyse with Gemini to extract your skills and unlock matches."
               cta="Go to Resume Analysis" href="/resume-analysis" />
           )}
 
@@ -203,7 +203,7 @@ export default function RecommendationsPage() {
             <div style={{ padding: '2rem', borderRadius: 14, border: '1px solid rgba(251,191,36,0.2)', background: 'rgba(251,191,36,0.04)', display: 'flex', gap: 14, alignItems: 'center' }}>
               <span style={{ width: 20, height: 20, borderRadius: '50%', border: '2.5px solid rgba(251,191,36,0.3)', borderTopColor: '#FBBF24', animation: 'rcSpin 0.8s linear infinite', display: 'inline-block', flexShrink: 0 }} />
               <div>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#FBBF24' }}>Groq is analysing your resume</p>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#FBBF24' }}>Gemini is analysing your resume</p>
                 <p style={{ margin: '2px 0 0', fontSize: 12, color: 'rgba(251,191,36,0.5)' }}>Recommendations will appear here automatically once complete · page auto-updates</p>
               </div>
             </div>

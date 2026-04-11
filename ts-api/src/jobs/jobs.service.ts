@@ -14,6 +14,7 @@ import { firstValueFrom }  from 'rxjs';
 import { DatabaseService } from '../database/database.service';
 import { AlertsService }   from '../alerts/alerts.service';
 import { JobsStreamService } from './jobs-stream.service';
+import { LlmService }      from '../ollama/Llm.service';
 import { CreateJobDto }    from './dto/create-job.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
 
@@ -56,9 +57,25 @@ export interface BrowseFilters {
 // ── Typed DB row interfaces ───────────────────────────────────────────────────
 
 interface CountRow      { count: string; }
-interface ProfileRow    { top_skills: string[]; experience_level: string; current_title: string; industry_tags: string[]; }
+interface ProfileRow {
+  top_skills: string[];
+  experience_level: string;
+  current_title: string | null;
+  target_roles: string[] | null;
+  preferred_locations: string[] | null;
+}
 interface OwnershipRow  { id: string; candidate_id: string; title: string; }
 interface JobRow        { id: string; title: string; recruiter_id: string; source: string; }
+interface ResumeContextRow {
+  summary: string | null;
+  top_skills: string[] | null;
+  experience_level: string | null;
+  trajectory: string | null;
+}
+interface RecommendationPlan {
+  queries: string[];
+  location?: string;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -73,6 +90,7 @@ export class JobsService {
     private readonly alerts: AlertsService,
     private readonly config: ConfigService,
     private readonly http:   HttpService,
+    private readonly llm:    LlmService,
     private readonly stream: JobsStreamService,  // ✅ injected for SSE events
   ) {
     // ✅ Both keys — SERPAPI_KEY for Google Jobs, RAPIDAPI_KEY for LinkedIn + Indeed
@@ -188,8 +206,10 @@ export class JobsService {
   async getRecommendations(userId: string): Promise<UnifiedJob[]> {
     this.logger.log(`[recs] Building for userId: ${userId}`);
 
+    try {
+
     const profileResult = await this.db.query<ProfileRow>(
-      `SELECT top_skills, experience_level, current_title, industry_tags
+      `SELECT top_skills, experience_level, current_title, target_roles, preferred_locations
        FROM candidate_profiles WHERE user_id = $1`,
       [userId],
     );
@@ -199,71 +219,178 @@ export class JobsService {
       return this.browseJobs(null, { limit: 12, source: 'all' }).then(r => r.jobs);
     }
 
-    const { top_skills, experience_level, current_title, industry_tags } =
+    const { top_skills, experience_level, current_title, target_roles, preferred_locations } =
       profileResult.rows[0];
 
-    const skills     = top_skills       as string[];
+    const skills      = this.toStringArray(top_skills);
     const expLevel   = experience_level as string | null;
     const curTitle   = current_title    as string | null;
-    const industries = (industry_tags   as string[] | null) ?? [];
+    const targetRoles = this.toStringArray(target_roles);
+    const preferredLocation = this.toStringArray(preferred_locations)[0] ?? 'India';
+
+    const { rows: resumeRows } = await this.db.query<ResumeContextRow>(
+      `SELECT
+         ra.summary,
+         ra.top_skills,
+         ra.experience_level,
+         ra.trajectory
+       FROM resume_analyses ra
+       JOIN resumes r ON r.id = ra.resume_id
+       WHERE r.user_id = $1
+         AND ra.status = 'completed'
+       ORDER BY ra.created_at DESC
+       LIMIT 1`,
+      [userId],
+    );
+
+    const resumeContext = resumeRows[0] ?? null;
 
     this.logger.log(`[recs] ${curTitle} | Skills: ${skills.slice(0, 4).join(', ')}`);
 
-    const { rows } = await this.db.query(
-      `SELECT j.*, u.full_name AS recruiter_name, COUNT(a.id) AS applicant_count
-       FROM jobs j
-       LEFT JOIN users u ON u.id = j.recruiter_id
-       LEFT JOIN applications a ON a.job_id = j.id
-       WHERE j.status = 'active'
-       GROUP BY j.id, u.full_name`,
-      [],
+    const plan = await this.buildRecommendationPlan({
+      skills,
+      targetRoles,
+      currentTitle: curTitle,
+      preferredLocation,
+      experienceLevel: expLevel,
+      resumeSummary: resumeContext?.summary ?? null,
+      trajectory: resumeContext?.trajectory ?? null,
+    });
+
+    const externalByQuery = await Promise.all(
+      plan.queries.slice(0, 4).map(async (query) => {
+        const [serp, linkedin, indeed] = await Promise.all([
+          this.fetchSerpApiJobs({ query, location: plan.location ?? preferredLocation }),
+          this.fetchLinkedInJobs({ query, location: plan.location ?? preferredLocation }),
+          this.fetchIndeedJobs({ query, location: plan.location ?? preferredLocation }),
+        ]);
+        return [...serp, ...linkedin, ...indeed];
+      }),
     );
 
-    const normalise  = (s: string) => s.toLowerCase().trim();
-    const userSkills = skills.map(normalise);
+    const externalJobs = externalByQuery.flat();
+    const internalJobs = (await this.browseJobs(userId, { limit: 30, source: 'internal' })).jobs;
 
-    const scored = rows
-      .map((row: any) => {
-        const jobSkills = (row.required_skills as string[] ?? []).map(normalise);
-        const jobTitle  = normalise(row.title       ?? '');
-        const jobDesc   = normalise(row.description ?? '');
-        const jobLevel  = normalise(row.experience_level ?? '');
-        const jobInd    = normalise(row.industry    ?? '');
+    const allJobs = this.dedupeJobs([...internalJobs, ...externalJobs]);
+    const scored = this.scoreRecommendations(allJobs, skills, targetRoles, curTitle, expLevel);
+
+    this.logger.log(`[recs] Generated ${scored.length} total recommendations`);
+    return scored.slice(0, 25);
+    } catch (err: any) {
+      this.logger.error(`[recs] Failed to build recommendations: ${err.message}`);
+      return this.browseJobs(null, { limit: 12, source: 'all' }).then(r => r.jobs);
+    }
+  }
+
+  private async buildRecommendationPlan(input: {
+    skills: string[];
+    targetRoles: string[];
+    currentTitle: string | null;
+    preferredLocation: string;
+    experienceLevel: string | null;
+    resumeSummary: string | null;
+    trajectory: string | null;
+  }): Promise<RecommendationPlan> {
+    const fallbackQueries = this.fallbackQueries(input);
+
+    try {
+      const plan = await this.llm.extractJsonWithRetry<RecommendationPlan>(
+        'You are a job search planner. Return only JSON with fields {"queries": string[], "location": string}.',
+        `Build 4 concise search queries to find currently open jobs from web sources.
+Location: ${input.preferredLocation}
+Target roles: ${input.targetRoles.join(', ') || 'none'}
+Current title: ${input.currentTitle ?? 'none'}
+Experience level: ${input.experienceLevel ?? 'unknown'}
+Top skills: ${input.skills.join(', ') || 'none'}
+Resume summary: ${input.resumeSummary ?? 'none'}
+Career trajectory: ${input.trajectory ?? 'none'}
+
+Return JSON only.`,
+      );
+
+      const queries = Array.from(
+        new Set(this.toStringArray(plan.queries).map(q => q.trim()).filter(Boolean)),
+      );
+      return {
+        queries: queries.length ? queries : fallbackQueries,
+        location: plan.location?.trim() || input.preferredLocation,
+      };
+    } catch (err: any) {
+      this.logger.warn(`[recs] Gemini planning fallback: ${err.message}`);
+      return {
+        queries: fallbackQueries,
+        location: input.preferredLocation,
+      };
+    }
+  }
+
+  private fallbackQueries(input: {
+    skills: string[];
+    targetRoles: string[];
+    currentTitle: string | null;
+    preferredLocation: string;
+  }): string[] {
+    const role = input.targetRoles[0] ?? input.currentTitle ?? 'software engineer';
+    const skillsChunk = input.skills.slice(0, 3).join(' ');
+    return [
+      `${role} ${skillsChunk}`.trim(),
+      `${role} remote`,
+      `${role} ${input.preferredLocation}`,
+      `${role} jobs open now`,
+    ];
+  }
+
+  private dedupeJobs(jobs: UnifiedJob[]): UnifiedJob[] {
+    const seen = new Set<string>();
+    const out: UnifiedJob[] = [];
+
+    for (const job of jobs) {
+      const key = `${job.title}|${job.company}|${job.location ?? ''}`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(job);
+    }
+
+    return out;
+  }
+
+  private scoreRecommendations(
+    jobs: UnifiedJob[],
+    skills: string[],
+    targetRoles: string[],
+    currentTitle: string | null,
+    experienceLevel: string | null,
+  ): UnifiedJob[] {
+    const normalize = (s: string) => s.toLowerCase().trim();
+    const userSkills = this.toStringArray(skills).map(normalize);
+    const roleHints = this.toStringArray([...targetRoles, currentTitle ?? ''])
+      .map(normalize)
+      .filter(Boolean);
+
+    return jobs
+      .map((job) => {
+        const title = normalize(job.title ?? '');
+        const desc = normalize(job.description ?? '');
+        const jobSkills = this.toStringArray(job.requiredSkills).map(normalize);
 
         let score = 0;
 
         for (const skill of userSkills) {
-          if (jobSkills.some(js => js === skill || js.includes(skill) || skill.includes(js))) {
-            score += 10;
-          } else if (new RegExp(`\\b${skill}\\b`).test(jobTitle)) {
-            score += 6;
-          } else if (jobDesc.includes(skill)) {
-            score += 2;
-          }
+          if (jobSkills.includes(skill)) score += 9;
+          else if (title.includes(skill)) score += 4;
+          else if (desc.includes(skill)) score += 2;
         }
 
-        if (expLevel && jobLevel && normalise(expLevel) === jobLevel) score += 5;
-        for (const tag of industries.map(normalise)) {
-          if (jobInd.includes(tag)) score += 3;
+        for (const role of roleHints) {
+          if (title.includes(role)) score += 7;
         }
 
-        const daysSince = (Date.now() - new Date(row.created_at).getTime()) / 86_400_000;
-        if (daysSince < 2)      score += 4;
-        else if (daysSince < 7) score += 2;
+        if (experienceLevel && desc.includes(normalize(experienceLevel))) score += 3;
 
-        const matchScore = score > 0
-          ? Math.min(99, Math.round(40 + score * 2.2))
-          : 0;
-
-        return { row, score, matchScore };
+        const finalScore = Math.min(99, Math.max(job.matchScore ?? 0, Math.round(35 + score * 1.8)));
+        return { ...job, matchScore: finalScore };
       })
-      .filter(x => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 20)
-      .map(x => ({ ...this.mapRow(x.row), matchScore: x.matchScore }));
-
-    this.logger.log(`[recs] ${scored.length} matched jobs`);
-    return scored;
+      .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
   }
 
   // ── Create internal job (recruiter) ──────────────────────────────────────
@@ -594,7 +721,7 @@ async fetchLinkedInJobs(params: {
       salaryMin:      job.job_min_salary       ?? null,
       salaryMax:      job.job_max_salary       ?? null,
       salaryCurrency: 'INR',
-      requiredSkills: (job.job_required_skills ?? []).slice(0, 8),
+      requiredSkills: this.toStringArray(job.job_required_skills).slice(0, 8),
       description:    (job.job_description    ?? '').slice(0, 5000),
       postedAt:       job.job_posted_at_datetime_utc
         ? new Date(job.job_posted_at_datetime_utc).toISOString()
@@ -649,7 +776,7 @@ async fetchIndeedJobs(params: {
       salaryMin:      job.job_min_salary       ?? null,
       salaryMax:      job.job_max_salary       ?? null,
       salaryCurrency: 'INR',
-      requiredSkills: (job.job_required_skills ?? []).slice(0, 8),
+      requiredSkills: this.toStringArray(job.job_required_skills).slice(0, 8),
       description:    (job.job_description    ?? '').slice(0, 5000),
       postedAt:       job.job_posted_at_datetime_utc
         ? new Date(job.job_posted_at_datetime_utc).toISOString()
@@ -754,5 +881,21 @@ async fetchIndeedJobs(params: {
     if (s.includes('part'))    return 'part_time';
     if (s.includes('intern'))  return 'internship';
     return 'full_time';
+  }
+
+  private toStringArray(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .filter((v): v is string => typeof v === 'string')
+        .map(v => v.trim())
+        .filter(Boolean);
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed ? [trimmed] : [];
+    }
+
+    return [];
   }
 }

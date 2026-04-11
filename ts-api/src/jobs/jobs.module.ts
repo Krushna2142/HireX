@@ -11,6 +11,7 @@ import { LinkedInAdapter }  from './adapters/linkedin.adapter';
 import { IndeedAdapter }    from './adapters/indeed.adapter';
 import { AlertsModule }     from '../alerts/alerts.module';
 import { DatabaseModule }   from '../database/datbase.module';
+import { OllamaModule }     from '../ollama/ollama.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { DatabaseModule }   from '../database/datbase.module';
     // ScheduleModule.forRoot() is in AppModule — not here
     AlertsModule,
     DatabaseModule,
+    OllamaModule,
   ],
   controllers: [JobsController],
   providers: [

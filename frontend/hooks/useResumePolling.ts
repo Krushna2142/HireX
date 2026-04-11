@@ -52,7 +52,9 @@ export function useResumes() {
     '/resumes',
     fetcher,
     {
-      refreshInterval:       8_000,
+      // ✅ Disabled: automatic polling removed 
+      // ✅ Only fetch on focus/reconnect or manual reload
+      refreshInterval:       false,
       revalidateOnFocus:     true,
       revalidateOnReconnect: true,
       dedupingInterval:      3_000,
@@ -91,13 +93,9 @@ export function useAnalysis(resumeId: string | null) {
     resumeId ? `/resumes/${resumeId}` : null,
     fetcher,
     {
-      // Adaptive interval: fast while processing, relaxed once terminal
-      refreshInterval: (current: Resume | undefined): number => {
-        if (!current) return 5_000;
-        if (current.status === 'processing') return 5_000;
-        if (current.status === 'analyzed')   return 30_000;
-        return 8_000; // uploaded | failed
-      },
+      // ✅ Disabled: removed automatic polling (5s/30s intervals)
+      // ✅ Only fetch on focus/reconnect or manual revalidation
+      refreshInterval: false,
       revalidateOnFocus: true,
       onSuccess: (data: Resume) => {
         // When analysis finishes, invalidate recommendations once
@@ -148,6 +146,31 @@ export function useAnalysis(resumeId: string | null) {
         mutateAnalysis(undefined), // clear stale analysis from previous run
         globalMutate('/resumes'),
       ]);
+
+      // ✅ Poll manually every 2 seconds until analysis completes (max 5 minutes)
+      const pollInterval = setInterval(async () => {
+        try {
+          const latestResume = await api.get(`/resumes/${id}`);
+          if (latestResume.data?.status === 'analyzed') {
+            clearInterval(pollInterval);
+            // Analysis complete - fetch analysis and recommendations
+            await Promise.all([
+              mutateResume(),
+              globalMutate(`/resumes/${id}/analysis`),
+              globalMutate('/jobs/recommendations'),
+            ]);
+          } else if (latestResume.data?.status === 'failed') {
+            clearInterval(pollInterval);
+            setTriggerError('Analysis failed. Please try again.');
+            await mutateResume();
+          }
+        } catch (err) {
+          // Silently fail on poll errors, will retry next interval
+        }
+      }, 2000);
+
+      // Clear polling after 5 minutes to prevent memory leaks
+      setTimeout(() => clearInterval(pollInterval), 300_000);
     } catch (err: unknown) {
       const message =
         err instanceof Error

@@ -127,7 +127,7 @@ function ResumeCard({ resume, isSelected, onSelect, onAnalyse, analysing }: {
             ) : (
               <span style={{ fontSize: '11px' }}>⚡</span>
             )}
-            {analysing ? 'Starting…' : resume.status === 'failed' ? 'Retry analysis' : 'Analyse with Groq'}
+            {analysing ? 'Starting…' : resume.status === 'failed' ? 'Retry analysis' : 'Analyse with Gemini'}
           </button>
         </div>
       )}
@@ -135,7 +135,7 @@ function ResumeCard({ resume, isSelected, onSelect, onAnalyse, analysing }: {
       {isSelected && resume.status === 'processing' && (
         <div style={{ paddingLeft: '18px', marginTop: '6px' }}>
           <span style={{ fontSize: '10px', color: '#FBBF24', animation: 'raPulse 1.5s ease infinite' }}>
-            Groq is reading your resume…
+            Gemini is reading your resume…
           </span>
         </div>
       )}
@@ -364,7 +364,7 @@ export default function ResumeAnalysisTab() {
               animation: 'raSpin 0.7s linear infinite', display: 'inline-block',
             }} />
             <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#FBBF24' }}>Groq is analysing your resume</div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: '#FBBF24' }}>Gemini is analysing your resume</div>
               <div style={{ fontSize: '10px', color: 'rgba(251,191,36,0.6)', marginTop: '1px' }}>Usually 5–15 seconds…</div>
             </div>
           </div>

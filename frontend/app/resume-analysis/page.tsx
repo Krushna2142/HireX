@@ -368,7 +368,7 @@ export default function ResumeAnalysisPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#F1F5F9', letterSpacing: '-0.02em' }}>Resume Analysis</h1>
             <p style={{ margin: '2px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
-              Upload · Analyse with Groq AI · Get personalised job recommendations
+              Upload · Analyse with Gemini AI · Get personalised job recommendations
             </p>
           </div>
           {/* Live indicator */}
@@ -497,7 +497,7 @@ export default function ResumeAnalysisPage() {
                         ) : (
                           <span style={{ fontSize: 14 }}>⚡</span>
                         )}
-                        {analysing ? 'Starting…' : selectedResume.status === 'failed' ? 'Retry Analysis' : 'Analyse with Groq'}
+                        {analysing ? 'Starting…' : selectedResume.status === 'failed' ? 'Retry Analysis' : 'Analyse with Gemini'}
                       </button>
                     )}
                   </div>
@@ -519,7 +519,7 @@ export default function ResumeAnalysisPage() {
                   }}>
                     <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: '50%', border: '2.5px solid rgba(251,191,36,0.3)', borderTopColor: '#FBBF24', animation: 'raSpin 0.7s linear infinite', display: 'inline-block' }} />
                     <div>
-                      <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#FBBF24' }}>Groq is analysing your resume</p>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#FBBF24' }}>Gemini is analysing your resume</p>
                       <p style={{ margin: '2px 0 0', fontSize: 12, color: 'rgba(251,191,36,0.5)' }}>Usually 5–15 seconds · page updates automatically</p>
                     </div>
                   </div>

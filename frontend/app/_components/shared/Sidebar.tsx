@@ -11,15 +11,15 @@
 //   - AnalysisState is type-only import to prevent runtime crash
 // ─────────────────────────────────────────────────────────────────────────────
 
-import Link                       from 'next/link';
-import { useState }               from 'react';
-import { usePathname }            from 'next/navigation';
-import { useAuth }                from '@/components/providers/AuthProvider';
-import { useResumeAnalysis }      from '@/hooks/useAnalyseResume';
-import type { AnalysisState }     from '@/hooks/useAnalyseResume';
-import ResumeAnalysisTab          from '@/components/resumes/ResumeAnalysisTab';
-import { useAlerts }              from '@/hooks/useRealTimeAlerts';
-import { useProfilePanel }        from '@/components/context/ProfilePanelContext';
+import Link from 'next/link';
+import { useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { useAuth } from '@/components/providers/AuthProvider';
+import { useResumeAnalysis } from '@/hooks/useAnalyseResume';
+import type { AnalysisState } from '@/hooks/useAnalyseResume';
+import ResumeAnalysisTab from '@/components/resumes/ResumeAnalysisTab';
+import { useAlerts } from '@/hooks/useRealTimeAlerts';
+import { useProfilePanel } from '@/components/context/ProfilePanelContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Nav definitions — Settings intentionally absent from both roles
@@ -29,18 +29,18 @@ const CANDIDATE_NAV = [
   {
     label: 'Workspace',
     items: [
-      { href: '/dashboard',       icon: '⊞',  label: 'Dashboard'      },
-      { href: '/jobs',            icon: '💼',  label: 'Jobs'           },
-      { href: '/resumes',         icon: '📄',  label: 'Resume'         },
-      { href: '/resume-analysis', icon: '🧠',  label: 'AI Analysis'    },
-      { href: '/alerts',          icon: '🔔',  label: 'Alerts'         },
+      { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
+      { href: '/jobs', icon: '💼', label: 'Jobs' },
+      { href: '/resumes', icon: '📄', label: 'Resume' },
+      { href: '/resume-analysis', icon: '🧠', label: 'AI Analysis' },
+      { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
   },
   {
     label: 'Discover',
     items: [
       { href: '/recommendations', icon: '🎯', label: 'Recommendations' },
-      { href: '/mock-interview',  icon: '🎤', label: 'Mock Interview'  },
+      { href: '/mock-interview', icon: '🎤', label: 'Mock Interview' },
     ],
   },
 ] as const;
@@ -49,10 +49,10 @@ const RECRUITER_NAV = [
   {
     label: 'Workspace',
     items: [
-      { href: '/dashboard',           icon: '⊞',  label: 'Overview'   },
-      { href: '/recruiter/dashboard', icon: '📊',  label: 'Recruitment'},
-      { href: '/jobs',                icon: '💼',  label: 'All Jobs'   },
-      { href: '/alerts',              icon: '🔔',  label: 'Alerts'     },
+      { href: '/dashboard', icon: '⊞', label: 'Overview' },
+      { href: '/recruiter/dashboard', icon: '📊', label: 'Recruitment' },
+      { href: '/jobs', icon: '💼', label: 'All Jobs' },
+      { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
   },
 ] as const;
@@ -67,12 +67,12 @@ interface AnalyseBtnCfg {
 }
 
 const ANALYSE_CFG: Record<AnalysisState, AnalyseBtnCfg> = {
-  idle:       { label: 'No resume yet',     sublabel: 'Upload a resume first',      disabled: true,  icon: '📄', color: 'rgba(255,255,255,0.15)', bg: 'rgba(255,255,255,0.03)',  border: 'rgba(255,255,255,0.07)' },
-  uploaded:   { label: 'Analyse Resume',    sublabel: 'Run AI analysis on your CV', disabled: false, icon: '⚡', color: '#A78BFA',               bg: 'rgba(124,58,237,0.08)',   border: 'rgba(124,58,237,0.25)' },
-  triggering: { label: 'Starting…',         sublabel: 'Queuing analysis job',       disabled: true,  icon: '⚡', color: '#A78BFA',               bg: 'rgba(124,58,237,0.08)',   border: 'rgba(124,58,237,0.25)' },
-  processing: { label: 'Analysing…',        sublabel: 'AI is reading your resume',  disabled: true,  icon: '⚡', color: '#38BDF8',               bg: 'rgba(56,189,248,0.06)',   border: 'rgba(56,189,248,0.2)'  },
-  analyzed:   { label: 'Analysis complete', sublabel: 'Resume fully analysed ✓',    disabled: true,  icon: '✓', color: '#10B981',               bg: 'rgba(16,185,129,0.06)',   border: 'rgba(16,185,129,0.2)'  },
-  failed:     { label: 'Retry Analysis',    sublabel: 'Previous attempt failed',    disabled: false, icon: '↺', color: '#F87171',               bg: 'rgba(239,68,68,0.06)',    border: 'rgba(239,68,68,0.2)'   },
+  idle: { label: 'No resume yet', sublabel: 'Upload a resume first', disabled: true, icon: '📄', color: 'rgba(255,255,255,0.15)', bg: 'rgba(255,255,255,0.03)', border: 'rgba(255,255,255,0.07)' },
+  uploaded: { label: 'Analyse Resume', sublabel: 'Run AI analysis on your CV', disabled: false, icon: '⚡', color: '#A78BFA', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.25)' },
+  triggering: { label: 'Starting…', sublabel: 'Queuing analysis job', disabled: true, icon: '⚡', color: '#A78BFA', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.25)' },
+  processing: { label: 'Analysing…', sublabel: 'Gemini is reading your resume', disabled: true, icon: '⚡', color: '#38BDF8', bg: 'rgba(56,189,248,0.06)', border: 'rgba(56,189,248,0.2)' },
+  analyzed: { label: 'Analysis complete', sublabel: 'Resume fully analysed ✓', disabled: true, icon: '✓', color: '#10B981', bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.2)' },
+  failed: { label: 'Retry Analysis', sublabel: 'Previous attempt failed', disabled: false, icon: '↺', color: '#F87171', bg: 'rgba(239,68,68,0.06)', border: 'rgba(239,68,68,0.2)' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,19 +136,19 @@ function RecruiterStats() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
-  const { user, logout }   = useAuth();
-  const pathname           = usePathname();
-  const { openPanel }      = useProfilePanel(); // ← opens the profile drawer
+  const { user, logout } = useAuth();
+  const pathname = usePathname();
+  const { openPanel } = useProfilePanel(); // ← opens the profile drawer
 
   const { analysisState = 'idle', canAnalyse = false, trigger, error } = useResumeAnalysis();
   const { unreadCount = 0 } = useAlerts();
 
   const isCandidate = user?.role === 'candidate';
   const isRecruiter = user?.role === 'recruiter';
-  const navGroups   = isCandidate ? CANDIDATE_NAV : RECRUITER_NAV;
-  const cfg         = ANALYSE_CFG[analysisState] ?? ANALYSE_CFG.idle;
-  const isSpinning  = analysisState === 'triggering' || analysisState === 'processing';
-  const initial     = user?.full_name?.charAt(0).toUpperCase()
+  const navGroups = isCandidate ? CANDIDATE_NAV : RECRUITER_NAV;
+  const cfg = ANALYSE_CFG[analysisState] ?? ANALYSE_CFG.idle;
+  const isSpinning = analysisState === 'triggering' || analysisState === 'processing';
+  const initial = user?.full_name?.charAt(0).toUpperCase()
     ?? user?.email?.charAt(0).toUpperCase()
     ?? 'U';
 
@@ -326,9 +326,17 @@ export function Sidebar() {
         ─────────────────────────────────────────────────────────────────── */}
         {user && (
           <div className="sb-foot">
-            <button
+            <div
               className="sb-ucard"
               onClick={openPanel}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openPanel();
+                }
+              }}
+              role="button"
+              tabIndex={0}
               aria-label="Open profile and settings"
               title="Profile & Settings"
             >
@@ -338,18 +346,19 @@ export function Sidebar() {
                 <div className="sb-urole">{user.role}</div>
                 <div className="sb-uhint">Profile &amp; Settings →</div>
               </div>
+
               <button
+                type="button"
                 className="sb-logout"
-                onClick={e => { e.stopPropagation(); logout(); }}
+                onClick={(e) => { e.stopPropagation(); logout(); }}
                 aria-label="Log out"
                 title="Log out"
               >
                 ⏻
               </button>
-            </button>
+            </div>
           </div>
         )}
-
       </aside>
     </>
   );

@@ -32,7 +32,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly config:    ConfigService,
     private readonly reflector: Reflector,
   ) {
-    const secret = this.config.get<string>('JWT_SECRET');
+    const secret = this.config.get<string>('jwt.secret');
 
     // ✅ Crash early at startup if secret is missing — better than silent failure
     if (!secret) {
