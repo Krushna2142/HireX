@@ -1,16 +1,30 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable prettier/prettier */
-import { Controller, Post, Get, Body, Req, Res, Query, UseGuards } from '@nestjs/common';
-import { Response } from 'express';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { Response } from 'express';
+
 import { AuthService, UserRow } from './auth.service';
 import { Public } from './decorators/public.decorators';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+
+type CompleteOAuthSignupDto = {
+  onboardingToken: string;
+  role: 'candidate' | 'recruiter';
+};
 
 @Controller('auth')
 export class AuthController {
@@ -45,11 +59,14 @@ export class AuthController {
     return this.auth.getMe(req.user.id);
   }
 
-  // ---------- OAuth Google ----------
   @Public()
   @Get('oauth/google')
   @UseGuards(AuthGuard('google'))
-  async googleStart(@Req() _req: any, @Query('role') _role?: 'candidate' | 'recruiter') {
+  async googleStart(
+    @Req() _req: any,
+    @Query('role') _role?: 'candidate' | 'recruiter',
+    @Query('mode') _mode?: 'signin' | 'signup',
+  ) {
     return;
   }
 
@@ -57,22 +74,25 @@ export class AuthController {
   @Get('oauth/google/callback')
   @UseGuards(AuthGuard('google'))
   async googleCallback(@Req() req: any, @Res() res: Response) {
-    const { token } = await this.auth.loginOrRegisterOAuth({
+    const result = await this.auth.handleOAuthCallback({
       email: req.user.email,
       fullName: req.user.fullName,
       provider: 'google',
       providerId: req.user.providerId,
-      requestedRole: req.user.requestedRole,
+      mode: req.user.mode === 'signup' ? 'signup' : 'signin',
     });
 
-    return res.redirect(this.auth.buildFrontendOAuthRedirect(token));
+    return res.redirect(result.redirectUrl);
   }
 
-  // ---------- OAuth GitHub ----------
   @Public()
   @Get('oauth/github')
   @UseGuards(AuthGuard('github'))
-  async githubStart(@Req() _req: any, @Query('role') _role?: 'candidate' | 'recruiter') {
+  async githubStart(
+    @Req() _req: any,
+    @Query('role') _role?: 'candidate' | 'recruiter',
+    @Query('mode') _mode?: 'signin' | 'signup',
+  ) {
     return;
   }
 
@@ -80,14 +100,26 @@ export class AuthController {
   @Get('oauth/github/callback')
   @UseGuards(AuthGuard('github'))
   async githubCallback(@Req() req: any, @Res() res: Response) {
-    const { token } = await this.auth.loginOrRegisterOAuth({
+    const result = await this.auth.handleOAuthCallback({
       email: req.user.email,
       fullName: req.user.fullName,
       provider: 'github',
       providerId: req.user.providerId,
-      requestedRole: req.user.requestedRole,
+      mode: req.user.mode === 'signup' ? 'signup' : 'signin',
     });
 
-    return res.redirect(this.auth.buildFrontendOAuthRedirect(token));
+    return res.redirect(result.redirectUrl);
+  }
+
+  @Public()
+  @Post('oauth/complete-signup')
+  async completeOAuthSignup(@Body() body: CompleteOAuthSignupDto) {
+    if (!body?.onboardingToken) {
+      throw new BadRequestException('onboardingToken is required');
+    }
+    if (body.role !== 'candidate' && body.role !== 'recruiter') {
+      throw new BadRequestException('role must be candidate or recruiter');
+    }
+    return this.auth.completeOAuthSignup(body.onboardingToken, body.role);
   }
 }

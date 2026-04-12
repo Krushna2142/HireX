@@ -37,14 +37,6 @@ interface UserIdRow {
   id: string;
 }
 
-interface OAuthUpsertInput {
-  email: string;
-  fullName: string;
-  provider: 'google' | 'github';
-  providerId: string;
-  requestedRole?: 'candidate' | 'recruiter';
-}
-
 @Injectable()
 export class AuthService {
   private transporter: nodemailer.Transporter | undefined;
@@ -79,42 +71,132 @@ export class AuthService {
     } as jwt.SignOptions);
   }
 
-  // NEW: for OAuth callback
   buildFrontendOAuthRedirect(token: string): string {
     return `${this.frontendUrl}/auth/callback?token=${encodeURIComponent(token)}`;
   }
 
-  // NEW: upsert/link user on OAuth login
-  async loginOrRegisterOAuth(input: OAuthUpsertInput) {
-    const email = input.email.toLowerCase().trim();
-    const fullName = input.fullName?.trim() || 'User';
-    const role = input.requestedRole ?? 'candidate';
+  private signOnboardingToken(payload: {
+    email: string;
+    fullName: string;
+    provider: 'google' | 'github';
+    providerId: string;
+    mode: 'signin' | 'signup';
+  }): string {
+    return jwt.sign(
+      { type: 'oauth_onboarding', ...payload },
+      this.jwtSecret,
+      { expiresIn: '10m' } as jwt.SignOptions,
+    );
+  }
 
-    // 1) If user exists by email => keep existing role (do NOT override)
-    const existing = await this.db.query<UserRow>(
+  private verifyOnboardingToken(token: string): {
+    type: 'oauth_onboarding';
+    email: string;
+    fullName: string;
+    provider: 'google' | 'github';
+    providerId: string;
+    mode: 'signin' | 'signup';
+  } {
+    const decoded = jwt.verify(token, this.jwtSecret) as any;
+    if (!decoded || decoded.type !== 'oauth_onboarding') {
+      throw new UnauthorizedException('Invalid onboarding token');
+    }
+    return decoded;
+  }
+
+  buildFrontendOAuthOnboardingRedirect(data: {
+    onboardingToken: string;
+    provider: 'google' | 'github';
+    mode: 'signin' | 'signup';
+    email: string;
+    fullName: string;
+  }): string {
+    const q = new URLSearchParams({
+      ot: data.onboardingToken,
+      provider: data.provider,
+      mode: data.mode,
+      email: data.email,
+      name: data.fullName,
+    });
+
+    return `${this.frontendUrl}/auth/oauth-onboarding?${q.toString()}`;
+  }
+
+  async findUserByEmail(email: string): Promise<UserRow | null> {
+    const result = await this.db.query<UserRow>(
       `SELECT id, full_name, email, role, password_hash, created_at
        FROM users WHERE email = $1`,
-      [email],
+      [email.toLowerCase()],
     );
+    return result.rows[0] ?? null;
+  }
 
-    let user: UserRow;
+  async handleOAuthCallback(input: {
+    email: string;
+    fullName: string;
+    provider: 'google' | 'github';
+    providerId: string;
+    mode: 'signin' | 'signup';
+  }) {
+    const existing = await this.findUserByEmail(input.email);
 
-    if (existing.rows.length > 0) {
-      user = existing.rows[0];
-    } else {
-      const created = await this.db.query<UserRow>(
-        `INSERT INTO users (full_name, email, password_hash, role, created_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         RETURNING id, full_name, email, role, password_hash, created_at`,
-        [fullName, email, null, role],
-      );
-      user = created.rows[0];
+    if (existing) {
+      return {
+        kind: 'login' as const,
+        redirectUrl: this.buildFrontendOAuthRedirect(
+          this.signToken(existing.id, existing.email, existing.role),
+        ),
+      };
     }
 
-    const token = this.signToken(user.id, user.email, user.role);
+    const onboardingToken = this.signOnboardingToken({
+      email: input.email.toLowerCase(),
+      fullName: input.fullName,
+      provider: input.provider,
+      providerId: input.providerId,
+      mode: input.mode,
+    });
 
     return {
-      token,
+      kind: 'onboarding' as const,
+      redirectUrl: this.buildFrontendOAuthOnboardingRedirect({
+        onboardingToken,
+        provider: input.provider,
+        mode: input.mode,
+        email: input.email.toLowerCase(),
+        fullName: input.fullName,
+      }),
+    };
+  }
+
+  async completeOAuthSignup(onboardingToken: string, role: 'candidate' | 'recruiter') {
+    const data = this.verifyOnboardingToken(onboardingToken);
+    const existing = await this.findUserByEmail(data.email);
+
+    if (existing) {
+      return {
+        token: this.signToken(existing.id, existing.email, existing.role),
+        user: {
+          id: existing.id,
+          full_name: existing.full_name,
+          email: existing.email,
+          role: existing.role,
+          created_at: existing.created_at,
+        },
+      };
+    }
+
+    const created = await this.db.query<UserRow>(
+      `INSERT INTO users (full_name, email, password_hash, role, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING id, full_name, email, role, password_hash, created_at`,
+      [data.fullName, data.email.toLowerCase(), null, role],
+    );
+
+    const user = created.rows[0];
+
+    return {
+      token: this.signToken(user.id, user.email, user.role),
       user: {
         id: user.id,
         full_name: user.full_name,
@@ -126,10 +208,17 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    const existing = await this.db.query<UserIdRow>('SELECT id FROM users WHERE email = $1', [dto.email.toLowerCase()]);
-    if (existing.rows.length > 0) throw new ConflictException('Email already registered');
+    const existing = await this.db.query<UserIdRow>(
+      'SELECT id FROM users WHERE email = $1',
+      [dto.email.toLowerCase()],
+    );
+
+    if (existing.rows.length > 0) {
+      throw new ConflictException('Email already registered');
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
+
     const result = await this.db.query<UserRow>(
       `INSERT INTO users (full_name, email, password_hash, role, created_at)
        VALUES ($1, $2, $3, $4, NOW())
@@ -138,9 +227,16 @@ export class AuthService {
     );
 
     const user = result.rows[0];
+
     return {
       token: this.signToken(user.id, user.email, user.role),
-      user: { id: user.id, full_name: user.full_name, email: user.email, role: user.role, created_at: user.created_at },
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        role: user.role,
+        created_at: user.created_at,
+      },
     };
   }
 
@@ -151,25 +247,44 @@ export class AuthService {
       [dto.email.toLowerCase()],
     );
 
-    if (result.rows.length === 0) throw new UnauthorizedException('Invalid email or password');
+    if (result.rows.length === 0) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
     const user = result.rows[0];
 
     if (!user.password_hash) {
-      throw new UnauthorizedException('No password set for this account. Please reset your password.');
+      throw new UnauthorizedException(
+        'No password set for this account. Please reset your password.',
+      );
     }
 
     const valid = await bcrypt.compare(dto.password, user.password_hash);
-    if (!valid) throw new UnauthorizedException('Invalid email or password');
+    if (!valid) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
 
     return {
       token: this.signToken(user.id, user.email, user.role),
-      user: { id: user.id, full_name: user.full_name, email: user.email, role: user.role, created_at: user.created_at },
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        role: user.role,
+        created_at: user.created_at,
+      },
     };
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
-    const result = await this.db.query<UserIdEmailRow>('SELECT id, email FROM users WHERE email = $1', [dto.email.toLowerCase()]);
-    if (result.rows.length === 0) return { message: 'If the email exists, a reset link has been sent.' };
+    const result = await this.db.query<UserIdEmailRow>(
+      'SELECT id, email FROM users WHERE email = $1',
+      [dto.email.toLowerCase()],
+    );
+
+    if (result.rows.length === 0) {
+      return { message: 'If the email exists, a reset link has been sent.' };
+    }
 
     const user = result.rows[0];
     const resetToken = crypto.randomBytes(32).toString('hex');
@@ -198,7 +313,10 @@ export class AuthService {
       'SELECT id FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
       [dto.token],
     );
-    if (result.rows.length === 0) throw new BadRequestException('Invalid or expired reset token');
+
+    if (result.rows.length === 0) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
 
     const user = result.rows[0];
     const passwordHash = await bcrypt.hash(dto.new_password, 12);
@@ -216,7 +334,11 @@ export class AuthService {
       'SELECT id, full_name, email, role, created_at FROM users WHERE id = $1',
       [userId],
     );
-    if (result.rows.length === 0) throw new UnauthorizedException('User not found');
+
+    if (result.rows.length === 0) {
+      throw new UnauthorizedException('User not found');
+    }
+
     return result.rows[0];
   }
 }

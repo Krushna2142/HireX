@@ -1,5 +1,5 @@
 // frontend/app/layout.tsx
-import './globals.css';
+import './styles/globals.css';
 import { ThemeProvider } from 'next-themes';
 import { AuthProvider } from '../components/providers/AuthProvider';
 import ReactQueryProvider from './_providers/ReactQueryProvider';
@@ -28,27 +28,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           <ReactQueryProvider>
             <AuthProvider>
-              {/*
-                ✅ Navbar intentionally removed from root layout.
-
-                Navigation is now handled at the route-segment level:
-
-                  Public routes (/, /auth/*)
-                  └── app/page.tsx renders its own minimal header
-                      with Sign In / Get Started CTAs only.
-                      No persistent nav — unauthenticated users see
-                      nothing but the landing page.
-
-                  Protected routes (/dashboard, /jobs, /profile, ...)
-                  └── app/(protected)/layout.tsx mounts <Sidebar />
-                      which is role-aware (candidate vs recruiter)
-                      and only reachable after authentication.
-
-                This separation is the correct Next.js App Router pattern:
-                layouts are hierarchical and non-leaking by design.
-                Never put authenticated UI in the root layout.
-              */}
-
               {children}
 
               <Toaster
