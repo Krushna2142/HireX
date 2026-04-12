@@ -2,13 +2,15 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable prettier/prettier */
-import { Controller, Post, Get, Body, Req } from '@nestjs/common';
-import { AuthService, UserRow }             from './auth.service';  // ← import UserRow
-import { Public }           from './decorators/public.decorators';
-import { RegisterDto }      from './dto/register.dto';
-import { LoginDto }         from './dto/login.dto';
+import { Controller, Post, Get, Body, Req, Res, Query, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
+import { AuthGuard } from '@nestjs/passport';
+import { AuthService, UserRow } from './auth.service';
+import { Public } from './decorators/public.decorators';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { ResetPasswordDto }  from './dto/reset-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -38,11 +40,54 @@ export class AuthController {
     return this.auth.resetPassword(body);
   }
 
-  // ── GET /auth/me ──────────────────────────────────────────────────────────
-  // Explicit return type so TS4053 cannot fire — UserRow is now exported
-
   @Get('me')
-  async me(@Req() req: any): Promise<UserRow> {   // ← explicit return type
+  async me(@Req() req: any): Promise<UserRow> {
     return this.auth.getMe(req.user.id);
+  }
+
+  // ---------- OAuth Google ----------
+  @Public()
+  @Get('oauth/google')
+  @UseGuards(AuthGuard('google'))
+  async googleStart(@Req() _req: any, @Query('role') _role?: 'candidate' | 'recruiter') {
+    return;
+  }
+
+  @Public()
+  @Get('oauth/google/callback')
+  @UseGuards(AuthGuard('google'))
+  async googleCallback(@Req() req: any, @Res() res: Response) {
+    const { token } = await this.auth.loginOrRegisterOAuth({
+      email: req.user.email,
+      fullName: req.user.fullName,
+      provider: 'google',
+      providerId: req.user.providerId,
+      requestedRole: req.user.requestedRole,
+    });
+
+    return res.redirect(this.auth.buildFrontendOAuthRedirect(token));
+  }
+
+  // ---------- OAuth GitHub ----------
+  @Public()
+  @Get('oauth/github')
+  @UseGuards(AuthGuard('github'))
+  async githubStart(@Req() _req: any, @Query('role') _role?: 'candidate' | 'recruiter') {
+    return;
+  }
+
+  @Public()
+  @Get('oauth/github/callback')
+  @UseGuards(AuthGuard('github'))
+  async githubCallback(@Req() req: any, @Res() res: Response) {
+    const { token } = await this.auth.loginOrRegisterOAuth({
+      email: req.user.email,
+      fullName: req.user.fullName,
+      provider: 'github',
+      providerId: req.user.providerId,
+      requestedRole: req.user.requestedRole,
+    });
+
+    return res.redirect(this.auth.buildFrontendOAuthRedirect(token));
   }
 }
