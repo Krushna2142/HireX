@@ -62,9 +62,9 @@ export default function CredentialsModal({
   open:    boolean;
   onClose: () => void;
 }) {
-  const router               = useRouter();
+  const router                    = useRouter();
   const { login, register, user } = useAuth();
-  const overlayRef           = useRef<HTMLDivElement>(null);
+  const overlayRef                = useRef<HTMLDivElement>(null);
 
   const [panel,    setPanel]    = useState<'login' | 'register'>('login');
   const [role,     setRole]     = useState<UserRole>('candidate');
@@ -76,6 +76,8 @@ export default function CredentialsModal({
   const strength     = zxcvbn(password).score;
   const strengthMeta = STRENGTH_META[strength];
   const activeRole   = ROLES[role];
+
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -94,6 +96,17 @@ export default function CredentialsModal({
   function switchPanel(target: 'login' | 'register') {
     setPassword('');
     setPanel(target);
+  }
+
+  // OAuth handlers with role support (important for your role-selection UI)
+  function handleGoogleLogin() {
+    const roleParam = panel === 'register' ? `?role=${role}` : '';
+    window.location.href = `${API_BASE}/auth/oauth/google${roleParam}`;
+  }
+
+  function handleGithubLogin() {
+    const roleParam = panel === 'register' ? `?role=${role}` : '';
+    window.location.href = `${API_BASE}/auth/oauth/github${roleParam}`;
   }
 
   if (!open) return null;
@@ -134,8 +147,6 @@ export default function CredentialsModal({
     }
   }
 
-  // ── Shared input style ──────────────────────────────────────────────────────
-
   const inputStyle: React.CSSProperties = {
     width:        '100%',
     padding:      '11px 14px',
@@ -148,8 +159,6 @@ export default function CredentialsModal({
     transition:   'border-color 0.15s, box-shadow 0.15s',
     boxSizing:    'border-box',
   };
-
-  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <>
@@ -173,7 +182,6 @@ export default function CredentialsModal({
         .cred-link:hover { text-decoration: underline; }
       `}</style>
 
-      {/* ── Backdrop ─────────────────────────────────────────────────────── */}
       <div
         ref={overlayRef}
         className="cred-overlay"
@@ -190,7 +198,6 @@ export default function CredentialsModal({
           padding:        '1rem',
         }}
       >
-        {/* ── Modal shell ────────────────────────────────────────────────── */}
         <div
           className="cred-modal"
           style={{
@@ -200,13 +207,11 @@ export default function CredentialsModal({
             overflow:     'hidden',
             boxShadow:    '0 32px 80px rgba(0,0,0,0.6)',
             border:       '1px solid rgba(255,255,255,0.08)',
-            // Flex row — left form panel + right decorative panel
             display:      'flex',
             minHeight:    '560px',
             background:   '#0B0F1A',
           }}
         >
-          {/* ── LEFT: Form panel ─────────────────────────────────────────── */}
           <div style={{
             flex:           1,
             minWidth:       0,
@@ -216,12 +221,8 @@ export default function CredentialsModal({
             justifyContent: 'center',
             overflowY:      'auto',
           }}>
-
-            {/* ── LOGIN FORM ─────────────────────────────────────────────── */}
             {panel === 'login' && (
               <form onSubmit={handleLogin} style={{ maxWidth: '360px', margin: '0 auto', width: '100%' }}>
-
-                {/* Header */}
                 <div style={{ marginBottom: '1.75rem' }}>
                   <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#F1F5F9', margin: '0 0 6px' }}>
                     Welcome back
@@ -231,7 +232,6 @@ export default function CredentialsModal({
                   </p>
                 </div>
 
-                {/* Fields */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
                   <input
                     className="cred-input"
@@ -253,7 +253,6 @@ export default function CredentialsModal({
                   />
                 </div>
 
-                {/* Submit */}
                 <button
                   type="submit"
                   disabled={loading}
@@ -265,7 +264,7 @@ export default function CredentialsModal({
                     borderRadius: '10px',
                     color:        '#fff',
                     fontSize:     '14px',
-                    fontWeight:    600,
+                    fontWeight:   600,
                     cursor:       loading ? 'not-allowed' : 'pointer',
                     opacity:      loading ? 0.6 : 1,
                     transition:   'opacity 0.15s, transform 0.15s',
@@ -277,10 +276,10 @@ export default function CredentialsModal({
                   {loading ? 'Signing in…' : 'Sign In →'}
                 </button>
 
-                {/* OAuth */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                   <button
                     type="button"
+                    onClick={handleGoogleLogin}
                     className="cred-btn-google"
                     style={{
                       flex:           1,
@@ -294,7 +293,7 @@ export default function CredentialsModal({
                       borderRadius:   '10px',
                       color:          '#374151',
                       fontSize:       '13px',
-                      fontWeight:      500,
+                      fontWeight:     500,
                       cursor:         'pointer',
                       transition:     'background 0.15s',
                     }}
@@ -303,6 +302,7 @@ export default function CredentialsModal({
                   </button>
                   <button
                     type="button"
+                    onClick={handleGithubLogin}
                     className="cred-btn-github"
                     style={{
                       flex:           1,
@@ -316,7 +316,7 @@ export default function CredentialsModal({
                       borderRadius:   '10px',
                       color:          '#F1F5F9',
                       fontSize:       '13px',
-                      fontWeight:      500,
+                      fontWeight:     500,
                       cursor:         'pointer',
                       transition:     'background 0.15s',
                     }}
@@ -334,11 +334,8 @@ export default function CredentialsModal({
               </form>
             )}
 
-            {/* ── REGISTER FORM ──────────────────────────────────────────── */}
             {panel === 'register' && (
               <form onSubmit={handleSignup} style={{ maxWidth: '420px', margin: '0 auto', width: '100%' }}>
-
-                {/* Header */}
                 <div style={{ marginBottom: '1.5rem' }}>
                   <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#F1F5F9', margin: '0 0 6px' }}>
                     Create account
@@ -348,7 +345,6 @@ export default function CredentialsModal({
                   </p>
                 </div>
 
-                {/* ── Role selector ─────────────────────────────────────── */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '1.25rem' }}>
                   {(Object.entries(ROLES) as [UserRole, typeof ROLES[UserRole]][]).map(([key, cfg]) => {
                     const selected = role === key;
@@ -371,7 +367,6 @@ export default function CredentialsModal({
                           boxShadow:    selected ? `0 0 20px ${cfg.accent}18` : 'none',
                         }}
                       >
-                        {/* Checkmark */}
                         {selected && (
                           <div style={{
                             position:       'absolute',
@@ -380,7 +375,7 @@ export default function CredentialsModal({
                             width:          '20px',
                             height:         '20px',
                             borderRadius:   '50%',
-                            background:      cfg.accent,
+                            background:     cfg.accent,
                             display:        'flex',
                             alignItems:     'center',
                             justifyContent: 'center',
@@ -402,7 +397,6 @@ export default function CredentialsModal({
                   })}
                 </div>
 
-                {/* Form fields */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
                   <input
                     className="cred-input"
@@ -433,7 +427,6 @@ export default function CredentialsModal({
                   required
                 />
 
-                {/* Password strength meter */}
                 {password.length > 0 && (
                   <div style={{ marginBottom: '12px' }}>
                     <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
@@ -444,9 +437,7 @@ export default function CredentialsModal({
                             flex:         1,
                             height:       '3px',
                             borderRadius: '99px',
-                            background:   i <= strength
-                              ? strengthMeta.color
-                              : 'rgba(255,255,255,0.08)',
+                            background:   i <= strength ? strengthMeta.color : 'rgba(255,255,255,0.08)',
                             transition:   'background 0.3s',
                           }}
                         />
@@ -458,7 +449,6 @@ export default function CredentialsModal({
                   </div>
                 )}
 
-                {/* Role confirmation banner */}
                 <div
                   style={{
                     display:      'flex',
@@ -466,7 +456,7 @@ export default function CredentialsModal({
                     gap:          '10px',
                     padding:      '10px 12px',
                     borderRadius: '10px',
-                    background:    activeRole.bg,
+                    background:   activeRole.bg,
                     border:       `1px solid ${activeRole.border}`,
                     marginBottom: '14px',
                   }}
@@ -480,19 +470,18 @@ export default function CredentialsModal({
                   </p>
                 </div>
 
-                {/* Submit */}
                 <button
                   type="submit"
                   disabled={loading}
                   style={{
                     width:        '100%',
                     padding:      '12px',
-                    background:    activeRole.gradient,
+                    background:   activeRole.gradient,
                     border:       'none',
                     borderRadius: '10px',
                     color:        '#fff',
                     fontSize:     '14px',
-                    fontWeight:    600,
+                    fontWeight:   600,
                     cursor:       loading ? 'not-allowed' : 'pointer',
                     opacity:      loading ? 0.6 : 1,
                     transition:   'opacity 0.15s',
@@ -501,6 +490,55 @@ export default function CredentialsModal({
                 >
                   {loading ? 'Creating account…' : `Create ${activeRole.label} Account →`}
                 </button>
+
+                {/* OAuth also available on register panel with selected role */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    className="cred-btn-google"
+                    style={{
+                      flex:           1,
+                      display:        'flex',
+                      alignItems:     'center',
+                      justifyContent: 'center',
+                      gap:            '8px',
+                      padding:        '10px',
+                      background:     '#fff',
+                      border:         'none',
+                      borderRadius:   '10px',
+                      color:          '#374151',
+                      fontSize:       '13px',
+                      fontWeight:     500,
+                      cursor:         'pointer',
+                    }}
+                  >
+                    <FcGoogle size={17} /> Google
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleGithubLogin}
+                    className="cred-btn-github"
+                    style={{
+                      flex:           1,
+                      display:        'flex',
+                      alignItems:     'center',
+                      justifyContent: 'center',
+                      gap:            '8px',
+                      padding:        '10px',
+                      background:     'rgba(255,255,255,0.06)',
+                      border:         '1px solid rgba(255,255,255,0.12)',
+                      borderRadius:   '10px',
+                      color:          '#F1F5F9',
+                      fontSize:       '13px',
+                      fontWeight:     500,
+                      cursor:         'pointer',
+                    }}
+                  >
+                    <FaGithub size={16} /> GitHub
+                  </button>
+                </div>
 
                 <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', textAlign: 'center', margin: 0 }}>
                   Already have an account?{' '}
@@ -512,8 +550,6 @@ export default function CredentialsModal({
             )}
           </div>
 
-          {/* ── RIGHT: Decorative panel ───────────────────────────────────── */}
-          {/* Fixed-width, always visible — content changes based on active panel */}
           <div
             style={{
               width:          '340px',
@@ -532,29 +568,27 @@ export default function CredentialsModal({
               overflow:       'hidden',
             }}
           >
-            {/* Background glow */}
             <div style={{
-              position:   'absolute',
-              top:        '-60px',
-              right:      '-60px',
-              width:      '200px',
-              height:     '200px',
-              borderRadius:'50%',
-              background: 'rgba(255,255,255,0.05)',
+              position:     'absolute',
+              top:          '-60px',
+              right:        '-60px',
+              width:        '200px',
+              height:       '200px',
+              borderRadius: '50%',
+              background:   'rgba(255,255,255,0.05)',
               pointerEvents:'none',
             }} />
             <div style={{
-              position:   'absolute',
-              bottom:     '-40px',
-              left:       '-40px',
-              width:      '160px',
-              height:     '160px',
-              borderRadius:'50%',
-              background: 'rgba(255,255,255,0.04)',
+              position:     'absolute',
+              bottom:       '-40px',
+              left:         '-40px',
+              width:        '160px',
+              height:       '160px',
+              borderRadius: '50%',
+              background:   'rgba(255,255,255,0.04)',
               pointerEvents:'none',
             }} />
 
-            {/* Content */}
             {panel === 'login' ? (
               <>
                 <div style={{ fontSize: '52px', marginBottom: '20px', lineHeight: 1 }}>✨</div>
@@ -573,18 +607,10 @@ export default function CredentialsModal({
                     borderRadius: '10px',
                     color:        '#fff',
                     fontSize:     '13px',
-                    fontWeight:    600,
+                    fontWeight:   600,
                     cursor:       'pointer',
                     transition:   'all 0.2s',
                     backdropFilter:'blur(4px)',
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget.style.background = 'rgba(255,255,255,0.12)');
-                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.7)');
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget.style.background = 'transparent');
-                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)');
                   }}
                 >
                   Create Account
@@ -608,17 +634,9 @@ export default function CredentialsModal({
                     borderRadius: '10px',
                     color:        '#fff',
                     fontSize:     '13px',
-                    fontWeight:    600,
+                    fontWeight:   600,
                     cursor:       'pointer',
                     transition:   'all 0.2s',
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget.style.background = 'rgba(255,255,255,0.12)');
-                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.7)');
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget.style.background = 'transparent');
-                    (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)');
                   }}
                 >
                   Sign In
@@ -626,7 +644,6 @@ export default function CredentialsModal({
               </>
             )}
 
-            {/* Feature bullets */}
             <div style={{ marginTop: '40px', width: '100%' }}>
               {[
                 { icon: '🤖', text: 'AI-powered job matching' },
@@ -636,11 +653,11 @@ export default function CredentialsModal({
                 <div
                   key={item.text}
                   style={{
-                    display:     'flex',
-                    alignItems:  'center',
-                    gap:         '10px',
-                    padding:     '8px 0',
-                    borderBottom:'1px solid rgba(255,255,255,0.08)',
+                    display:      'flex',
+                    alignItems:   'center',
+                    gap:          '10px',
+                    padding:      '8px 0',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
                   <span style={{ fontSize: '16px' }}>{item.icon}</span>

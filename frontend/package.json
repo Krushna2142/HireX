@@ -46,12 +46,12 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.0.0",
     "@types/zxcvbn": "^4.4.5",
-    "autoprefixer": "^10.4.22",
+    "autoprefixer": "^10.4.27",
     "baseline-browser-mapping": "^2.10.10",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.0.6",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.17",
+    "postcss": "^8.5.9",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3"
   }
 }

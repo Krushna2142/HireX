@@ -43,7 +43,7 @@ interface UserIdRow {
 
 @Injectable()
 export class AuthService {
-  private transporter: nodemailer.Transporter;
+  private transporter: nodemailer.Transporter | undefined;
   private readonly jwtSecret:    string;
   private readonly jwtExpiresIn: string;
   private readonly frontendUrl:  string;
