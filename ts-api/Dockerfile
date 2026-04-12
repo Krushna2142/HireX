@@ -14,7 +14,7 @@ RUN npm ci
 RUN npx prisma generate
 
 COPY src ./src
-
+COPY prisma ./prisma   
 RUN npm run build
 
 # ✅ Verify against the ACTUAL output path
