@@ -1,7 +1,7 @@
 'use client';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// components/Sidebar.tsx
+// _components/shared/Sidebar.tsx
 //
 // Architecture:
 //   - Settings REMOVED from nav entirely — lives inside ProfilePanel drawer

@@ -9,15 +9,21 @@ import { roleRedirectPath } from '@/lib/auth';
 
 function SearchParamsHandler({ onAuthParam }: { onAuthParam: () => void }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
+
   useEffect(() => {
-    if (searchParams.get('auth') === 'login') onAuthParam();
-  }, [searchParams, onAuthParam]);
+    if (searchParams.get('auth') === 'login') {
+      onAuthParam();
+      router.replace('/'); // remove query so logout doesn't keep reopening modal
+    }
+  }, [searchParams, onAuthParam, router]);
+
   return null;
 }
 
 export default function LandingPage() {
   const { user, loading } = useAuth();
-  const router            = useRouter();
+  const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
@@ -79,9 +85,9 @@ export default function LandingPage() {
       <div style={{
         fontFamily: "'Sora', sans-serif",
         background: '#070B14',
-        minHeight:  '100vh',
-        color:      '#E2E8F0',
-        overflow:   'hidden',
+        minHeight: '100vh',
+        color: '#E2E8F0',
+        overflow: 'hidden',
       }}>
 
         {/* ── Ambient background glows ── */}
@@ -292,12 +298,12 @@ export default function LandingPage() {
                 flexWrap: 'wrap', justifyContent: 'center', marginTop: '4rem',
               }}>
                 {[
-                  { icon: '🤖', label: 'AI Resume Analysis'  },
-                  { icon: '🎯', label: 'Smart Job Matching'   },
-                  { icon: '⚡', label: 'Real-Time Alerts'     },
-                  { icon: '🎤', label: 'Mock Interviews'      },
+                  { icon: '🤖', label: 'AI Resume Analysis' },
+                  { icon: '🎯', label: 'Smart Job Matching' },
+                  { icon: '⚡', label: 'Real-Time Alerts' },
+                  { icon: '🎤', label: 'Mock Interviews' },
                   { icon: '📊', label: 'Application Tracking' },
-                  { icon: '🏢', label: 'Recruiter Dashboard'  },
+                  { icon: '🏢', label: 'Recruiter Dashboard' },
                 ].map(f => (
                   <div
                     key={f.label}

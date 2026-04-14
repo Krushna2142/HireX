@@ -12,34 +12,28 @@ import {
 import { useRouter } from 'next/navigation';
 import {
   getMe,
-  getToken,       // ← added
-  setToken,       // ← added
+  getToken,
+  setToken,
   login as apiLogin,
   register as apiRegister,
   removeToken,
-  roleRedirectPath,
 } from '@/lib/auth';
 import type { User, UserRole, AuthResponse } from '@/lib/auth';
 
 export interface AuthContextValue {
-  user:     User | null;
-  loading:  boolean;
-  login:    (email: string, password: string) => Promise<AuthResponse>;
-  register: (
-    fullName: string,
-    email:    string,
-    password: string,
-    role:     UserRole,
-  ) => Promise<AuthResponse>;
-  logout:   () => void;
+  user: User | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<AuthResponse>;
+  register: (fullName: string, email: string, password: string, role: UserRole) => Promise<AuthResponse>;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
-  user:     null,
-  loading:  true,
-  login:    async () => { throw new Error('AuthProvider not mounted'); },
+  user: null,
+  loading: true,
+  login: async () => { throw new Error('AuthProvider not mounted'); },
   register: async () => { throw new Error('AuthProvider not mounted'); },
-  logout:   () => {},
+  logout: () => {},
 });
 
 export function useAuth(): AuthContextValue {
@@ -47,54 +41,73 @@ export function useAuth(): AuthContextValue {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user,    setUser]    = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const router                = useRouter();
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
 
-    // Re-sync localStorage token → cookie on every mount.
-    // Middleware runs on the server and cannot read localStorage —
-    // the cookie is its only signal. This keeps them in sync.
-    const existingToken = getToken();
-    if (existingToken) setToken(existingToken);
+    const boot = async () => {
+      try {
+        const token = getToken();
+        if (!token) {
+          if (!cancelled) {
+            setUser(null);
+            localStorage.removeItem('user');
+          }
+          return;
+        }
 
-    getMe()
-      .then(u  => { if (!cancelled) setUser(u); })
-      .catch(() => { if (!cancelled) setUser(null); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+        // keep cookie in sync for middleware
+        setToken(token);
 
+        const me = await getMe(); // SOURCE OF TRUTH
+        if (!cancelled) {
+          setUser(me);
+          localStorage.setItem('user', JSON.stringify(me));
+        }
+      } catch {
+        if (!cancelled) {
+          removeToken();
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void boot();
     return () => { cancelled = true; };
   }, []);
 
-  const login = useCallback(
-    async (email: string, password: string): Promise<AuthResponse> => {
-      const res = await apiLogin(email, password);
-      setUser(res.user);
-      return res;
-    },
-    [],
-  );
+  const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
+    localStorage.removeItem('user'); // prevent stale role
+    const res = await apiLogin(email, password);
+    setUser(res.user);
+    localStorage.setItem('user', JSON.stringify(res.user));
+    return res;
+  }, []);
 
-  const register = useCallback(
-    async (
-      fullName: string,
-      email:    string,
-      password: string,
-      role:     UserRole,
-    ): Promise<AuthResponse> => {
-      const res = await apiRegister(fullName, email, password, role);
-      setUser(res.user);
-      return res;
-    },
-    [],
-  );
+  const register = useCallback(async (
+    fullName: string,
+    email: string,
+    password: string,
+    role: UserRole,
+  ): Promise<AuthResponse> => {
+    localStorage.removeItem('user'); // prevent stale role
+    const res = await apiRegister(fullName, email, password, role);
+    setUser(res.user);
+    localStorage.setItem('user', JSON.stringify(res.user));
+    return res;
+  }, []);
 
   const logout = useCallback(() => {
     removeToken();
+    localStorage.removeItem('user');
     setUser(null);
-    router.replace('/');
+    router.replace('/'); // always landing page
   }, [router]);
 
   const value = useMemo<AuthContextValue>(
@@ -102,9 +115,5 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user, loading, login, register, logout],
   );
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
