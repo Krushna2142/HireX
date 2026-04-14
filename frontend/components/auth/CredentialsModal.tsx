@@ -122,21 +122,39 @@ export default function CredentialsModal({
     }
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (strength < 2) return toast.error('Password too weak');
-    setLoading(true);
-    try {
-      await register(name, email, password, role);
-      toast.success('Account created');
-      router.push(roleRedirectPath(role));
-      onClose();
-    } catch (err: any) {
-      toast.error(err?.message || 'Signup failed');
-    } finally {
-      setLoading(false);
+ const handleSignup = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (strength < 2) {
+    toast.error('Password too weak');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    // clear stale cache before fresh auth flow
+    localStorage.removeItem('user');
+
+    // IMPORTANT: register should return { token, user }
+    const res = await register(name, email, password, role);
+
+    // Always trust backend user role, not selected frontend state
+    if (!res?.user?.role) {
+      throw new Error('Invalid register response: missing user role');
     }
-  };
+
+    // keep client cache consistent with backend
+    localStorage.setItem('user', JSON.stringify(res.user));
+
+    toast.success(`${ROLES[res.user.role].label} account created 🎉`);
+    router.push(roleRedirectPath(res.user.role));
+    onClose();
+  } catch (err: any) {
+    toast.error(err?.message || 'Signup failed');
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <>

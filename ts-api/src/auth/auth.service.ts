@@ -179,42 +179,47 @@ export class AuthService {
 }
 
   async completeOAuthSignup(onboardingToken: string, role: 'candidate' | 'recruiter') {
-    const data = this.verifyOnboardingToken(onboardingToken);
-    const existing = await this.findUserByEmail(data.email);
+  const data = this.verifyOnboardingToken(onboardingToken);
+  const existing = await this.findUserByEmail(data.email);
 
-    if (existing) {
-      return {
-        token: this.signToken(existing.id, existing.email, existing.role),
-        user: {
-          id: existing.id,
-          full_name: existing.full_name,
-          email: existing.email,
-          role: existing.role,
-          created_at: existing.created_at,
-        },
-      };
+  if (existing) {
+    // IMPORTANT: if this is signup flow, do not silently login wrong role
+    if (data.mode === 'signup' && existing.role !== role) {
+      throw new ConflictException(`Account already exists as ${existing.role}`);
     }
 
-    const created = await this.db.query<UserRow>(
-      `INSERT INTO users (full_name, email, password_hash, role, created_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       RETURNING id, full_name, email, role, password_hash, created_at`,
-      [data.fullName, data.email.toLowerCase(), null, role],
-    );
-
-    const user = created.rows[0];
-
     return {
-      token: this.signToken(user.id, user.email, user.role),
+      token: this.signToken(existing.id, existing.email, existing.role),
       user: {
-        id: user.id,
-        full_name: user.full_name,
-        email: user.email,
-        role: user.role,
-        created_at: user.created_at,
+        id: existing.id,
+        full_name: existing.full_name,
+        email: existing.email,
+        role: existing.role,
+        created_at: existing.created_at,
       },
     };
   }
+
+  const created = await this.db.query<UserRow>(
+    `INSERT INTO users (full_name, email, password_hash, role, created_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     RETURNING id, full_name, email, role, password_hash, created_at`,
+    [data.fullName, data.email.toLowerCase(), null, role],
+  );
+
+  const user = created.rows[0];
+
+  return {
+    token: this.signToken(user.id, user.email, user.role),
+    user: {
+      id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      role: user.role,
+      created_at: user.created_at,
+    },
+  };
+}
 
   async register(dto: RegisterDto) {
     const existing = await this.db.query<UserIdRow>(

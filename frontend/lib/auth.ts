@@ -16,9 +16,8 @@ export interface AuthResponse {
   token: string;
   user: User;
 }
-
 export function roleRedirectPath(role: UserRole): string {
-  return role === 'recruiter' ? '/dashboard/recruiter' : '/dashboard';
+  return '/dashboard';
 }
 
 export function getToken(): string | null {
