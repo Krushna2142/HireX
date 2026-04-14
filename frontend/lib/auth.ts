@@ -1,36 +1,25 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// frontend/lib/auth.ts
-// NEXT_PUBLIC_API_URL already ends in /api
-// e.g. https://job-crawler-ts-api-t9r0.onrender.com/api
-// So all paths here are /auth/login, /auth/me etc. — no extra /api needed.
-
-const API_URL   = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const TOKEN_KEY = 'jc_token';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type UserRole = 'candidate' | 'recruiter';
 
 export interface User {
-  id:         string;
-  full_name:  string;
-  email:      string;
-  role:       UserRole;
+  id: string;
+  full_name: string;
+  email: string;
+  role: UserRole;
   created_at: string;
 }
 
 export interface AuthResponse {
   token: string;
-  user:  User;
+  user: User;
 }
 
-// ── Routing ───────────────────────────────────────────────────────────────────
-
-export function roleRedirectPath(_role: UserRole): string {
-  return '/dashboard';
+export function roleRedirectPath(role: UserRole): string {
+  return role === 'recruiter' ? '/dashboard/recruiter' : '/dashboard';
 }
-
-// ── Token helpers ─────────────────────────────────────────────────────────────
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -38,7 +27,9 @@ export function getToken(): string | null {
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(TOKEN_KEY, token);
+  }
   if (typeof document !== 'undefined') {
     const secure = process.env.NODE_ENV === 'production' ? ';Secure' : '';
     const maxAge = 60 * 60 * 24 * 7;
@@ -47,41 +38,26 @@ export function setToken(token: string): void {
 }
 
 export function removeToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  if (typeof window !== 'undefined') localStorage.removeItem(TOKEN_KEY);
   if (typeof document !== 'undefined') {
     document.cookie = `${TOKEN_KEY}=;path=/;max-age=0`;
   }
 }
 
-export function getAuthHeaders(): Record<string, string> {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-// ── Error helper ──────────────────────────────────────────────────────────────
-
 async function parseError(res: Response, fallback: string): Promise<Error> {
   let body: any = null;
-  try   { body = await res.json(); }
-  catch { body = { message: fallback }; }
+  try { body = await res.json(); } catch { body = { message: fallback }; }
   const err = new Error(body?.message || fallback);
   (err as any).status = res.status;
-  (err as any).body   = body;
+  (err as any).body = body;
   return err;
 }
 
-// ── API calls ─────────────────────────────────────────────────────────────────
-
-export async function register(
-  full_name: string,
-  email:     string,
-  password:  string,
-  role:      UserRole,
-): Promise<AuthResponse> {
+export async function register(full_name: string, email: string, password: string, role: UserRole): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/register`, {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ full_name, email, password, role }),
+    body: JSON.stringify({ full_name, email, password, role }),
   });
   if (!res.ok) throw await parseError(res, 'Registration failed');
   const data: AuthResponse = await res.json();
@@ -89,43 +65,16 @@ export async function register(
   return data;
 }
 
-export async function login(
-  email:    string,
-  password: string,
-): Promise<AuthResponse> {
+export async function login(email: string, password: string): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/login`, {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password }),
   });
   if (!res.ok) throw await parseError(res, 'Login failed');
   const data: AuthResponse = await res.json();
   setToken(data.token);
   return data;
-}
-
-export async function forgotPassword(
-  email: string,
-): Promise<{ message: string }> {
-  const res = await fetch(`${API_URL}/auth/forgot-password`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ email }),
-  });
-  return res.json();
-}
-
-export async function resetPassword(
-  token:        string,
-  new_password: string,
-): Promise<{ message: string }> {
-  const res = await fetch(`${API_URL}/auth/reset-password`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ token, new_password }),
-  });
-  if (!res.ok) throw await parseError(res, 'Reset failed');
-  return res.json();
 }
 
 export async function getMe(): Promise<User | null> {
@@ -138,7 +87,21 @@ export async function getMe(): Promise<User | null> {
   return res.json();
 }
 
-export function logout(): void {
-  removeToken();
-  window.location.href = '/';
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const res = await fetch(`${API_URL}/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  return res.json();
+}
+
+export async function resetPassword(token: string, new_password: string): Promise<{ message: string }> {
+  const res = await fetch(`${API_URL}/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, new_password }),
+  });
+  if (!res.ok) throw await parseError(res, 'Reset failed');
+  return res.json();
 }

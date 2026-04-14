@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { setToken, roleRedirectPath } from '@/lib/auth';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:5000/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
 export default function OAuthOnboardingPage() {
   const router = useRouter();
@@ -19,10 +20,12 @@ export default function OAuthOnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
-  const title = useMemo(() => {
-    if (mode === 'signin') return `No account found. Complete signup with ${provider}.`;
-    return `Complete signup with ${provider}.`;
-  }, [mode, provider]);
+  const title = useMemo(
+    () => mode === 'signin'
+      ? `No account found. Complete signup with ${provider}.`
+      : `Complete signup with ${provider}.`,
+    [mode, provider],
+  );
 
   const onContinue = async () => {
     try {
@@ -36,18 +39,11 @@ export default function OAuthOnboardingPage() {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data?.message ?? 'Signup failed');
 
-      if (!res.ok) {
-        throw new Error(
-          Array.isArray(data?.message) ? data.message.join(', ') : (data?.message ?? 'Signup failed'),
-        );
-      }
-
-      localStorage.setItem('token', data.token);
+      setToken(data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-
-      if (data.user.role === 'recruiter') router.replace('/dashboard/recruiter');
-      else router.replace('/dashboard');
+      router.replace(roleRedirectPath(data.user.role));
     } catch (e: any) {
       setErr(e?.message || 'Something went wrong');
     } finally {
@@ -63,25 +59,14 @@ export default function OAuthOnboardingPage() {
 
       <div style={{ marginTop: 16, marginBottom: 16 }}>
         <label style={{ display: 'block', marginBottom: 8 }}>
-          <input
-            type="radio"
-            checked={role === 'candidate'}
-            onChange={() => setRole('candidate')}
-          />{' '}
-          Job Seeker
+          <input type="radio" checked={role === 'candidate'} onChange={() => setRole('candidate')} /> Job Seeker
         </label>
         <label style={{ display: 'block' }}>
-          <input
-            type="radio"
-            checked={role === 'recruiter'}
-            onChange={() => setRole('recruiter')}
-          />{' '}
-          Recruiter
+          <input type="radio" checked={role === 'recruiter'} onChange={() => setRole('recruiter')} /> Recruiter
         </label>
       </div>
 
       {err ? <p style={{ color: 'red', marginBottom: 12 }}>{err}</p> : null}
-
       <button onClick={onContinue} disabled={loading || !onboardingToken}>
         {loading ? 'Please wait...' : 'Continue'}
       </button>

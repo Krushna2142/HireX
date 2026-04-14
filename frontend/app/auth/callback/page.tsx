@@ -2,8 +2,9 @@
 
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { setToken, roleRedirectPath } from '@/lib/auth';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
 export default function OAuthCallbackPage() {
   const router = useRouter();
@@ -12,43 +13,29 @@ export default function OAuthCallbackPage() {
   useEffect(() => {
     const run = async () => {
       const token = params.get('token');
-
-      if (!token) {
-        router.replace('/login?error=missing_oauth_token');
-        return;
-      }
+      if (!token) return router.replace('/?auth=login&error=missing_oauth_token');
 
       try {
-        localStorage.setItem('token', token);
+        setToken(token);
 
         const res = await fetch(`${API_BASE}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (!res.ok) {
-          localStorage.removeItem('token');
-          router.replace('/login?error=invalid_oauth_token');
-          return;
+          return router.replace('/?auth=login&error=invalid_oauth_token');
         }
 
         const user = await res.json();
         localStorage.setItem('user', JSON.stringify(user));
-
-        if (user?.role === 'recruiter') router.replace('/dashboard/recruiter');
-        else router.replace('/dashboard');
+        router.replace(roleRedirectPath(user.role));
       } catch {
-        localStorage.removeItem('token');
-        router.replace('/login?error=oauth_callback_failed');
+        router.replace('/?auth=login&error=oauth_callback_failed');
       }
     };
 
     void run();
   }, [params, router]);
 
-  return (
-    <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>
-      <h1>Signing you in...</h1>
-      <p>Please wait.</p>
-    </main>
-  );
+  return <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>Signing you in...</main>;
 }

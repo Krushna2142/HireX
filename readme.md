@@ -85,43 +85,79 @@ Controls subscriptions, billing, usage, compliance, and exact platform analytics
 
 ---
 
-## 4) Auth & Identity Module
+## 4. ## Auth Module Flow (Role-First + Correct Endpoint Routing)
 
-Supports **Email + Password**, **Google OAuth**, and **LinkedIn OAuth** with unified identity.
+### Role-first entry (required)
+When a user clicks **Sign In** or **Create Account**, they must first choose a role:
 
-### Supported Sign-In Methods
+- **Recruiter**
+- **Job Seeker (Candidate)**
 
-- Email + password
-- Google OAuth
-- LinkedIn OAuth
-
-### Critical Account Linking Rule
-
-If user signs in with Google/LinkedIn using the **same verified email** as existing email account, system must open the **same profile/account** (no duplicate user).
-
-#### Linking Flow
-
-1. Existing account: `x@example.com` via email-password  
-2. OAuth login returns same verified email  
-3. Provider is linked to existing user identity  
-4. Same profile/resumes/applications/interview history is loaded  
-
-### Edge Cases
-
-- Unverified provider email → no auto-link
-- Email conflict with existing linked account → safe resolution flow
-- OAuth-first account can later add email-password via verification
-
-### Auth Security
-
-- JWT access token (short-lived, e.g., 15 min)
-- Refresh token rotation (e.g., 30 days)
-- Session/device tracking
-- Brute-force protection
-- Role-based guards + ownership checks
-- Audit logs for auth and linking events
+Only after selecting role, the auth form appears.
 
 ---
+
+### Sign In flow (with role-aware routing)
+1. User clicks **Sign In**
+2. Role popup appears (Recruiter Login / Job Seeker Login)
+3. User selects role
+4. App opens sign-in form for that role
+5. User signs in via:
+   - Email/Password, or
+   - Google OAuth, or
+   - GitHub OAuth
+6. Request is sent to role-aware auth endpoint/query
+7. On success, user is redirected to role-specific destination:
+   - Recruiter → recruiter dashboard endpoint/route
+   - Job Seeker → candidate dashboard endpoint/route
+
+✅ This ensures selected role always maps to correct auth handling and post-login route.
+
+---
+
+### Sign Up flow (with role-aware routing)
+1. User clicks **Create Account**
+2. Role popup appears
+3. User selects role
+4. User signs up with Email/Password or OAuth
+5. Account is created with selected role
+6. User is redirected to role-specific destination:
+   - Recruiter route for recruiter accounts
+   - Candidate route for job seeker accounts
+
+---
+
+### OAuth endpoint rules
+Use `mode` and role query params:
+
+- Sign in:
+  - `/auth/oauth/google?mode=signin&role=recruiter`
+  - `/auth/oauth/google?mode=signin&role=candidate`
+  - `/auth/oauth/github?mode=signin&role=recruiter`
+  - `/auth/oauth/github?mode=signin&role=candidate`
+
+- Sign up:
+  - `/auth/oauth/google?mode=signup&role=recruiter`
+  - `/auth/oauth/google?mode=signup&role=candidate`
+  - `/auth/oauth/github?mode=signup&role=recruiter`
+  - `/auth/oauth/github?mode=signup&role=candidate`
+
+---
+
+### OAuth new-user behavior from Sign In
+If user chooses **Sign In via OAuth** but account does not exist:
+- Show: **“No account found. Complete signup with Google/GitHub.”**
+- Redirect to OAuth onboarding
+- Preserve identity from provider
+- User picks role
+- System completes signup and redirects to correct role route
+
+---
+
+### Final guarantee
+After role selection, authentication always:
+1. hits the correct role-aware endpoint/query, and
+2. redirects to the correct role-specific route/dashboard.
 
 ## 5) Profile Module (LinkedIn-Style + Unique Differentiators)
 
@@ -336,7 +372,7 @@ A separate AI preparation module for candidates before recruiter interview.
 
 ---
 
-## 11) Real-Time Events
+## 11) Real-Time Eventstty
 
 WebSocket: `ws://localhost:3001/realtime`  
 Auth payload: `auth: { token }`
