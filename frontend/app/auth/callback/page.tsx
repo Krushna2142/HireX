@@ -1,19 +1,22 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { setToken, roleRedirectPath } from '@/lib/auth';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api';
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackInner() {
   const router = useRouter();
   const params = useSearchParams();
 
   useEffect(() => {
     const run = async () => {
       const token = params.get('token');
-      if (!token) return router.replace('/?auth=login&error=missing_oauth_token');
+      if (!token) {
+        router.replace('/?auth=login&error=missing_oauth_token');
+        return;
+      }
 
       try {
         setToken(token);
@@ -23,7 +26,8 @@ export default function OAuthCallbackPage() {
         });
 
         if (!res.ok) {
-          return router.replace('/?auth=login&error=invalid_oauth_token');
+          router.replace('/?auth=login&error=invalid_oauth_token');
+          return;
         }
 
         const user = await res.json();
@@ -37,5 +41,23 @@ export default function OAuthCallbackPage() {
     void run();
   }, [params, router]);
 
-  return <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>Signing you in...</main>;
+  return (
+    <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>
+      Signing you in...
+    </main>
+  );
+}
+
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>
+          Loading...
+        </main>
+      }
+    >
+      <OAuthCallbackInner />
+    </Suspense>
+  );
 }
