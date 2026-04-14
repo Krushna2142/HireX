@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Tilt from 'react-parallax-tilt';
 import { useAuth } from '@/components/providers/AuthProvider';
 import toast from 'react-hot-toast';
 import { FcGoogle } from 'react-icons/fc';
@@ -24,18 +25,18 @@ const ROLES: Record<UserRole, {
     icon: '🎯',
     description: 'Upload resume, get AI-matched to jobs, track applications',
     accent: '#38BDF8',
-    bg: 'rgba(56,189,248,0.10)',
-    border: 'rgba(56,189,248,0.35)',
-    gradient: 'linear-gradient(135deg, #0369A1, #0EA5E9)',
+    bg: 'rgba(56,189,248,0.12)',
+    border: 'rgba(56,189,248,0.40)',
+    gradient: 'linear-gradient(135deg,#0369A1,#0EA5E9)',
   },
   recruiter: {
     label: 'Recruiter',
     icon: '🏢',
     description: 'Post roles, search candidates, manage hiring pipeline',
     accent: '#F472B6',
-    bg: 'rgba(244,114,182,0.10)',
-    border: 'rgba(244,114,182,0.35)',
-    gradient: 'linear-gradient(135deg, #9D174D, #EC4899)',
+    bg: 'rgba(244,114,182,0.12)',
+    border: 'rgba(244,114,182,0.40)',
+    gradient: 'linear-gradient(135deg,#9D174D,#EC4899)',
   },
 };
 
@@ -67,11 +68,10 @@ export default function CredentialsModal({
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
   const strength = zxcvbn(password).score;
   const strengthMeta = STRENGTH_META[strength];
   const activeRole = ROLES[role];
-
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
   useEffect(() => {
     if (user) {
@@ -82,222 +82,178 @@ export default function CredentialsModal({
 
   if (!open) return null;
 
-  function handleOverlayClick(e: React.MouseEvent) {
-    if (e.target === overlayRef.current) onClose();
-  }
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.24)',
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06))',
+    color: '#F8FAFC',
+    outline: 'none',
+    boxSizing: 'border-box',
+  };
 
-  function switchPanel(target: 'login' | 'register') {
-    setPassword('');
+  const handleOAuth = (provider: 'google' | 'github') => {
+    const mode = panel === 'register' ? 'signup' : 'signin';
+    const selectedRole = panel === 'register' ? role : (loginRole ?? 'candidate');
+    window.location.href = `${API_BASE}/auth/oauth/${provider}?mode=${mode}&role=${selectedRole}`;
+  };
+
+  const switchPanel = (target: 'login' | 'register') => {
     setPanel(target);
+    setPassword('');
     if (target === 'login') setLoginRole(null);
-  }
+  };
 
-  function handleGoogleLogin() {
-    const mode = panel === 'register' ? 'signup' : 'signin';
-    const selectedRole = panel === 'register' ? role : (loginRole ?? 'candidate');
-    window.location.href = `${API_BASE}/auth/oauth/google?mode=${mode}&role=${selectedRole}`;
-  }
-
-  function handleGithubLogin() {
-    const mode = panel === 'register' ? 'signup' : 'signin';
-    const selectedRole = panel === 'register' ? role : (loginRole ?? 'candidate');
-    window.location.href = `${API_BASE}/auth/oauth/github?mode=${mode}&role=${selectedRole}`;
-  }
-
-  async function handleLogin(e: React.FormEvent) {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginRole) {
-      toast.error('Please select Recruiter or Job Seeker first');
-      return;
-    }
-
+    if (!loginRole) return toast.error('Select role first');
     setLoading(true);
     try {
       const { user: u } = await login(email, password);
-
-      if (u.role !== loginRole) {
-        toast.error(`This account is ${u.role}, not ${loginRole}`);
-        return;
-      }
-
-      toast.success(`Welcome back, ${u.full_name.split(' ')[0]} 🚀`);
+      if (u.role !== loginRole) return toast.error(`This account is ${u.role}, not ${loginRole}`);
+      toast.success('Signed in');
       router.push(roleRedirectPath(u.role));
       onClose();
     } catch (err: any) {
-      toast.error(err.message || 'Login failed');
+      toast.error(err?.message || 'Login failed');
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function handleSignup(e: React.FormEvent) {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (strength < 2) {
-      toast.error('Password is too weak — aim for "Fair" or better');
-      return;
-    }
-
+    if (strength < 2) return toast.error('Password too weak');
     setLoading(true);
     try {
       await register(name, email, password, role);
-      toast.success(`${ROLES[role].label} account created 🎉`);
+      toast.success('Account created');
       router.push(roleRedirectPath(role));
       onClose();
     } catch (err: any) {
-      toast.error(err.message || 'Sign up failed');
+      toast.error(err?.message || 'Signup failed');
     } finally {
       setLoading(false);
     }
-  }
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '11px 14px',
-    background: 'rgba(255,255,255,0.08)',
-    border: '1px solid rgba(255,255,255,0.18)',
-    borderRadius: '12px',
-    color: '#F1F5F9',
-    fontSize: '13px',
-    outline: 'none',
-    boxSizing: 'border-box',
   };
 
   return (
     <>
       <style>{`
         .cred-input:focus {
-          border-color: rgba(139,92,246,0.7) !important;
-          box-shadow: 0 0 0 3px rgba(139,92,246,0.15) !important;
+          border-color: rgba(139,92,246,.70) !important;
+          box-shadow: 0 0 0 3px rgba(139,92,246,.15) !important;
         }
-        .cred-input::placeholder { color: rgba(255,255,255,0.35); }
       `}</style>
 
       <div
         ref={overlayRef}
-        onClick={handleOverlayClick}
+        onClick={(e) => e.target === overlayRef.current && onClose()}
         style={{
           position: 'fixed',
           inset: 0,
-          zIndex: 100,
-          background: 'radial-gradient(circle at 20% 20%, rgba(56,189,248,0.14), transparent 35%), radial-gradient(circle at 80% 80%, rgba(236,72,153,0.14), transparent 35%), rgba(3,6,16,0.78)',
-          backdropFilter: 'blur(10px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          zIndex: 1000,
+          display: 'grid',
+          placeItems: 'center',
           padding: '1rem',
+          background:
+            'radial-gradient(circle at 20% 20%, rgba(56,189,248,.18), transparent 35%), radial-gradient(circle at 80% 70%, rgba(236,72,153,.18), transparent 35%), rgba(2,6,23,.75)',
+          backdropFilter: 'blur(12px)',
         }}
       >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: 920,
-            minHeight: 560,
-            borderRadius: 24,
-            overflow: 'hidden',
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: 'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
-            boxShadow: '0 28px 70px rgba(0,0,0,0.45)',
-            backdropFilter: 'blur(16px)',
-            display: 'grid',
-            gridTemplateColumns: '1.1fr 0.9fr',
-          }}
-        >
-          <div style={{ padding: 32, overflowY: 'auto' }}>
-            {panel === 'login' && !loginRole && (
-              <>
-                <h2 style={{ color: '#fff', fontSize: 26, marginBottom: 8 }}>Choose how to sign in</h2>
-                <p style={{ color: 'rgba(255,255,255,0.65)', marginBottom: 18 }}>
-                  Select your role first so we route you to the correct experience.
-                </p>
+        <Tilt tiltMaxAngleX={4} tiltMaxAngleY={4} glareEnable glareMaxOpacity={0.12} glarePosition="all">
+          <div
+            style={{
+              width: 'min(940px, 95vw)',
+              minHeight: 560,
+              borderRadius: 24,
+              overflow: 'hidden',
+              border: '1px solid rgba(255,255,255,.25)',
+              background: 'linear-gradient(135deg, rgba(255,255,255,.12), rgba(255,255,255,.04))',
+              boxShadow: '0 30px 80px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.35)',
+              display: 'grid',
+              gridTemplateColumns: '1.1fr .9fr',
+            }}
+          >
+            <div style={{ padding: 30, overflowY: 'auto' }}>
+              {panel === 'login' && !loginRole && (
+                <>
+                  <h2 style={{ color: '#fff', marginBottom: 8, fontSize: 28 }}>Select role to continue</h2>
+                  <p style={{ color: 'rgba(255,255,255,.72)', marginBottom: 14 }}>
+                    Choose your login mode first.
+                  </p>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {(['candidate', 'recruiter'] as UserRole[]).map((r) => (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {(['candidate', 'recruiter'] as UserRole[]).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setLoginRole(r)}
+                        style={{
+                          padding: 16,
+                          borderRadius: 14,
+                          border: `1px solid ${ROLES[r].border}`,
+                          background: ROLES[r].bg,
+                          color: '#fff',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ fontSize: 22 }}>{ROLES[r].icon}</div>
+                        <b>{ROLES[r].label}</b>
+                        <div style={{ fontSize: 12, opacity: 0.8 }}>{ROLES[r].description}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <p style={{ marginTop: 14, color: 'rgba(255,255,255,.8)', fontSize: 13 }}>
+                    Don&apos;t have an account?{' '}
                     <button
-                      key={r}
                       type="button"
-                      onClick={() => setLoginRole(r)}
-                      style={{
-                        padding: 18,
-                        borderRadius: 16,
-                        border: `1px solid ${ROLES[r].border}`,
-                        background: ROLES[r].bg,
-                        color: '#fff',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                      }}
+                      onClick={() => switchPanel('register')}
+                      style={{ background: 'none', border: 'none', color: '#A78BFA', cursor: 'pointer' }}
                     >
-                      <div style={{ fontSize: 24 }}>{ROLES[r].icon}</div>
-                      <div style={{ fontWeight: 700, marginTop: 8 }}>{ROLES[r].label} Login</div>
-                      <div style={{ fontSize: 12, opacity: 0.78, marginTop: 4 }}>{ROLES[r].description}</div>
+                      Create account
                     </button>
-                  ))}
-                </div>
+                  </p>
+                </>
+              )}
 
-                <p style={{ marginTop: 16, color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>
-                  New here?{' '}
-                  <button
-                    type="button"
-                    onClick={() => switchPanel('register')}
-                    style={{ background: 'none', border: 'none', color: '#A78BFA', cursor: 'pointer' }}
-                  >
-                    Create account
-                  </button>
-                </p>
-              </>
-            )}
-
-            {panel === 'login' && loginRole && (
-              <form onSubmit={handleLogin} style={{ maxWidth: 430, margin: '0 auto', width: '100%' }}>
-                <div
-                  style={{
-                    borderRadius: 22,
-                    padding: 26,
-                    background: 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))',
-                    border: '1px solid rgba(255,255,255,0.20)',
-                    backdropFilter: 'blur(14px)',
-                    WebkitBackdropFilter: 'blur(14px)',
-                    boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
-                  }}
-                >
+              {panel === 'login' && loginRole && (
+                <form onSubmit={handleLogin}>
                   <button
                     type="button"
                     onClick={() => setLoginRole(null)}
                     style={{
-                      background: 'transparent',
+                      background: 'none',
                       border: 'none',
-                      color: 'rgba(255,255,255,0.7)',
+                      color: '#cbd5e1',
+                      marginBottom: 10,
                       cursor: 'pointer',
-                      marginBottom: 12,
-                      fontSize: 13,
                     }}
                   >
-                    ← Change role ({loginRole === 'recruiter' ? 'Recruiter' : 'Job Seeker'})
+                    ← Change role
                   </button>
 
-                  <h2 style={{ fontSize: 24, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
-                    Welcome back
-                  </h2>
-                  <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginBottom: 18 }}>
-                    Sign in as <strong>{loginRole === 'recruiter' ? 'Recruiter' : 'Job Seeker'}</strong>
-                  </p>
+                  <h2 style={{ color: '#fff', fontSize: 26, marginBottom: 8 }}>Welcome back</h2>
 
-                  <div style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
                     <input
                       className="cred-input"
-                      type="email"
-                      placeholder="Email address"
+                      style={inputStyle}
+                      placeholder="Email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      style={inputStyle}
                       required
                     />
                     <input
                       className="cred-input"
+                      style={inputStyle}
                       type="password"
                       placeholder="Password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      style={inputStyle}
                       required
                     />
                   </div>
@@ -306,136 +262,225 @@ export default function CredentialsModal({
                     type="submit"
                     disabled={loading}
                     style={{
+                      marginTop: 12,
                       width: '100%',
-                      marginTop: 14,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: 'none',
+                      color: '#fff',
+                      background: loginRole === 'recruiter' ? ROLES.recruiter.gradient : ROLES.candidate.gradient,
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {loading ? 'Signing in...' : 'Sign in'}
+                  </button>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOAuth('google')}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,.22)',
+                        background: 'rgba(255,255,255,.92)',
+                        color: '#111827',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <FcGoogle /> Google
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOAuth('github')}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,.22)',
+                        background: 'rgba(255,255,255,.08)',
+                        color: '#fff',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <FaGithub /> GitHub
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {panel === 'register' && (
+                <form onSubmit={handleSignup}>
+                  <h2 style={{ color: '#fff', fontSize: 26, marginBottom: 8 }}>Create account</h2>
+                  <p style={{ color: 'rgba(255,255,255,.72)', marginBottom: 12 }}>
+                    Choose role and create your account
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                    {(['candidate', 'recruiter'] as UserRole[]).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setRole(r)}
+                        style={{
+                          border: role === r ? `2px solid ${ROLES[r].accent}` : '1px solid rgba(255,255,255,.2)',
+                          borderRadius: 12,
+                          padding: 12,
+                          color: '#fff',
+                          background: role === r ? ROLES[r].bg : 'rgba(255,255,255,.04)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        {ROLES[r].icon} {ROLES[r].label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <input
+                      className="cred-input"
+                      style={inputStyle}
+                      placeholder="Full name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                    />
+                    <input
+                      className="cred-input"
+                      style={inputStyle}
+                      type="email"
+                      placeholder="Email address"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                    <input
+                      className="cred-input"
+                      style={inputStyle}
+                      type="password"
+                      placeholder="Password (min 8 chars)"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  {password.length > 0 && (
+                    <p style={{ marginTop: 8, color: strengthMeta.color, fontSize: 12 }}>
+                      {strengthMeta.label}
+                    </p>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    style={{
+                      width: '100%',
+                      marginTop: 12,
                       padding: '12px',
                       borderRadius: 12,
                       border: 'none',
                       color: '#fff',
-                      fontWeight: 700,
+                      background: activeRole.gradient,
                       cursor: loading ? 'not-allowed' : 'pointer',
-                      opacity: loading ? 0.7 : 1,
-                      background:
-                        loginRole === 'recruiter'
-                          ? 'linear-gradient(135deg, #BE185D, #EC4899)'
-                          : 'linear-gradient(135deg, #0369A1, #0EA5E9)',
-                      boxShadow:
-                        loginRole === 'recruiter'
-                          ? '0 10px 24px rgba(236,72,153,0.35)'
-                          : '0 10px 24px rgba(14,165,233,0.35)',
                     }}
                   >
-                    {loading ? 'Signing in...' : 'Sign In'}
+                    {loading ? 'Creating account...' : `Create ${activeRole.label} account`}
                   </button>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                    <button type="button" onClick={handleGoogleLogin} style={{ flex: 1, padding: 10, borderRadius: 10, border: 'none', cursor: 'pointer' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOAuth('google')}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,.22)',
+                        background: 'rgba(255,255,255,.92)',
+                        color: '#111827',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                      }}
+                    >
                       <FcGoogle /> Google
                     </button>
-                    <button type="button" onClick={handleGithubLogin} style={{ flex: 1, padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer' }}>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOAuth('github')}
+                      style={{
+                        flex: 1,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,.22)',
+                        background: 'rgba(255,255,255,.08)',
+                        color: '#fff',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                      }}
+                    >
                       <FaGithub /> GitHub
                     </button>
                   </div>
-                </div>
-              </form>
-            )}
 
-            {panel === 'register' && (
-              <form onSubmit={handleSignup}>
-                <h2 style={{ color: '#fff', fontSize: 24, marginBottom: 8 }}>Create account</h2>
-                <p style={{ color: 'rgba(255,255,255,0.65)', marginBottom: 14 }}>Choose role and sign up</p>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-                  {(['candidate', 'recruiter'] as UserRole[]).map((r) => (
+                  <p style={{ marginTop: 12, color: 'rgba(255,255,255,.78)', fontSize: 13 }}>
+                    Already have an account?{' '}
                     <button
-                      key={r}
                       type="button"
-                      onClick={() => setRole(r)}
-                      style={{
-                        border: role === r ? `2px solid ${ROLES[r].accent}` : '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: 12,
-                        padding: 12,
-                        color: '#fff',
-                        background: role === r ? ROLES[r].bg : 'rgba(255,255,255,0.04)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
+                      onClick={() => switchPanel('login')}
+                      style={{ background: 'none', border: 'none', color: '#A78BFA', cursor: 'pointer' }}
                     >
-                      {ROLES[r].icon} {ROLES[r].label}
+                      Sign in
                     </button>
-                  ))}
-                </div>
-
-                <div style={{ display: 'grid', gap: 10 }}>
-                  <input className="cred-input" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} required />
-                  <input className="cred-input" type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} required />
-                  <input className="cred-input" type="password" placeholder="Password (min 8 chars)" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} required />
-                </div>
-
-                {password.length > 0 && (
-                  <p style={{ marginTop: 8, color: strengthMeta.color, fontSize: 12 }}>
-                    {strengthMeta.label}
                   </p>
-                )}
+                </form>
+              )}
+            </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  style={{
-                    width: '100%',
-                    marginTop: 12,
-                    padding: '12px',
-                    borderRadius: 12,
-                    border: 'none',
-                    color: '#fff',
-                    fontWeight: 700,
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    opacity: loading ? 0.7 : 1,
-                    background: activeRole.gradient,
-                  }}
-                >
-                  {loading ? 'Creating account...' : `Create ${activeRole.label} account`}
-                </button>
-
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <button type="button" onClick={handleGoogleLogin} style={{ flex: 1, padding: 10, borderRadius: 10, border: 'none', cursor: 'pointer' }}>
-                    <FcGoogle /> Google
-                  </button>
-                  <button type="button" onClick={handleGithubLogin} style={{ flex: 1, padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer' }}>
-                    <FaGithub /> GitHub
-                  </button>
-                </div>
-
-                <p style={{ marginTop: 12, color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>
-                  Already have an account?{' '}
-                  <button type="button" onClick={() => switchPanel('login')} style={{ background: 'none', border: 'none', color: '#A78BFA', cursor: 'pointer' }}>
-                    Sign in
-                  </button>
-                </p>
-              </form>
-            )}
+            <div
+              style={{
+                background:
+                  panel === 'register'
+                    ? 'linear-gradient(145deg, rgba(30,27,75,0.95), rgba(79,70,229,0.82))'
+                    : 'linear-gradient(145deg, rgba(49,46,129,0.95), rgba(124,58,237,0.82))',
+                color: '#fff',
+                padding: 32,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                gap: 14,
+              }}
+            >
+              <h3 style={{ fontSize: 28, margin: 0 }}>AI Hiring Platform</h3>
+              <p style={{ opacity: 0.85 }}>Smart matching, real-time hiring, role-based dashboards.</p>
+              <div style={{ opacity: 0.85, fontSize: 13 }}>• AI Resume Analysis</div>
+              <div style={{ opacity: 0.85, fontSize: 13 }}>• Recruiter Pipeline</div>
+              <div style={{ opacity: 0.85, fontSize: 13 }}>• Live Interview Workflow</div>
+            </div>
           </div>
-
-          <div
-            style={{
-              background: panel === 'register'
-                ? 'linear-gradient(145deg, rgba(30,27,75,0.95), rgba(79,70,229,0.82))'
-                : 'linear-gradient(145deg, rgba(49,46,129,0.95), rgba(124,58,237,0.82))',
-              color: '#fff',
-              padding: 32,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              gap: 14,
-            }}
-          >
-            <h3 style={{ fontSize: 28, margin: 0 }}>AI Hiring Platform</h3>
-            <p style={{ opacity: 0.85 }}>Smart matching, real-time hiring, role-based dashboards.</p>
-            <div style={{ opacity: 0.85, fontSize: 13 }}>• AI Resume Analysis</div>
-            <div style={{ opacity: 0.85, fontSize: 13 }}>• Recruiter Pipeline</div>
-            <div style={{ opacity: 0.85, fontSize: 13 }}>• Live Interview Workflow</div>
-          </div>
-        </div>
+        </Tilt>
       </div>
     </>
   );

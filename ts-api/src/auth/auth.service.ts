@@ -132,42 +132,51 @@ export class AuthService {
   }
 
   async handleOAuthCallback(input: {
-    email: string;
-    fullName: string;
-    provider: 'google' | 'github';
-    providerId: string;
-    mode: 'signin' | 'signup';
-  }) {
-    const existing = await this.findUserByEmail(input.email);
+  email: string;
+  fullName: string;
+  provider: 'google' | 'github';
+  providerId: string;
+  mode: 'signin' | 'signup';
+  requestedRole: 'candidate' | 'recruiter'; // add this
+}) {
+  const existing = await this.findUserByEmail(input.email);
 
-    if (existing) {
+  if (existing) {
+    // ✅ Enforce role on OAuth sign-in
+    if (input.mode === 'signin' && existing.role !== input.requestedRole) {
       return {
-        kind: 'login' as const,
-        redirectUrl: this.buildFrontendOAuthRedirect(
-          this.signToken(existing.id, existing.email, existing.role),
-        ),
+        kind: 'role_mismatch' as const,
+        redirectUrl: `${this.frontendUrl}/?auth=login&error=role_mismatch&expected=${existing.role}`,
       };
     }
 
-    const onboardingToken = this.signOnboardingToken({
-      email: input.email.toLowerCase(),
-      fullName: input.fullName,
-      provider: input.provider,
-      providerId: input.providerId,
-      mode: input.mode,
-    });
-
     return {
-      kind: 'onboarding' as const,
-      redirectUrl: this.buildFrontendOAuthOnboardingRedirect({
-        onboardingToken,
-        provider: input.provider,
-        mode: input.mode,
-        email: input.email.toLowerCase(),
-        fullName: input.fullName,
-      }),
+      kind: 'login' as const,
+      redirectUrl: this.buildFrontendOAuthRedirect(
+        this.signToken(existing.id, existing.email, existing.role),
+      ),
     };
   }
+
+  const onboardingToken = this.signOnboardingToken({
+    email: input.email.toLowerCase(),
+    fullName: input.fullName,
+    provider: input.provider,
+    providerId: input.providerId,
+    mode: input.mode,
+  });
+
+  return {
+    kind: 'onboarding' as const,
+    redirectUrl: this.buildFrontendOAuthOnboardingRedirect({
+      onboardingToken,
+      provider: input.provider,
+      mode: input.mode,
+      email: input.email.toLowerCase(),
+      fullName: input.fullName,
+    }),
+  };
+}
 
   async completeOAuthSignup(onboardingToken: string, role: 'candidate' | 'recruiter') {
     const data = this.verifyOnboardingToken(onboardingToken);

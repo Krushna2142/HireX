@@ -28,7 +28,7 @@ type CompleteOAuthSignupDto = {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService) { }
 
   @Public()
   @Post('register')
@@ -80,6 +80,7 @@ export class AuthController {
       provider: 'google',
       providerId: req.user.providerId,
       mode: req.user.mode === 'signup' ? 'signup' : 'signin',
+      requestedRole: req.user.requestedRole === 'recruiter' ? 'recruiter' : 'candidate',
     });
 
     return res.redirect(result.redirectUrl);
@@ -106,6 +107,7 @@ export class AuthController {
       provider: 'github',
       providerId: req.user.providerId,
       mode: req.user.mode === 'signup' ? 'signup' : 'signin',
+      requestedRole: req.user.requestedRole === 'recruiter' ? 'recruiter' : 'candidate',
     });
 
     return res.redirect(result.redirectUrl);
