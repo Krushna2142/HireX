@@ -18,9 +18,7 @@ export interface AuthResponse {
 }
 
 export function roleRedirectPath(role: UserRole): string {
-  // Put REAL existing routes only
-  if (role === 'candidate') return '/dashboard/candidate'; // or '/dashboard'
-  if (role === 'recruiter') return '/dashboard/recruiter'; // change if different
+
   return '/dashboard';
 }
 
