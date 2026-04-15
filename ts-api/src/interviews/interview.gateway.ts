@@ -15,7 +15,7 @@ import { Server, Socket } from 'socket.io';
 /**
  * Interview signaling gateway for WebRTC.
  *
- * Events from client:
+ * Client -> Server:
  * - interview:join-room      { roomId, userId, name?, role? }
  * - interview:offer          { roomId, targetUserId, sdp }
  * - interview:answer         { roomId, targetUserId, sdp }
@@ -23,7 +23,7 @@ import { Server, Socket } from 'socket.io';
  * - interview:leave-room     { roomId }
  * - interview:toggle-media   { roomId, micOn?, camOn? }
  *
- * Events to client:
+ * Server -> Client:
  * - interview:room-users
  * - interview:user-joined
  * - interview:user-left
@@ -40,11 +40,29 @@ type JoinPayload = {
   role?: 'candidate' | 'recruiter' | string;
 };
 
+/**
+ * IMPORTANT:
+ * Do NOT use browser-only DOM types in Nest backend
+ * (e.g. RTCSessionDescriptionInit, RTCIceCandidateInit).
+ * Define JSON-compatible payload types instead.
+ */
+type SessionDescriptionPayload = {
+  type: 'offer' | 'answer' | 'pranswer' | 'rollback';
+  sdp: string;
+};
+
+type IceCandidatePayload = {
+  candidate: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+};
+
 type SignalPayload = {
   roomId: string;
   targetUserId: string;
-  sdp?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
+  sdp?: SessionDescriptionPayload;
+  candidate?: IceCandidatePayload;
 };
 
 type TogglePayload = {
