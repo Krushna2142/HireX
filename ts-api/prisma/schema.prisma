@@ -7,6 +7,22 @@ datasource db {
   provider = "postgresql"
 }
 
+enum InterviewStage {
+  APPLIED
+  UNDER_REVIEW
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  INTERVIEW_IN_PROGRESS
+  INTERVIEW_PASSED
+  INTERVIEW_FAILED
+  FINAL_REVIEW
+  OFFERED
+  HIRED
+  REJECTED
+  ON_HOLD
+  WITHDRAWN
+}
+
 model Resume {
   id             String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   userId         String                 @map("user_id") @db.Uuid
@@ -18,11 +34,15 @@ model Resume {
   analysis       Json?
   rawFile        String?                @map("raw_file")
   fileBytes      Bytes?                 @map("file_bytes")
+  garbagedAt     DateTime?              @map("garbaged_at") @db.Timestamptz(6)
+  garbageReason  String?                @map("garbage_reason")
   applications   applications[]
   resumeAnalysis ResumeAnalysis?
   users          users                  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([userId], map: "idx_resumes_user_id")
+  @@index([status], map: "idx_resumes_status")
+  @@index([garbagedAt], map: "idx_resumes_garbaged_at")
   @@map("resumes")
 }
 
@@ -134,13 +154,7 @@ model Job {
   createdAt          DateTime?            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime?            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   source             String               @default("internal") @db.VarChar(20)
-
-  // ── ONLY CHANGE: was @db.VarChar(255) ────────────────────────────────────
-  // SerpAPI job_ids are base64-encoded JSON blobs, often 300-500+ chars.
-  // VarChar(255) was causing "value too long" 500 errors on every sync.
-  // After editing, run: npx prisma migrate dev --name fix-external-id-text
   external_id        String?              @unique @db.Text
-
   applyUrl           String?              @map("apply_url")
   expiresAt          DateTime?            @map("expires_at") @db.Timestamptz(6)
   sync_batch         String?              @db.VarChar(50)
@@ -248,12 +262,66 @@ model interview_sessions {
   @@index([candidate_id], map: "idx_sessions_candidate")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model recruiter_interviews {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  application_id String         @unique @db.Uuid
+  job_id         String         @db.Uuid
+  candidate_id   String         @db.Uuid
+  recruiter_id   String         @db.Uuid
+  current_stage  InterviewStage @default(APPLIED)
+  status_code    Int            @default(100)
+  final_status   String?
+  created_at     DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@index([recruiter_id, status_code], map: "idx_ri_recruiter_status")
+  @@index([job_id, status_code], map: "idx_ri_job_status")
+  @@index([candidate_id, created_at], map: "idx_ri_candidate_created")
+}
+
+model recruiter_interview_rounds {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interview_id     String    @db.Uuid
+  round_number     Int
+  round_type       String
+  scheduled_at     DateTime? @db.Timestamptz(6)
+  duration_mins    Int?      @default(45)
+  mode             String?   @default("video")
+  interviewer_id   String?   @db.Uuid
+  meeting_provider String?   @default("internal")
+  meeting_room_id  String?
+  meeting_join_url String?
+  result           String?   @default("pending")
+  score            Float?
+  feedback         String?
+  notify_30_sent   Boolean   @default(false)
+  notify_15_sent   Boolean   @default(false)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@unique([interview_id, round_number])
+  @@index([scheduled_at], map: "idx_rir_scheduled")
+  @@index([interview_id], map: "idx_rir_interview")
+}
+
+model recruiter_interview_events {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interview_id  String   @db.Uuid
+  actor_user_id String?  @db.Uuid
+  event_type    String
+  from_stage    String?
+  to_stage      String?
+  metadata      Json     @default("{}")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([interview_id, created_at], map: "idx_rie_interview_created")
+}
+
 model users {
   id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   full_name          String
   email              String               @unique
-  password_hash      String? 
+  password_hash      String?
   reset_token        String?
   reset_token_expiry DateTime?            @db.Timestamptz(6)
   created_at         DateTime?            @default(now()) @db.Timestamptz(6)

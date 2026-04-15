@@ -35,6 +35,7 @@
     "react-parallax-tilt": "^1.7.323",
     "react-use-websocket": "^4.13.0",
     "recharts": "^3.8.0",
+    "socket.io-client": "^4.8.3",
     "swr": "^2.4.1",
     "zod": "^4.1.13",
     "zxcvbn": "^4.4.2"

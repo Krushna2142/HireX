@@ -33,6 +33,7 @@ const CANDIDATE_NAV = [
       { href: '/jobs', icon: '💼', label: 'Jobs' },
       { href: '/resumes', icon: '📄', label: 'Resume' },
       { href: '/resume-analysis', icon: '🧠', label: 'AI Analysis' },
+      { href: '/interviews', icon: '🎥', label: 'Interviews' }, // NEW
       { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
   },
@@ -51,6 +52,7 @@ const RECRUITER_NAV = [
     items: [
       { href: '/dashboard', icon: '⊞', label: 'Overview' },
       { href: '/recruiter/dashboard', icon: '📊', label: 'Recruitment' },
+      { href: '/recruiter/interviews', icon: '🎥', label: 'Interviews' }, // NEW
       { href: '/jobs', icon: '💼', label: 'All Jobs' },
       { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
@@ -138,7 +140,7 @@ function RecruiterStats() {
 export function Sidebar() {
   const { user, logout } = useAuth();
   const pathname = usePathname();
-  const { openPanel } = useProfilePanel(); // ← opens the profile drawer
+  const { openPanel } = useProfilePanel();
 
   const { analysisState = 'idle', canAnalyse = false, trigger, error } = useResumeAnalysis();
   const { unreadCount = 0 } = useAlerts();
@@ -220,7 +222,6 @@ export function Sidebar() {
         }
         .sb-rec-cta:hover { background: rgba(244,114,182,.14); }
 
-        /* ── User card — clicking opens ProfilePanel drawer ── */
         .sb-foot { padding: .75rem; border-top: 1px solid rgba(255,255,255,.07); flex-shrink: 0; }
         .sb-ucard {
           display: flex; align-items: center; gap: 10px;
@@ -249,14 +250,11 @@ export function Sidebar() {
       `}</style>
 
       <aside className="sb-root" aria-label="Sidebar navigation">
-
-        {/* Logo */}
         <div className="sb-logo">
           <span className="sb-logo-mark">⬡</span>
           <span className="sb-logo-name">JobCrawler</span>
         </div>
 
-        {/* Nav */}
         <nav className="sb-nav">
           {navGroups.map((group, gi) => (
             <div key={gi}>
@@ -284,7 +282,6 @@ export function Sidebar() {
           ))}
         </nav>
 
-        {/* Candidate: AI analyse trigger */}
         {isCandidate && (
           <div className="sb-ai">
             <div className="sb-grp" style={{ marginBottom: 8 }}>AI Tools</div>
@@ -311,19 +308,12 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* Recruiter: post job shortcut */}
         {isRecruiter && (
           <Link href="/recruiter/dashboard" className="sb-rec-cta">
             <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> Post a New Job
           </Link>
         )}
 
-        {/* ── Username card ──────────────────────────────────────────────────
-            Clicking this opens the ProfilePanel slide-in drawer.
-            No page navigation — the panel overlays the current page.
-            This means profile/settings are accessible from ANY route,
-            not just /dashboard.
-        ─────────────────────────────────────────────────────────────────── */}
         {user && (
           <div className="sb-foot">
             <div
