@@ -3,8 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InterviewsService } from './interviews.service';
 import { InterviewGateway } from './interview.gateway';
-
-// If you already have controllers, keep them and add candidate/room controllers too.
+import { InterviewsController } from './interviews.controller';
 import { RecruiterInterviewsController } from './recruiter-interviews.controller';
 import { CandidateInterviewsController } from './candidate-interviews.controller';
 import { InterviewRoomController } from './interview-room.controller';
@@ -12,6 +11,7 @@ import { InterviewRoomController } from './interview-room.controller';
 @Module({
   imports: [JwtModule.register({})],
   controllers: [
+    InterviewsController,
     RecruiterInterviewsController,
     CandidateInterviewsController,
     InterviewRoomController,

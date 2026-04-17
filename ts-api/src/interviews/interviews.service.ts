@@ -6,6 +6,27 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
+export type AnswerEvaluation = {
+  score: number;
+  feedback: string;
+};
+
+export type InterviewQuestionRow = {
+  id: string;
+  session_id: string;
+  question_number: number;
+  question: string;
+  category: string | null;
+  difficulty: string | null;
+  ideal_answer: string | null;
+  user_answer: string | null;
+  score: number | null;
+  feedback: string | null;
+  time_taken_secs: number | null;
+  answered_at: Date | null;
+  created_at: Date | null;
+};
+
 type ScheduleRoundInput = {
   roundType: 'hr' | 'technical' | 'managerial' | 'assignment';
   scheduledAt: string;
@@ -41,7 +62,177 @@ export class InterviewsService {
   constructor(private readonly prisma: PrismaService) {}
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Recruiter endpoints
+  // MOCK INTERVIEW (used by interviews.controller.ts)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  async startSession(
+    userId: string,
+    jobTitle: string,
+    company: string,
+    sessionType = 'technical',
+    jobId?: string,
+  ) {
+    if (!jobTitle?.trim()) throw new BadRequestException('jobTitle is required');
+
+    const session = await this.prisma.interview_sessions.create({
+      data: {
+        candidate_id: userId,
+        job_id: jobId ?? null,
+        job_title: jobTitle.trim(),
+        company: company ?? null,
+        session_type: sessionType ?? 'technical',
+        status: 'in_progress',
+        total_questions: 5,
+      },
+    });
+
+    const starterQuestions = [
+      {
+        question_number: 1,
+        question: `Tell me about yourself and your fit for ${jobTitle}.`,
+        category: 'behavioral',
+        difficulty: 'easy',
+        ideal_answer: 'Structured summary of experience, strengths, and relevance to role.',
+      },
+      {
+        question_number: 2,
+        question: `Explain a challenging problem you solved in your recent project.`,
+        category: 'problem_solving',
+        difficulty: 'medium',
+        ideal_answer: 'Context, challenge, action, result with measurable impact.',
+      },
+      {
+        question_number: 3,
+        question: `How do you ensure quality while delivering under deadlines?`,
+        category: 'execution',
+        difficulty: 'medium',
+        ideal_answer: 'Testing, prioritization, tradeoff communication, risk mitigation.',
+      },
+      {
+        question_number: 4,
+        question: `Describe your approach to collaboration with cross-functional teams.`,
+        category: 'communication',
+        difficulty: 'easy',
+        ideal_answer: 'Clear communication, ownership, conflict handling, alignment.',
+      },
+      {
+        question_number: 5,
+        question: `Why do you want to join this company?`,
+        category: 'motivation',
+        difficulty: 'easy',
+        ideal_answer: 'Company alignment, role impact, growth path.',
+      },
+    ];
+
+    await this.prisma.interview_questions.createMany({
+      data: starterQuestions.map((q) => ({
+        session_id: session.id,
+        ...q,
+      })),
+    });
+
+    return session;
+  }
+
+  async submitAnswer(
+    questionId: string,
+    userId: string,
+    answer: string,
+    timeTakenSecs: number,
+  ): Promise<InterviewQuestionRow & { evaluation: AnswerEvaluation; idealAnswer: string }> {
+    const q = await this.prisma.interview_questions.findUnique({
+      where: { id: questionId },
+      include: { interview_sessions: true },
+    });
+
+    if (!q) throw new NotFoundException('Question not found');
+    if (q.interview_sessions.candidate_id !== userId) {
+      throw new ForbiddenException('Not allowed');
+    }
+
+    const clean = (answer ?? '').trim();
+    const len = clean.length;
+    const score = Math.max(0, Math.min(100, Math.round((len / 280) * 100)));
+    const feedback =
+      len < 60
+        ? 'Answer too short; add context, action, and result.'
+        : len < 160
+        ? 'Good start; include stronger measurable outcomes.'
+        : 'Strong answer structure and detail.';
+
+    const updated = await this.prisma.interview_questions.update({
+      where: { id: questionId },
+      data: {
+        user_answer: clean,
+        time_taken_secs: timeTakenSecs,
+        answered_at: new Date(),
+        score,
+        feedback,
+      },
+    });
+
+    return {
+      ...(updated as InterviewQuestionRow),
+      evaluation: { score, feedback },
+      idealAnswer: q.ideal_answer ?? '',
+    };
+  }
+
+  async completeSession(sessionId: string, userId: string) {
+    const session = await this.prisma.interview_sessions.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session) throw new NotFoundException('Session not found');
+    if (session.candidate_id !== userId) throw new ForbiddenException('Not allowed');
+
+    const qs = await this.prisma.interview_questions.findMany({
+      where: { session_id: sessionId },
+    });
+
+    const scored = qs.filter((x) => typeof x.score === 'number');
+    const overall =
+      scored.length > 0
+        ? Number(
+            (
+              scored.reduce((sum, x) => sum + Number(x.score ?? 0), 0) / scored.length
+            ).toFixed(2),
+          )
+        : null;
+
+    return this.prisma.interview_sessions.update({
+      where: { id: sessionId },
+      data: {
+        status: 'completed',
+        overall_score: overall,
+        completed_at: new Date(),
+      },
+    });
+  }
+
+  async getSessionHistory(userId: string) {
+    return this.prisma.interview_sessions.findMany({
+      where: { candidate_id: userId },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async getSession(sessionId: string, userId: string) {
+    const session = await this.prisma.interview_sessions.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session) throw new NotFoundException('Session not found');
+    if (session.candidate_id !== userId) throw new ForbiddenException('Not allowed');
+
+    const questions = await this.prisma.interview_questions.findMany({
+      where: { session_id: sessionId },
+      orderBy: { question_number: 'asc' },
+    });
+
+    return { session, questions };
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // RECRUITER INTERVIEW PIPELINE
   // ───────────────────────────────────────────────────────────────────────────
 
   async listRecruiterInterviews(
@@ -136,9 +327,7 @@ export class InterviewsService {
     if (!interview) throw new NotFoundException('Interview not found');
 
     const scheduledAt = new Date(payload.scheduledAt);
-    if (Number.isNaN(scheduledAt.getTime())) {
-      throw new BadRequestException('Invalid scheduledAt');
-    }
+    if (Number.isNaN(scheduledAt.getTime())) throw new BadRequestException('Invalid scheduledAt');
 
     const lastRound = await this.prisma.recruiter_interview_rounds.findFirst({
       where: { interview_id: interviewId },
@@ -178,11 +367,7 @@ export class InterviewsService {
         interview_id: interviewId,
         actor_user_id: recruiterId,
         event_type: 'round_scheduled',
-        metadata: {
-          round_id: round.id,
-          round_number: round.round_number,
-          room_id: roomId,
-        },
+        metadata: { round_id: round.id, round_number: round.round_number, room_id: roomId },
       },
     });
 
@@ -194,17 +379,16 @@ export class InterviewsService {
       where: { id: interviewId, recruiter_id: recruiterId },
     });
     if (!interview) throw new NotFoundException('Interview not found');
-
-    if (!(stage in STAGE_TO_CODE)) {
-      throw new BadRequestException('Invalid stage');
-    }
+    if (!(stage in STAGE_TO_CODE)) throw new BadRequestException('Invalid stage');
 
     const updated = await this.prisma.recruiter_interviews.update({
       where: { id: interviewId },
       data: {
         current_stage: stage as any,
         status_code: STAGE_TO_CODE[stage],
-        final_status: ['HIRED', 'REJECTED', 'WITHDRAWN'].includes(stage) ? stage : interview.final_status,
+        final_status: ['HIRED', 'REJECTED', 'WITHDRAWN'].includes(stage)
+          ? stage
+          : interview.final_status,
       },
     });
 
@@ -222,17 +406,13 @@ export class InterviewsService {
   }
 
   async submitRoundResult(recruiterId: string, roundId: string, payload: RoundResultInput) {
-    const round = await this.prisma.recruiter_interview_rounds.findUnique({
-      where: { id: roundId },
-    });
+    const round = await this.prisma.recruiter_interview_rounds.findUnique({ where: { id: roundId } });
     if (!round) throw new NotFoundException('Round not found');
 
     const interview = await this.prisma.recruiter_interviews.findUnique({
       where: { id: round.interview_id },
     });
-    if (!interview || interview.recruiter_id !== recruiterId) {
-      throw new ForbiddenException('Not allowed');
-    }
+    if (!interview || interview.recruiter_id !== recruiterId) throw new ForbiddenException('Not allowed');
 
     const updatedRound = await this.prisma.recruiter_interview_rounds.update({
       where: { id: roundId },
@@ -243,7 +423,6 @@ export class InterviewsService {
       },
     });
 
-    // Optional auto-stage progression
     if (payload.result === 'pass') {
       await this.prisma.recruiter_interviews.update({
         where: { id: interview.id },
@@ -267,11 +446,7 @@ export class InterviewsService {
         interview_id: interview.id,
         actor_user_id: recruiterId,
         event_type: 'round_result_submitted',
-        metadata: {
-          round_id: roundId,
-          result: payload.result,
-          score: payload.score ?? null,
-        },
+        metadata: { round_id: roundId, result: payload.result, score: payload.score ?? null },
       },
     });
 
@@ -279,13 +454,10 @@ export class InterviewsService {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Candidate endpoints
+  // CANDIDATE VIEWS
   // ───────────────────────────────────────────────────────────────────────────
 
-  async listCandidateInterviews(
-    candidateId: string,
-    params?: { statusCode?: number; limit?: number },
-  ) {
+  async listCandidateInterviews(candidateId: string, params?: { statusCode?: number; limit?: number }) {
     const rows = await this.prisma.recruiter_interviews.findMany({
       where: {
         candidate_id: candidateId,
@@ -298,12 +470,10 @@ export class InterviewsService {
     if (!rows.length) return [];
 
     const jobIds = [...new Set(rows.map((r) => r.job_id))];
-
     const jobs = await this.prisma.job.findMany({
       where: { id: { in: jobIds } },
       select: { id: true, title: true, company: true },
     });
-
     const jobMap = new Map(jobs.map((j) => [j.id, j]));
 
     return rows.map((r) => ({
@@ -349,7 +519,7 @@ export class InterviewsService {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Room access validation for REST + Socket join
+  // ROOM ACCESS VALIDATION
   // ───────────────────────────────────────────────────────────────────────────
 
   async validateRoomAccess(roomId: string, userId: string, role: string) {
@@ -360,9 +530,7 @@ export class InterviewsService {
     const roundNumber = Number(m[2]);
 
     const [interview, round] = await Promise.all([
-      this.prisma.recruiter_interviews.findUnique({
-        where: { id: interviewId },
-      }),
+      this.prisma.recruiter_interviews.findUnique({ where: { id: interviewId } }),
       this.prisma.recruiter_interview_rounds.findFirst({
         where: { interview_id: interviewId, round_number: roundNumber },
       }),
@@ -372,7 +540,6 @@ export class InterviewsService {
 
     const isCandidate = role === 'candidate' && interview.candidate_id === userId;
     const isRecruiter = role === 'recruiter' && interview.recruiter_id === userId;
-
     if (!isCandidate && !isRecruiter) return { allowed: false };
 
     return {
@@ -382,7 +549,6 @@ export class InterviewsService {
       roundId: round.id,
       role,
       userId,
-      name: undefined,
     };
   }
 }
