@@ -1,6 +1,4 @@
-// lib/axios.ts — THE SINGLE HTTP CLIENT
-// baseURL already includes /api — never append /api in call sites.
-
+// ...existing imports
 import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -9,34 +7,9 @@ const api = axios.create({
   baseURL: API_URL,
 });
 
-// Attach JWT on every outbound request
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('jc_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
-});
-
-// Auto-logout on 401 — fires for EVERY request in the app
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('jc_token');
-      window.location.href = '/';
-    }
-    return Promise.reject(error);
-  },
-);
+// ...existing interceptors
 
 export default api;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Interview API helpers (mock + real recruiter/candidate process)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type InterviewStage =
   | 'APPLIED'
@@ -54,7 +27,7 @@ export type InterviewStage =
   | 'WITHDRAWN';
 
 export const interviewApi = {
-  // Mock interview
+  // existing methods...
   startMockSession: (payload: {
     jobTitle: string;
     company: string;
@@ -73,7 +46,6 @@ export const interviewApi = {
   getMockHistory: () => api.get('/interviews/sessions'),
   getMockSession: (sessionId: string) => api.get(`/interviews/sessions/${sessionId}`),
 
-  // Recruiter
   initFromApplication: (applicationId: string) =>
     api.post(`/recruiter/interviews/${applicationId}/init`),
 
@@ -109,14 +81,16 @@ export const interviewApi = {
   getRecruiterInterview: (interviewId: string) =>
     api.get(`/recruiter/interviews/${interviewId}`),
 
-  // Candidate (FIXED: no recruiter namespace)
   listCandidateInterviews: (params?: { statusCode?: number; limit?: number }) =>
     api.get('/candidate/interviews', { params }),
 
   getCandidateInterview: (interviewId: string) =>
     api.get(`/candidate/interviews/${interviewId}`),
 
-  // Room access (recommended)
   getRoomAccess: (roomId: string) =>
     api.get(`/interviews/room/${encodeURIComponent(roomId)}/access`),
+
+  // ✅ ADD THIS
+  getLivekitToken: (roomId: string) =>
+    api.post(`/interviews/room/${encodeURIComponent(roomId)}/token`),
 };

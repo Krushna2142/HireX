@@ -11,6 +11,8 @@ import { RecruiterInterviewsService } from './recruiter-interviews.service';
 
 import { CandidateInterviewsController } from './candidate-interviews.controller';
 import { InterviewRoomController } from './interview-room.controller';
+import { InterviewRoomsController } from './interview-rooms.controller';
+import { InterviewRoomsService } from './interview-rooms.service';
 
 import { DatabaseModule } from '../database/datbase.module';
 
@@ -24,12 +26,14 @@ import { DatabaseModule } from '../database/datbase.module';
     RecruiterInterviewsController,
     CandidateInterviewsController,
     InterviewRoomController,
+    InterviewRoomsController,
   ],
   providers: [
     PrismaService,
     InterviewsService,
     RecruiterInterviewsService, // <-- missing provider (main crash reason)
     InterviewGateway,
+    InterviewRoomsService,
   ],
   exports: [InterviewsService, RecruiterInterviewsService],
 })

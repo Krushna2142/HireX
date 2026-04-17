@@ -18,6 +18,7 @@ import { AlertsModule }              from './alerts/alerts.module';
 import { CandidatesModule }          from './candidates/candidates.module';
 import { RecruitersModule }          from './recruiters/recruiters.module';
 import { InterviewsModule }          from './interviews/interviews.module';
+import { LivekitModule }             from './livekit/livekit.module';
 import { RecommendationsModule }     from './recommendations/recommendatyions.module';
 import { OllamaModule }              from './ollama/ollama.module';
 import { PrismaModule }              from '../prisma/prisma.module';
@@ -94,6 +95,7 @@ const REDIS_ENABLED =
     RecruitersModule,
     InterviewsModule,
     RecommendationsModule,
+    LivekitModule,
   ],
 
   providers: [

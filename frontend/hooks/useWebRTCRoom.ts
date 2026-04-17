@@ -74,20 +74,33 @@ type UseWebRTCRoomArgs = {
 };
 
 // ─── ICE configuration ────────────────────────────────────────────────────────
-// For production, add TURN servers. STUN alone fails across symmetric NATs (~15% of users).
-// Free TURN: Twilio TURN, Metered.ca, or self-host coturn.
-// Critical: Without TURN, ~30% of peer connections will fail silently.
+// For production, configure TURN servers via the NEXT_PUBLIC_TURN_SERVERS env var.
+// Example (stringified JSON array):
+// NEXT_PUBLIC_TURN_SERVERS=[{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]
+// STUN alone fails across some NATs; TURN improves connectivity reliability.
 
-const ICE_SERVERS: RTCIceServer[] = [
+const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  // Add TURN servers here for production:
-  // {
-  //   urls: 'turn:your-turn-server.com:3478',
-  //   username: process.env.NEXT_PUBLIC_TURN_USERNAME,
-  //   credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
-  // },
+];
+
+let TURN_SERVERS: RTCIceServer[] = [];
+try {
+  const raw = process.env.NEXT_PUBLIC_TURN_SERVERS;
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) TURN_SERVERS = parsed as RTCIceServer[];
+  }
+} catch (err) {
+  // Non-fatal: fall back to STUN-only
+  // eslint-disable-next-line no-console
+  console.warn('Failed to parse NEXT_PUBLIC_TURN_SERVERS:', err);
+}
+
+const ICE_SERVERS: RTCIceServer[] = [
+  ...DEFAULT_STUN_SERVERS,
+  ...TURN_SERVERS,
 ];
 
 const RTC_CONFIG: RTCConfiguration = {

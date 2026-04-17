@@ -299,6 +299,11 @@ model recruiter_interview_rounds {
   created_at       DateTime  @default(now()) @db.Timestamptz(6)
   updated_at       DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
+  // Relation to the interview_rooms table created below. This keeps the
+  // meeting_room_id column for backward compatibility while providing a
+  // Prisma-level relation to the canonical rooms table.
+  meetingRoom      interview_rooms? @relation(fields: [meeting_room_id], references: [id])
+
   @@unique([interview_id, round_number])
   @@index([scheduled_at], map: "idx_rir_scheduled")
   @@index([interview_id], map: "idx_rir_interview")
@@ -335,4 +340,128 @@ model users {
   @@index([email], map: "idx_users_email")
   @@index([reset_token], map: "idx_users_reset_token")
   @@index([role], map: "idx_users_role")
+}
+
+// ----------------------------- Interview Models ---------------------------
+
+model interview_rooms {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recruiter_round_id    String?  @map("recruiter_round_id") @db.Uuid
+  session_id            String?  @map("session_id") @db.Uuid
+  room_name             String?  @map("room_name")
+  provider              String?  @default("internal")
+  provider_room_id      String?  @map("provider_room_id")
+  max_participants      Int?     @default(4) @map("max_participants")
+  mode                  String?  @default("video")
+  is_locked             Boolean  @default(false) @map("is_locked")
+  host_user_id          String?  @map("host_user_id") @db.Uuid
+  join_url              String?  @map("join_url")
+  started_at            DateTime? @map("started_at") @db.Timestamptz(6)
+  ended_at              DateTime? @map("ended_at") @db.Timestamptz(6)
+  metadata              Json?    @default("{}")
+  created_at            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  participants          room_participants[]
+
+  @@map("interview_rooms")
+  @@index([host_user_id], map: "idx_interview_rooms_host")
+  @@index([recruiter_round_id], map: "idx_interview_rooms_round")
+  recruiterInterviewRounds recruiter_interview_rounds[]
+}
+
+model room_participants {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  room_id        String   @map("room_id") @db.Uuid
+  user_id        String   @map("user_id") @db.Uuid
+  role           String?  @default("participant")
+  display_name   String?  @map("display_name")
+  joined_at      DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+  left_at        DateTime? @map("left_at") @db.Timestamptz(6)
+  is_muted       Boolean  @default(false) @map("is_muted")
+  is_video_off   Boolean  @default(false) @map("is_video_off")
+  raised_hand    Boolean  @default(false) @map("raised_hand")
+  rtc_client_id  String?  @map("rtc_client_id")
+  metadata       Json?    @default("{}")
+
+  media_state    media_states? @relation(fields: [id], references: [participant_id])
+
+  @@map("room_participants")
+  @@index([room_id], map: "idx_room_participants_room")
+  @@index([user_id], map: "idx_room_participants_user")
+  interviewRooms interview_rooms[]
+}
+
+model media_states {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  participant_id  String   @map("participant_id") @db.Uuid @unique
+  audio_enabled   Boolean  @default(true) @map("audio_enabled")
+  video_enabled   Boolean  @default(true) @map("video_enabled")
+  screen_sharing  Boolean  @default(false) @map("screen_sharing")
+  last_updated    DateTime @default(now()) @updatedAt @map("last_updated") @db.Timestamptz(6)
+  bandwidth_kbps  Int?     @map("bandwidth_kbps")
+  resolution      String?  @map("resolution")
+  metadata        Json?    @default("{}")
+
+  @@map("media_states")
+  @@index([participant_id], map: "idx_media_states_participant")
+  roomParticipants room_participants[]
+}
+
+model interview_transcripts {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id    String?  @map("session_id") @db.Uuid
+  participant_id String? @map("participant_id") @db.Uuid
+  content       String
+  timestamp     DateTime @default(now()) @map("timestamp") @db.Timestamptz(6)
+  source        String?  @default("local")
+  confidence    Float?
+  is_final      Boolean  @default(false) @map("is_final")
+  created_at    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("interview_transcripts")
+  @@index([session_id], map: "idx_transcripts_session")
+}
+
+model interview_scorecards {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id  String   @map("session_id") @db.Uuid
+  created_by  String   @map("created_by") @db.Uuid
+  rubric      Json?    @default("{}")
+  total_score Float?   @map("total_score")
+  comments    String?
+  created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("interview_scorecards")
+  @@index([session_id], map: "idx_scorecards_session")
+}
+
+model interview_chat_messages {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  room_id      String   @map("room_id") @db.Uuid
+  session_id   String?  @map("session_id") @db.Uuid
+  sender_id    String   @map("sender_id") @db.Uuid
+  message      String
+  message_type String?  @default("text") @map("message_type")
+  file_url     String?  @map("file_url")
+  metadata     Json?    @default("{}")
+  created_at   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("interview_chat_messages")
+  @@index([room_id], map: "idx_chat_room")
+  @@index([session_id], map: "idx_chat_session")
+}
+
+model interview_events_log {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id    String?  @map("session_id") @db.Uuid
+  room_id       String?  @map("room_id") @db.Uuid
+  actor_user_id String?  @map("actor_user_id") @db.Uuid
+  event_type    String
+  payload       Json?    @default("{}")
+  created_at    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("interview_events_log")
+  @@index([session_id], map: "idx_events_session")
+  @@index([room_id], map: "idx_events_room")
 }
