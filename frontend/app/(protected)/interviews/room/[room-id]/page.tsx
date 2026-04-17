@@ -31,6 +31,7 @@ import {
   useParticipants,
   useTracks,
   VideoTrack,
+  TrackReference,
 } from '@livekit/components-react';
 import { ConnectionState, Track } from 'livekit-client';
 import '@livekit/components-styles';
@@ -68,6 +69,22 @@ const T = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Type Guards
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ✅ FIXED: Type guard to check if track is a real TrackReference (not placeholder)
+ */
+function isTrackReference(track: any): track is TrackReference {
+  return (
+    track &&
+    typeof track === 'object' &&
+    'publication' in track &&
+    track.publication !== undefined
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Utility
 // ─────────────────────────────────────────────────────────────────────────────
 function useClock() {
@@ -99,7 +116,7 @@ function useMeetDuration(connected: boolean) {
 // ParticipantTile — renders a single video participant
 // ─────────────────────────────────────────────────────────────────────────────
 function ParticipantTile({ track, isLocal, name }: {
-  track: ReturnType<typeof useTracks>[number];
+  track: TrackReference;  // ✅ FIXED: Accept only valid TrackReference, not placeholder
   isLocal: boolean;
   name: string;
 }) {
@@ -146,10 +163,13 @@ function ParticipantTile({ track, isLocal, name }: {
           <span style={{ fontSize: 12, color: T.muted }}>{displayName}</span>
         </div>
       ) : (
-        <VideoTrack
-          trackRef={track}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        />
+        // ✅ FIXED: Only render VideoTrack for valid TrackReference
+        isTrackReference(track) && (
+          <VideoTrack
+            trackRef={track}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        )
       )}
 
       {/* Bottom overlay */}
@@ -196,10 +216,15 @@ function ParticipantTile({ track, isLocal, name }: {
 // VideoGrid — responsive layout based on participant count
 // ─────────────────────────────────────────────────────────────────────────────
 function VideoGrid({ localName, isRecruiter }: { localName: string; isRecruiter: boolean }) {
-  const cameraTracks = useTracks([
+  // ✅ FIXED: Get all tracks including placeholders
+  const allTracks = useTracks([
     { source: Track.Source.Camera, withPlaceholder: true },
     { source: Track.Source.ScreenShare, withPlaceholder: false },
   ]);
+
+  // ✅ FIXED: Filter to only valid TrackReference objects
+  const cameraTracks = allTracks.filter(isTrackReference);
+
   const { localParticipant } = useLocalParticipant();
   const participants = useParticipants();
 
@@ -687,7 +712,7 @@ function AINotesPanel({ interviewId }: { interviewId?: string }) {
         <button
           onClick={() => void handleSave()}
           style={{
-            width: '100%', padding: '10px', borderRadius: 8, border: 'none',
+            width: '100%', padding: '10px', borderRadius: 8,
             background: saved ? T.green : `${T.purple}22`,
             color: saved ? '#fff' : T.purple,
             fontWeight: 700, fontSize: 13, cursor: 'pointer',
@@ -1083,10 +1108,11 @@ function RoomEndedScreen({ isRecruiter, router }: { isRecruiter: boolean; router
         <button
           onClick={() => router.push(isRecruiter ? '/recruiter/interviews' : '/interviews')}
           style={{
-            padding: '12px 24px', borderRadius: 10, border: 'none',
+            padding: '12px 24px', borderRadius: 10,
+            border: `1px solid ${T.sky}33`,
             background: `${T.sky}22`, color: T.sky,
             fontWeight: 700, fontSize: 14, cursor: 'pointer',
-            fontFamily: 'Sora, sans-serif', border: `1px solid ${T.sky}33` as any,
+            fontFamily: 'Sora, sans-serif',
           }}
         >
           Back to Interviews
