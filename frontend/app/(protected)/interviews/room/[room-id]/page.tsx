@@ -28,6 +28,7 @@ import {
 } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { interviewApi } from '@/lib/axios';
 import {
   useWebRTCRoom,
   type RemotePeer,
@@ -1140,8 +1141,9 @@ function MeetingRoom({ roomId, user }: {
   const {
     connectionState, connected, connecting, localStream,
     peers, messages, micOn, camOn, screenSharing, error,
+    hostPresent, roomEnded, canEndRoom,
     join, leave, toggleMic, toggleCam,
-    startScreenShare, stopScreenShare, sendMessage,
+    startScreenShare, stopScreenShare, sendMessage, endRoom,
   } = useWebRTCRoom({ roomId, user });
 
   const [sidePanel, setSidePanel] = useState<SidePanel>(null);
@@ -1173,8 +1175,8 @@ function MeetingRoom({ roomId, user }: {
 
   const handleLeave = useCallback(() => {
     leave();
-    router.push('/interviews');
-  }, [leave, router]);
+    router.push(user.role === 'recruiter' ? '/recruiter/interviews' : '/interviews');
+  }, [leave, router, user.role]);
 
   const handlePin = (userId: string) => {
     setPinnedUserId(prev => prev === userId ? null : userId);
@@ -1206,6 +1208,7 @@ function MeetingRoom({ roomId, user }: {
   }, [localStream, user, micOn, camOn, screenSharing, localSpeaking, peers]);
 
   const showOverlay = !connected || connectionState === 'error' || connectionState === 'left';
+  const waitingForInterviewer = connected && user.role === 'candidate' && !hostPresent && !roomEnded;
 
   return (
     <div style={{
@@ -1296,7 +1299,46 @@ function MeetingRoom({ roomId, user }: {
         <div style={{
           flex: 1, padding: 10, display: 'flex',
           overflow: 'hidden',
+          position: 'relative',
         }}>
+          {waitingForInterviewer && (
+            <div style={{
+              position: 'absolute',
+              top: 16,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 25,
+              padding: '8px 14px',
+              borderRadius: 999,
+              background: `${T.amber}20`,
+              border: `1px solid ${T.amber}55`,
+              color: '#FCD34D',
+              fontSize: 12,
+              fontWeight: 700,
+            }}>
+              Waiting for interviewer to join...
+            </div>
+          )}
+
+          {roomEnded && (
+            <div style={{
+              position: 'absolute',
+              top: 16,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 25,
+              padding: '8px 14px',
+              borderRadius: 999,
+              background: `${T.red}20`,
+              border: `1px solid ${T.red}55`,
+              color: '#FCA5A5',
+              fontSize: 12,
+              fontWeight: 700,
+            }}>
+              Interview ended by host
+            </div>
+          )}
+
           <VideoGrid
             participants={gridParticipants}
             pinnedUserId={pinnedUserId}
@@ -1381,6 +1423,19 @@ function MeetingRoom({ roomId, user }: {
           danger
           onClick={handleLeave}
         />
+
+        {canEndRoom && (
+          <CtrlButton
+            icon="⏹"
+            label="End Interview"
+            danger
+            onClick={() => {
+              endRoom();
+              leave();
+              router.push('/recruiter/interviews');
+            }}
+          />
+        )}
       </footer>
     </div>
   );
@@ -1397,6 +1452,36 @@ export default function InterviewRoomPage() {
 
   const { user } = useAuth();
   const [joined, setJoined] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [accessError, setAccessError] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+    const checkAccess = async () => {
+      if (!user || !roomId) {
+        if (mounted) setCheckingAccess(false);
+        return;
+      }
+
+      try {
+        setCheckingAccess(true);
+        setAccessError('');
+        await interviewApi.getRoomAccess(roomId);
+      } catch (e: any) {
+        const message =
+          e?.response?.data?.message ??
+          'You do not have access to this room or the room link has expired.';
+        if (mounted) setAccessError(message);
+      } finally {
+        if (mounted) setCheckingAccess(false);
+      }
+    };
+
+    void checkAccess();
+    return () => {
+      mounted = false;
+    };
+  }, [roomId, user]);
 
   if (!user) {
     return (
@@ -1422,6 +1507,40 @@ export default function InterviewRoomPage() {
         fontFamily: "system-ui, sans-serif", fontSize: 14,
       }}>
         Invalid room ID.
+      </div>
+    );
+  }
+
+  if (checkingAccess) {
+    return (
+      <div style={{
+        minHeight: '100dvh', display: 'flex', alignItems: 'center',
+        justifyContent: 'center',
+        background: T.bg, color: T.muted,
+        fontFamily: 'system-ui, sans-serif', fontSize: 14,
+      }}>
+        Checking room access...
+      </div>
+    );
+  }
+
+  if (accessError) {
+    return (
+      <div style={{
+        minHeight: '100dvh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+        background: T.bg,
+        color: T.white,
+        fontFamily: 'system-ui, sans-serif',
+      }}>
+        <div style={{ fontSize: 32 }}>🔐</div>
+        <div style={{ fontSize: 14, color: '#FCA5A5', maxWidth: 460, textAlign: 'center' }}>
+          {accessError}
+        </div>
       </div>
     );
   }

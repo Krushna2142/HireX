@@ -136,6 +136,9 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
   const [camOn, setCamOn] = useState(true);
   const [screenSharing, setScreenSharing] = useState(false);
   const [error, setError] = useState<string>('');
+  const [hostUserId, setHostUserId] = useState<string | null>(null);
+  const [hostPresent, setHostPresent] = useState(false);
+  const [roomEnded, setRoomEnded] = useState(false);
 
   // ── Internal refs (not reactive — used in async callbacks) ────────────────
   const socketRef = useRef<Socket | null>(null);
@@ -379,6 +382,7 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
       // Room snapshot: current participants when we join
       socket.on('interview:room-snapshot', async (data: { participants: ParticipantSnapshot[] }) => {
         setConnectionState('connected');
+        setRoomEnded(false);
 
         const others = data.participants.filter(p => p.userId !== user.id);
 
@@ -572,6 +576,24 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
         setMessages(prev => [...prev, msg]);
       });
 
+      socket.on('interview:room-status', (data: {
+        hostUserId: string | null;
+        hostPresent: boolean;
+        ended: boolean;
+      }) => {
+        setHostUserId(data.hostUserId ?? null);
+        setHostPresent(!!data.hostPresent);
+        if (data.ended) {
+          setRoomEnded(true);
+          setConnectionState('left');
+        }
+      });
+
+      socket.on('interview:room-ended', () => {
+        setRoomEnded(true);
+        setConnectionState('left');
+      });
+
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to join room';
       setError(msg);
@@ -604,6 +626,9 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     setPeers([]);
     setMessages([]);
     setScreenSharing(false);
+    setHostPresent(false);
+    setHostUserId(null);
+    setRoomEnded(false);
     setConnectionState('left');
   }, [roomId]);
 
@@ -772,6 +797,11 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     socketRef.current.emit('interview:chat-message', { roomId, message: trimmed });
   }, [roomId]);
 
+  const endRoom = useCallback(() => {
+    if (!socketRef.current?.connected) return;
+    socketRef.current.emit('interview:end-room', { roomId });
+  }, [roomId]);
+
   // ── Cleanup on unmount ─────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
@@ -792,6 +822,10 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     camOn,
     screenSharing,
     error,
+    hostUserId,
+    hostPresent,
+    roomEnded,
+    canEndRoom: user?.role === 'recruiter' && !!hostUserId && user?.id === hostUserId,
     // Actions
     join,
     leave,
@@ -800,5 +834,6 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     startScreenShare,
     stopScreenShare,
     sendMessage,
+    endRoom,
   };
 }

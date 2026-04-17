@@ -41,6 +41,20 @@ type RoundResultInput = {
   feedback?: string;
 };
 
+type RoomAccessResult = {
+  allowed: boolean;
+  reason?: 'invalid_room' | 'room_not_found' | 'forbidden' | 'room_link_expired';
+  roomId?: string;
+  interviewId?: string;
+  roundId?: string;
+  role?: string;
+  userId?: string;
+  hostUserId?: string;
+  interviewStage?: string;
+  scheduledAt?: string | null;
+  expiresAt?: string | null;
+};
+
 const STAGE_TO_CODE: Record<string, number> = {
   APPLIED: 100,
   UNDER_REVIEW: 200,
@@ -523,8 +537,12 @@ export class InterviewsService {
   // ───────────────────────────────────────────────────────────────────────────
 
   async validateRoomAccess(roomId: string, userId: string, role: string) {
+    return this.validateRoomAccessWithContext(roomId, userId, role);
+  }
+
+  async validateRoomAccessWithContext(roomId: string, userId: string, role: string): Promise<RoomAccessResult> {
     const m = /^jc-([a-f0-9-]+)-r(\d+)$/i.exec(roomId);
-    if (!m) return { allowed: false };
+    if (!m) return { allowed: false, reason: 'invalid_room' };
 
     const interviewId = m[1];
     const roundNumber = Number(m[2]);
@@ -536,11 +554,37 @@ export class InterviewsService {
       }),
     ]);
 
-    if (!interview || !round) return { allowed: false };
+    if (!interview || !round) return { allowed: false, reason: 'room_not_found' };
 
     const isCandidate = role === 'candidate' && interview.candidate_id === userId;
     const isRecruiter = role === 'recruiter' && interview.recruiter_id === userId;
-    if (!isCandidate && !isRecruiter) return { allowed: false };
+    if (!isCandidate && !isRecruiter) return { allowed: false, reason: 'forbidden' };
+
+    // Expiring room URL policy:
+    // Join opens 30 minutes before schedule and expires 2 hours after round end.
+    if (round.scheduled_at) {
+      const scheduledAt = round.scheduled_at.getTime();
+      const durationMs = (round.duration_mins ?? 45) * 60 * 1000;
+      const startsAtMs = scheduledAt - 30 * 60 * 1000;
+      const expiresAtMs = scheduledAt + durationMs + 2 * 60 * 60 * 1000;
+      const now = Date.now();
+
+      if (now < startsAtMs || now > expiresAtMs) {
+        return {
+          allowed: false,
+          reason: 'room_link_expired',
+          roomId,
+          interviewId,
+          roundId: round.id,
+          role,
+          userId,
+          hostUserId: interview.recruiter_id,
+          interviewStage: interview.current_stage,
+          scheduledAt: round.scheduled_at.toISOString(),
+          expiresAt: new Date(expiresAtMs).toISOString(),
+        };
+      }
+    }
 
     return {
       allowed: true,
@@ -549,6 +593,47 @@ export class InterviewsService {
       roundId: round.id,
       role,
       userId,
+      hostUserId: interview.recruiter_id,
+      interviewStage: interview.current_stage,
+      scheduledAt: round.scheduled_at ? round.scheduled_at.toISOString() : null,
+      expiresAt: round.scheduled_at
+        ? new Date(round.scheduled_at.getTime() + ((round.duration_mins ?? 45) + 120) * 60 * 1000).toISOString()
+        : null,
     };
+  }
+
+  async markRoomStarted(interviewId: string, roundId: string, actorUserId: string) {
+    const interview = await this.prisma.recruiter_interviews.findUnique({ where: { id: interviewId } });
+    if (!interview) return;
+
+    if (interview.current_stage !== 'INTERVIEW_IN_PROGRESS') {
+      await this.prisma.recruiter_interviews.update({
+        where: { id: interviewId },
+        data: {
+          current_stage: 'INTERVIEW_IN_PROGRESS',
+          status_code: STAGE_TO_CODE.INTERVIEW_IN_PROGRESS,
+        },
+      });
+    }
+
+    await this.prisma.recruiter_interview_events.create({
+      data: {
+        interview_id: interviewId,
+        actor_user_id: actorUserId,
+        event_type: 'room_started',
+        metadata: { round_id: roundId },
+      },
+    });
+  }
+
+  async markRoomEnded(interviewId: string, roundId: string, actorUserId: string) {
+    await this.prisma.recruiter_interview_events.create({
+      data: {
+        interview_id: interviewId,
+        actor_user_id: actorUserId,
+        event_type: 'room_ended',
+        metadata: { round_id: roundId },
+      },
+    });
   }
 }

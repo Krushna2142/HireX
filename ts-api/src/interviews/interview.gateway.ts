@@ -32,6 +32,13 @@ type RoomParticipant = {
   joinedAt: number;
 };
 
+type RoomMeta = {
+  interviewId: string;
+  roundId: string;
+  hostUserId: string;
+  endedAt: number | null;
+};
+
 type SDP = RTCSessionDescriptionInit;
 type ICECandidate = RTCIceCandidateInit;
 
@@ -65,6 +72,9 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   // roomId → Map<userId, RoomParticipant>
   private readonly rooms = new Map<string, Map<string, RoomParticipant>>();
+
+  // roomId → metadata used for waiting room and host-only controls
+  private readonly roomMeta = new Map<string, RoomMeta>();
 
   // socketId → AuthUser (for fast disconnect lookup)
   private readonly socketUsers = new Map<string, AuthUser>();
@@ -147,10 +157,12 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
         if (!activeSockets || activeSockets.size === 0) {
           participants.delete(user.id);
           client.to(roomId).emit('interview:user-left', { userId: user.id });
+          this.emitRoomStatus(roomId);
           this.logger.debug(`[room:${roomId}] ${user.id} left (disconnect)`);
 
           if (participants.size === 0) {
             this.rooms.delete(roomId);
+            this.roomMeta.delete(roomId);
             this.logger.debug(`[room:${roomId}] Empty — cleaned up`);
           }
         }
@@ -201,6 +213,16 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
       joinedAt: Date.now(),
     };
 
+    if (access.allowed && access.interviewId && access.roundId && access.hostUserId) {
+      const existingMeta = this.roomMeta.get(roomId);
+      this.roomMeta.set(roomId, {
+        interviewId: access.interviewId,
+        roundId: access.roundId,
+        hostUserId: existingMeta?.hostUserId ?? access.hostUserId,
+        endedAt: existingMeta?.endedAt ?? null,
+      });
+    }
+
     participants.set(user.id, participant);
 
     // Send current participant list to the joiner
@@ -213,6 +235,12 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
     client.to(roomId).emit('interview:user-joined', {
       participant: this.serializeParticipant(participant),
     });
+
+    this.emitRoomStatus(roomId);
+
+    if (user.role === 'recruiter' && access.allowed && access.interviewId && access.roundId) {
+      void this.interviewsService.markRoomStarted(access.interviewId, access.roundId, user.id);
+    }
 
     this.logger.log(`[room:${roomId}] ${user.id} (${user.role}) joined — ${participants.size} total`);
   }
@@ -232,7 +260,9 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (participants) {
       participants.delete(user.id);
       client.to(roomId).emit('interview:user-left', { userId: user.id });
+      this.emitRoomStatus(roomId);
       if (participants.size === 0) this.rooms.delete(roomId);
+      if (participants.size === 0) this.roomMeta.delete(roomId);
     }
 
     this.logger.debug(`[room:${roomId}] ${user.id} left voluntarily`);
@@ -347,6 +377,55 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
     client.emit('interview:pong', { ts: Date.now() });
   }
 
+  @SubscribeMessage('interview:end-room')
+  async onEndRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { roomId: string },
+  ): Promise<void> {
+    const user = this.getAuthUser(client);
+    if (!user) return;
+
+    const roomId = body?.roomId;
+    if (!roomId) return this.sendError(client, 'roomId required');
+
+    const access = await this.interviewsService.validateRoomAccessWithContext(roomId, user.id, user.role);
+    if (!access.allowed) return this.sendError(client, 'Forbidden: cannot end room');
+
+    const meta = this.roomMeta.get(roomId);
+    const hostUserId = meta?.hostUserId ?? access.hostUserId;
+    const canEnd = user.role === 'recruiter' && !!hostUserId && hostUserId === user.id;
+    if (!canEnd) return this.sendError(client, 'Only host can end interview');
+
+    this.roomMeta.set(roomId, {
+      interviewId: access.interviewId!,
+      roundId: access.roundId!,
+      hostUserId,
+      endedAt: Date.now(),
+    });
+
+    this.server.to(roomId).emit('interview:room-ended', {
+      roomId,
+      endedBy: user.id,
+      endedAt: new Date().toISOString(),
+    });
+
+    await this.interviewsService.markRoomEnded(access.interviewId!, access.roundId!, user.id);
+
+    // Detach all sockets from this room to guarantee hard end.
+    const roomSockets = this.server.sockets.adapter.rooms.get(roomId);
+    if (roomSockets) {
+      for (const socketId of roomSockets) {
+        const socket = this.server.sockets.sockets.get(socketId);
+        if (socket) {
+          await socket.leave(roomId);
+        }
+      }
+    }
+
+    this.rooms.delete(roomId);
+    this.roomMeta.delete(roomId);
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private getAuthUser(client: Socket): AuthUser | null {
@@ -390,6 +469,21 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
       screenSharing: p.screenSharing,
       joinedAt: p.joinedAt,
     };
+  }
+
+  private emitRoomStatus(roomId: string): void {
+    const participants = this.rooms.get(roomId);
+    const meta = this.roomMeta.get(roomId);
+    const hostPresent = !!meta?.hostUserId && !!participants?.has(meta.hostUserId);
+
+    this.server.to(roomId).emit('interview:room-status', {
+      roomId,
+      hostUserId: meta?.hostUserId ?? null,
+      hostPresent,
+      participantCount: participants?.size ?? 0,
+      ended: !!meta?.endedAt,
+      endedAt: meta?.endedAt ? new Date(meta.endedAt).toISOString() : null,
+    });
   }
 
   private extractBearer(authHeader?: string): string | null {
