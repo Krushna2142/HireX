@@ -13,22 +13,22 @@ const PROTECTED = [
   '/recommendations',
   '/alerts',
   '/analyze',
+  '/interviews',
+  '/recruiter',
+  '/candidate',
 ];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const isProtected = PROTECTED.some(path => pathname.startsWith(path));
+  const isProtected = PROTECTED.some((path) => pathname.startsWith(path));
   if (!isProtected) return NextResponse.next();
 
-  // Check for auth token in cookies
-  // We also check localStorage-based token via a cookie fallback
   const token = request.cookies.get('jc_token')?.value;
-
   if (!token) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
-    url.searchParams.set('auth', 'login'); // signals landing page to open modal
+    url.searchParams.set('auth', 'login');
     return NextResponse.redirect(url);
   }
 
@@ -47,5 +47,8 @@ export const config = {
     '/recommendations/:path*',
     '/alerts/:path*',
     '/analyze/:path*',
+    '/interviews/:path*',
+    '/recruiter/:path*',
+    '/candidate/:path*',
   ],
 };

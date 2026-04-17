@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   ConnectedSocket,
   MessageBody,
@@ -9,293 +7,251 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { JwtService } from '@nestjs/jwt';
+import { InterviewsService } from './interviews.service';
 
-/**
- * Interview signaling + chat gateway.
- *
- * Client → Server events:
- *   interview:join-room      { roomId, userId, name?, role? }
- *   interview:offer          { roomId, targetUserId, sdp }
- *   interview:answer         { roomId, targetUserId, sdp }
- *   interview:ice-candidate  { roomId, targetUserId, candidate }
- *   interview:leave-room     { roomId }
- *   interview:toggle-media   { roomId, micOn?, camOn?, screenSharing? }
- *   interview:chat-message   { roomId, message }
- *
- * Server → Client events:
- *   interview:room-users
- *   interview:user-joined
- *   interview:user-left
- *   interview:offer
- *   interview:answer
- *   interview:ice-candidate
- *   interview:user-media-toggled
- *   interview:chat-message
- */
-
-// ─── Payload types ────────────────────────────────────────────────────────────
-
-type JoinPayload = {
-  roomId: string;
+type RoomUser = {
   userId: string;
   name?: string;
-  role?: 'candidate' | 'recruiter' | string;
+  role?: string;
+  micOn?: boolean;
+  camOn?: boolean;
+  screenSharing?: boolean;
 };
 
-type SessionDescriptionPayload = {
+type SDP = {
   type: 'offer' | 'answer' | 'pranswer' | 'rollback';
-  sdp: string;
+  sdp?: string;
 };
 
-type IceCandidatePayload = {
+type ICE = {
   candidate: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
   usernameFragment?: string | null;
 };
 
-type SignalPayload = {
-  roomId: string;
-  targetUserId: string;
-  sdp?: SessionDescriptionPayload;
-  candidate?: IceCandidatePayload;
-};
-
-type TogglePayload = {
-  roomId: string;
-  micOn?: boolean;
-  camOn?: boolean;
-  screenSharing?: boolean; // ← new: tracks screen-share state for all peers
-};
-
-type ChatPayload = {
-  roomId: string;
-  message: string;
-};
-
-// ─── Room member ──────────────────────────────────────────────────────────────
-
-type Member = {
-  socketId: string;
-  userId: string;
-  name?: string;
-  role?: string;
-  micOn: boolean;
-  camOn: boolean;
-  screenSharing: boolean; // ← new
-};
-
-// ─── Gateway ──────────────────────────────────────────────────────────────────
-
+@Injectable()
 @WebSocketGateway({
   namespace: '/interview',
   cors: { origin: true, credentials: true },
+  transports: ['websocket'],
 })
 export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer()
-  server!: Server;
-
+  @WebSocketServer() server!: Server;
   private readonly logger = new Logger(InterviewGateway.name);
 
-  /** roomId → userId → Member */
-  private readonly rooms = new Map<string, Map<string, Member>>();
+  // roomId -> (userId -> user meta)
+  private readonly roomUsers = new Map<string, Map<string, RoomUser>>();
 
-  /** socketId → { roomId, userId } */
-  private readonly socketIndex = new Map<string, { roomId: string; userId: string }>();
+  constructor(
+    private readonly interviewsService: InterviewsService,
+    private readonly jwtService: JwtService,
+  ) {}
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
+  async handleConnection(client: Socket) {
+    try {
+      const token =
+        client.handshake.auth?.token ||
+        this.extractBearer(client.handshake.headers?.authorization as string | undefined);
 
-  handleConnection(client: Socket) {
-    this.logger.log(`Socket connected: ${client.id}`);
+      if (!token) throw new ForbiddenException('Missing auth token');
+
+      const decoded = await this.jwtService.verifyAsync(token);
+      (client as any).user = {
+        id: decoded.sub ?? decoded.id,
+        role: decoded.role,
+        full_name: decoded.full_name,
+      };
+    } catch (e) {
+      this.logger.warn(`Socket auth failed: ${String(e)}`);
+      client.disconnect(true);
+    }
   }
 
   handleDisconnect(client: Socket) {
-    const indexed = this.socketIndex.get(client.id);
-    if (!indexed) return;
-    this.removeMember(indexed.roomId, indexed.userId, client.id);
+    const user = (client as any).user as { id: string } | undefined;
+    if (!user?.id) return;
+
+    for (const [roomId, usersMap] of this.roomUsers.entries()) {
+      if (usersMap.has(user.id)) {
+        usersMap.delete(user.id);
+        client.to(roomId).emit('interview:user-left', { userId: user.id });
+        if (usersMap.size === 0) this.roomUsers.delete(roomId);
+      }
+    }
   }
 
-  // ── Room management ────────────────────────────────────────────────────────
-
   @SubscribeMessage('interview:join-room')
-  handleJoinRoom(
+  async onJoinRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: JoinPayload,
+    @MessageBody() body: { roomId: string; userId: string; name?: string; role?: string },
   ) {
-    if (!payload?.roomId || !payload?.userId) return;
+    const authUser = (client as any).user as { id: string; role: string; full_name?: string };
+    if (!authUser?.id) {
+      client.emit('interview:error', { message: 'Unauthenticated' });
+      return;
+    }
 
-    const roomId = payload.roomId.trim();
-    const userId = payload.userId.trim();
+    const access = await this.interviewsService.validateRoomAccess(
+      body.roomId,
+      authUser.id,
+      authUser.role,
+    );
 
-    client.join(roomId);
+    if (!access.allowed) {
+      client.emit('interview:error', { message: 'Forbidden room access' });
+      return;
+    }
 
-    if (!this.rooms.has(roomId)) this.rooms.set(roomId, new Map());
+    await client.join(body.roomId);
 
-    const members = this.rooms.get(roomId)!;
-    members.set(userId, {
-      socketId: client.id,
-      userId,
-      name: payload.name,
-      role: payload.role,
+    let usersMap = this.roomUsers.get(body.roomId);
+    if (!usersMap) {
+      usersMap = new Map<string, RoomUser>();
+      this.roomUsers.set(body.roomId, usersMap);
+    }
+
+    usersMap.set(authUser.id, {
+      userId: authUser.id,
+      name: body.name ?? authUser.full_name,
+      role: authUser.role,
       micOn: true,
       camOn: true,
       screenSharing: false,
     });
 
-    this.socketIndex.set(client.id, { roomId, userId });
+    const allUsers = Array.from(usersMap.values());
 
-    // Send current members list to the joining user
-    client.emit('interview:room-users', {
-      roomId,
-      users: Array.from(members.values()).map(this.memberToPublic),
+    // Snapshot for the joiner
+    client.emit('interview:room-users', { users: allUsers });
+
+    // Notify others
+    client.to(body.roomId).emit('interview:user-joined', {
+      user: usersMap.get(authUser.id),
     });
-
-    // Broadcast new arrival to everyone else
-    client.to(roomId).emit('interview:user-joined', {
-      roomId,
-      user: {
-        userId,
-        name: payload.name,
-        role: payload.role,
-        micOn: true,
-        camOn: true,
-        screenSharing: false,
-      },
-    });
-
-    this.logger.log(`User ${userId} joined room ${roomId} (${members.size} total)`);
   }
 
   @SubscribeMessage('interview:leave-room')
-  handleLeaveRoom(
+  async onLeaveRoom(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { roomId: string },
   ) {
-    const indexed = this.socketIndex.get(client.id);
-    if (!indexed) return;
-    if (body?.roomId && indexed.roomId !== body.roomId) return;
-    this.removeMember(indexed.roomId, indexed.userId, client.id);
+    const authUser = (client as any).user as { id: string } | undefined;
+    if (!authUser?.id) return;
+
+    await client.leave(body.roomId);
+
+    const usersMap = this.roomUsers.get(body.roomId);
+    if (!usersMap) return;
+
+    usersMap.delete(authUser.id);
+    client.to(body.roomId).emit('interview:user-left', { userId: authUser.id });
+
+    if (usersMap.size === 0) this.roomUsers.delete(body.roomId);
   }
 
-  // ── WebRTC signaling (pure relay — no inspection needed) ───────────────────
-
   @SubscribeMessage('interview:offer')
-  handleOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: SignalPayload) {
-    this.forwardSignal(client, 'interview:offer', payload);
+  onOffer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: { roomId: string; targetUserId: string; sdp: SDP },
+  ) {
+    const authUser = (client as any).user as { id: string };
+    this.emitToUserInRoom(body.roomId, body.targetUserId, 'interview:offer', {
+      fromUserId: authUser.id,
+      sdp: body.sdp,
+    });
   }
 
   @SubscribeMessage('interview:answer')
-  handleAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: SignalPayload) {
-    this.forwardSignal(client, 'interview:answer', payload);
+  onAnswer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: { roomId: string; targetUserId: string; sdp: SDP },
+  ) {
+    const authUser = (client as any).user as { id: string };
+    this.emitToUserInRoom(body.roomId, body.targetUserId, 'interview:answer', {
+      fromUserId: authUser.id,
+      sdp: body.sdp,
+    });
   }
 
   @SubscribeMessage('interview:ice-candidate')
-  handleIceCandidate(@ConnectedSocket() client: Socket, @MessageBody() payload: SignalPayload) {
-    this.forwardSignal(client, 'interview:ice-candidate', payload);
-  }
-
-  // ── Media state ────────────────────────────────────────────────────────────
-
-  @SubscribeMessage('interview:toggle-media')
-  handleToggleMedia(
+  onIceCandidate(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: TogglePayload,
+    @MessageBody()
+    body: { roomId: string; targetUserId: string; candidate: ICE },
   ) {
-    const indexed = this.socketIndex.get(client.id);
-    if (!indexed) return;
-
-    const members = this.rooms.get(indexed.roomId);
-    const me = members?.get(indexed.userId);
-    if (!me) return;
-
-    if (typeof payload.micOn === 'boolean')        me.micOn = payload.micOn;
-    if (typeof payload.camOn === 'boolean')        me.camOn = payload.camOn;
-    if (typeof payload.screenSharing === 'boolean') me.screenSharing = payload.screenSharing;
-
-    // Broadcast updated state to everyone else in the room
-    client.to(indexed.roomId).emit('interview:user-media-toggled', {
-      roomId: indexed.roomId,
-      userId: indexed.userId,
-      micOn: me.micOn,
-      camOn: me.camOn,
-      screenSharing: me.screenSharing,
+    const authUser = (client as any).user as { id: string };
+    this.emitToUserInRoom(body.roomId, body.targetUserId, 'interview:ice-candidate', {
+      fromUserId: authUser.id,
+      candidate: body.candidate,
     });
   }
 
-  // ── In-room chat ───────────────────────────────────────────────────────────
+  @SubscribeMessage('interview:toggle-media')
+  onToggleMedia(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { roomId: string; micOn: boolean; camOn: boolean; screenSharing?: boolean },
+  ) {
+    const authUser = (client as any).user as { id: string };
+    const usersMap = this.roomUsers.get(body.roomId);
+    if (usersMap?.has(authUser.id)) {
+      const u = usersMap.get(authUser.id)!;
+      u.micOn = body.micOn;
+      u.camOn = body.camOn;
+      u.screenSharing = body.screenSharing ?? false;
+      usersMap.set(authUser.id, u);
+    }
+
+    client.to(body.roomId).emit('interview:user-media-toggled', {
+      userId: authUser.id,
+      micOn: body.micOn,
+      camOn: body.camOn,
+      screenSharing: body.screenSharing ?? false,
+    });
+  }
 
   @SubscribeMessage('interview:chat-message')
-  handleChatMessage(
+  onChatMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: ChatPayload,
+    @MessageBody() body: { roomId: string; message: string },
   ) {
-    const indexed = this.socketIndex.get(client.id);
-    if (!indexed) return;
+    const authUser = (client as any).user as { id: string; full_name?: string; role?: string };
+    const usersMap = this.roomUsers.get(body.roomId);
+    const me = usersMap?.get(authUser.id);
 
-    const message = payload?.message?.trim();
-    if (!message) return;
-
-    const members = this.rooms.get(indexed.roomId);
-    const me = members?.get(indexed.userId);
-
-    const chatEvent = {
-      roomId: indexed.roomId,
-      userId: indexed.userId,
-      name: me?.name ?? 'Participant',
-      role: me?.role,
-      message,
+    const msg = {
+      userId: authUser.id,
+      name: me?.name ?? authUser.full_name ?? 'Participant',
+      role: me?.role ?? authUser.role,
+      message: body.message,
       timestamp: new Date().toISOString(),
     };
 
-    // Echo to everyone in the room INCLUDING the sender
-    this.server.to(indexed.roomId).emit('interview:chat-message', chatEvent);
+    this.server.to(body.roomId).emit('interview:chat-message', msg);
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
+  private emitToUserInRoom(roomId: string, targetUserId: string, event: string, payload: unknown) {
+    const sockets = this.server.sockets.adapter.rooms.get(roomId);
+    if (!sockets?.size) return;
 
-  private forwardSignal(client: Socket, event: string, payload: SignalPayload) {
-    const indexed = this.socketIndex.get(client.id);
-    if (!indexed || !payload?.roomId || !payload?.targetUserId) return;
-
-    const members = this.rooms.get(payload.roomId);
-    const target = members?.get(payload.targetUserId);
-    if (!target) return;
-
-    this.server.to(target.socketId).emit(event, {
-      roomId: payload.roomId,
-      fromUserId: indexed.userId,
-      sdp: payload.sdp,
-      candidate: payload.candidate,
-    });
+    for (const socketId of sockets) {
+      const s = this.server.sockets.sockets.get(socketId);
+      const user = (s as any)?.user as { id: string } | undefined;
+      if (user?.id === targetUserId) {
+        s?.emit(event, payload);
+        return;
+      }
+    }
   }
 
-  private removeMember(roomId: string, userId: string, socketId: string) {
-    const members = this.rooms.get(roomId);
-    if (!members) return;
-
-    const existing = members.get(userId);
-    if (!existing || existing.socketId !== socketId) return;
-
-    members.delete(userId);
-    this.socketIndex.delete(socketId);
-
-    this.server.to(roomId).emit('interview:user-left', { roomId, userId });
-
-    if (members.size === 0) this.rooms.delete(roomId);
-
-    this.logger.log(`User ${userId} left room ${roomId}`);
-  }
-
-  private memberToPublic(m: Member) {
-    return {
-      userId: m.userId,
-      name: m.name,
-      role: m.role,
-      micOn: m.micOn,
-      camOn: m.camOn,
-      screenSharing: m.screenSharing,
-    };
+  private extractBearer(authHeader?: string) {
+    if (!authHeader) return null;
+    const m = authHeader.match(/^Bearer\s+(.+)$/i);
+    return m ? m[1] : null;
   }
 }

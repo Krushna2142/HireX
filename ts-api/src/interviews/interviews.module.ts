@@ -1,28 +1,22 @@
-/* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
-import { HttpModule } from '@nestjs/axios';
-import { ScheduleModule } from '@nestjs/schedule';
-import { AuthModule } from '../auth/auth.module';
-import { OllamaModule } from '../ollama/ollama.module';
-import { DatabaseModule } from '../database/datbase.module';
-import { PrismaModule } from '../../prisma/prisma.module';
-
-import { InterviewsController } from './interviews.controller';
+import { JwtModule } from '@nestjs/jwt';
+import { PrismaService } from '../../prisma/prisma.service';
 import { InterviewsService } from './interviews.service';
+import { InterviewGateway } from './interview.gateway';
+
+// If you already have controllers, keep them and add candidate/room controllers too.
 import { RecruiterInterviewsController } from './recruiter-interviews.controller';
-import { RecruiterInterviewsService } from './recruiter-interviews.service';
-import { InterviewRemindersService } from './interview-reminders.service';
+import { CandidateInterviewsController } from './candidate-interviews.controller';
+import { InterviewRoomController } from './interview-room.controller';
 
 @Module({
-  imports: [
-    HttpModule.register({ timeout: 30_000 }),
-    ScheduleModule.forRoot(),
-    AuthModule,
-    OllamaModule,
-    DatabaseModule,
-    PrismaModule,
+  imports: [JwtModule.register({})],
+  controllers: [
+    RecruiterInterviewsController,
+    CandidateInterviewsController,
+    InterviewRoomController,
   ],
-  controllers: [InterviewsController, RecruiterInterviewsController],
-  providers: [InterviewsService, RecruiterInterviewsService, InterviewRemindersService],
+  providers: [PrismaService, InterviewsService, InterviewGateway],
+  exports: [InterviewsService],
 })
 export class InterviewsModule {}

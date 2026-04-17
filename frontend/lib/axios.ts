@@ -1,5 +1,4 @@
 // lib/axios.ts — THE SINGLE HTTP CLIENT
-// Every hook and page imports `api` from here.
 // baseURL already includes /api — never append /api in call sites.
 
 import axios from 'axios';
@@ -36,7 +35,7 @@ api.interceptors.response.use(
 export default api;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Interview API helpers (both mock + recruiter real process)
+// Interview API helpers (mock + real recruiter/candidate process)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type InterviewStage =
@@ -55,7 +54,7 @@ export type InterviewStage =
   | 'WITHDRAWN';
 
 export const interviewApi = {
-  // Candidate mock interview
+  // Mock interview
   startMockSession: (payload: {
     jobTitle: string;
     company: string;
@@ -72,11 +71,9 @@ export const interviewApi = {
     api.post(`/interviews/sessions/${sessionId}/complete`),
 
   getMockHistory: () => api.get('/interviews/sessions'),
+  getMockSession: (sessionId: string) => api.get(`/interviews/sessions/${sessionId}`),
 
-  getMockSession: (sessionId: string) =>
-    api.get(`/interviews/sessions/${sessionId}`),
-
-  // Recruiter interview pipeline
+  // Recruiter
   initFromApplication: (applicationId: string) =>
     api.post(`/recruiter/interviews/${applicationId}/init`),
 
@@ -112,10 +109,14 @@ export const interviewApi = {
   getRecruiterInterview: (interviewId: string) =>
     api.get(`/recruiter/interviews/${interviewId}`),
 
-  // Candidate real interview process view (same endpoint, role-based response)
+  // Candidate (FIXED: no recruiter namespace)
   listCandidateInterviews: (params?: { statusCode?: number; limit?: number }) =>
-    api.get('/recruiter/interviews', { params }),
+    api.get('/candidate/interviews', { params }),
 
   getCandidateInterview: (interviewId: string) =>
-    api.get(`/recruiter/interviews/${interviewId}`),
+    api.get(`/candidate/interviews/${interviewId}`),
+
+  // Room access (recommended)
+  getRoomAccess: (roomId: string) =>
+    api.get(`/interviews/room/${encodeURIComponent(roomId)}/access`),
 };
