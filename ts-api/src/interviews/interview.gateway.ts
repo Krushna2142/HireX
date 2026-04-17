@@ -13,25 +13,29 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 
 /**
- * Interview signaling gateway for WebRTC.
+ * Interview signaling + chat gateway.
  *
- * Client -> Server:
- * - interview:join-room      { roomId, userId, name?, role? }
- * - interview:offer          { roomId, targetUserId, sdp }
- * - interview:answer         { roomId, targetUserId, sdp }
- * - interview:ice-candidate  { roomId, targetUserId, candidate }
- * - interview:leave-room     { roomId }
- * - interview:toggle-media   { roomId, micOn?, camOn? }
+ * Client → Server events:
+ *   interview:join-room      { roomId, userId, name?, role? }
+ *   interview:offer          { roomId, targetUserId, sdp }
+ *   interview:answer         { roomId, targetUserId, sdp }
+ *   interview:ice-candidate  { roomId, targetUserId, candidate }
+ *   interview:leave-room     { roomId }
+ *   interview:toggle-media   { roomId, micOn?, camOn?, screenSharing? }
+ *   interview:chat-message   { roomId, message }
  *
- * Server -> Client:
- * - interview:room-users
- * - interview:user-joined
- * - interview:user-left
- * - interview:offer
- * - interview:answer
- * - interview:ice-candidate
- * - interview:user-media-toggled
+ * Server → Client events:
+ *   interview:room-users
+ *   interview:user-joined
+ *   interview:user-left
+ *   interview:offer
+ *   interview:answer
+ *   interview:ice-candidate
+ *   interview:user-media-toggled
+ *   interview:chat-message
  */
+
+// ─── Payload types ────────────────────────────────────────────────────────────
 
 type JoinPayload = {
   roomId: string;
@@ -40,12 +44,6 @@ type JoinPayload = {
   role?: 'candidate' | 'recruiter' | string;
 };
 
-/**
- * IMPORTANT:
- * Do NOT use browser-only DOM types in Nest backend
- * (e.g. RTCSessionDescriptionInit, RTCIceCandidateInit).
- * Define JSON-compatible payload types instead.
- */
 type SessionDescriptionPayload = {
   type: 'offer' | 'answer' | 'pranswer' | 'rollback';
   sdp: string;
@@ -69,7 +67,15 @@ type TogglePayload = {
   roomId: string;
   micOn?: boolean;
   camOn?: boolean;
+  screenSharing?: boolean; // ← new: tracks screen-share state for all peers
 };
+
+type ChatPayload = {
+  roomId: string;
+  message: string;
+};
+
+// ─── Room member ──────────────────────────────────────────────────────────────
 
 type Member = {
   socketId: string;
@@ -78,14 +84,14 @@ type Member = {
   role?: string;
   micOn: boolean;
   camOn: boolean;
+  screenSharing: boolean; // ← new
 };
+
+// ─── Gateway ──────────────────────────────────────────────────────────────────
 
 @WebSocketGateway({
   namespace: '/interview',
-  cors: {
-    origin: true,
-    credentials: true,
-  },
+  cors: { origin: true, credentials: true },
 })
 export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -93,11 +99,13 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   private readonly logger = new Logger(InterviewGateway.name);
 
-  /** roomId -> userId -> Member */
+  /** roomId → userId → Member */
   private readonly rooms = new Map<string, Map<string, Member>>();
 
-  /** socketId -> { roomId, userId } */
+  /** socketId → { roomId, userId } */
   private readonly socketIndex = new Map<string, { roomId: string; userId: string }>();
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   handleConnection(client: Socket) {
     this.logger.log(`Socket connected: ${client.id}`);
@@ -106,10 +114,10 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
   handleDisconnect(client: Socket) {
     const indexed = this.socketIndex.get(client.id);
     if (!indexed) return;
-
-    const { roomId, userId } = indexed;
-    this.removeMember(roomId, userId, client.id);
+    this.removeMember(indexed.roomId, indexed.userId, client.id);
   }
+
+  // ── Room management ────────────────────────────────────────────────────────
 
   @SubscribeMessage('interview:join-room')
   handleJoinRoom(
@@ -133,23 +141,18 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
       role: payload.role,
       micOn: true,
       camOn: true,
+      screenSharing: false,
     });
 
     this.socketIndex.set(client.id, { roomId, userId });
 
-    // Send current members to joiner
+    // Send current members list to the joining user
     client.emit('interview:room-users', {
       roomId,
-      users: Array.from(members.values()).map((m) => ({
-        userId: m.userId,
-        name: m.name,
-        role: m.role,
-        micOn: m.micOn,
-        camOn: m.camOn,
-      })),
+      users: Array.from(members.values()).map(this.memberToPublic),
     });
 
-    // Notify others
+    // Broadcast new arrival to everyone else
     client.to(roomId).emit('interview:user-joined', {
       roomId,
       user: {
@@ -158,35 +161,42 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
         role: payload.role,
         micOn: true,
         camOn: true,
+        screenSharing: false,
       },
     });
 
-    this.logger.log(`User ${userId} joined room ${roomId}`);
+    this.logger.log(`User ${userId} joined room ${roomId} (${members.size} total)`);
   }
 
-  @SubscribeMessage('interview:offer')
-  handleOffer(
+  @SubscribeMessage('interview:leave-room')
+  handleLeaveRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: SignalPayload,
+    @MessageBody() body: { roomId: string },
   ) {
+    const indexed = this.socketIndex.get(client.id);
+    if (!indexed) return;
+    if (body?.roomId && indexed.roomId !== body.roomId) return;
+    this.removeMember(indexed.roomId, indexed.userId, client.id);
+  }
+
+  // ── WebRTC signaling (pure relay — no inspection needed) ───────────────────
+
+  @SubscribeMessage('interview:offer')
+  handleOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: SignalPayload) {
     this.forwardSignal(client, 'interview:offer', payload);
   }
 
   @SubscribeMessage('interview:answer')
-  handleAnswer(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: SignalPayload,
-  ) {
+  handleAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: SignalPayload) {
     this.forwardSignal(client, 'interview:answer', payload);
   }
 
   @SubscribeMessage('interview:ice-candidate')
-  handleIceCandidate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: SignalPayload,
-  ) {
+  handleIceCandidate(@ConnectedSocket() client: Socket, @MessageBody() payload: SignalPayload) {
     this.forwardSignal(client, 'interview:ice-candidate', payload);
   }
+
+  // ── Media state ────────────────────────────────────────────────────────────
 
   @SubscribeMessage('interview:toggle-media')
   handleToggleMedia(
@@ -197,42 +207,60 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!indexed) return;
 
     const members = this.rooms.get(indexed.roomId);
-    if (!members) return;
-
-    const me = members.get(indexed.userId);
+    const me = members?.get(indexed.userId);
     if (!me) return;
 
-    if (typeof payload.micOn === 'boolean') me.micOn = payload.micOn;
-    if (typeof payload.camOn === 'boolean') me.camOn = payload.camOn;
+    if (typeof payload.micOn === 'boolean')        me.micOn = payload.micOn;
+    if (typeof payload.camOn === 'boolean')        me.camOn = payload.camOn;
+    if (typeof payload.screenSharing === 'boolean') me.screenSharing = payload.screenSharing;
 
+    // Broadcast updated state to everyone else in the room
     client.to(indexed.roomId).emit('interview:user-media-toggled', {
       roomId: indexed.roomId,
       userId: indexed.userId,
       micOn: me.micOn,
       camOn: me.camOn,
+      screenSharing: me.screenSharing,
     });
   }
 
-  @SubscribeMessage('interview:leave-room')
-  handleLeaveRoom(
+  // ── In-room chat ───────────────────────────────────────────────────────────
+
+  @SubscribeMessage('interview:chat-message')
+  handleChatMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { roomId: string },
+    @MessageBody() payload: ChatPayload,
   ) {
     const indexed = this.socketIndex.get(client.id);
     if (!indexed) return;
 
-    if (body?.roomId && indexed.roomId !== body.roomId) return;
-    this.removeMember(indexed.roomId, indexed.userId, client.id);
+    const message = payload?.message?.trim();
+    if (!message) return;
+
+    const members = this.rooms.get(indexed.roomId);
+    const me = members?.get(indexed.userId);
+
+    const chatEvent = {
+      roomId: indexed.roomId,
+      userId: indexed.userId,
+      name: me?.name ?? 'Participant',
+      role: me?.role,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Echo to everyone in the room INCLUDING the sender
+    this.server.to(indexed.roomId).emit('interview:chat-message', chatEvent);
   }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
 
   private forwardSignal(client: Socket, event: string, payload: SignalPayload) {
     const indexed = this.socketIndex.get(client.id);
     if (!indexed || !payload?.roomId || !payload?.targetUserId) return;
 
     const members = this.rooms.get(payload.roomId);
-    if (!members) return;
-
-    const target = members.get(payload.targetUserId);
+    const target = members?.get(payload.targetUserId);
     if (!target) return;
 
     this.server.to(target.socketId).emit(event, {
@@ -258,5 +286,16 @@ export class InterviewGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (members.size === 0) this.rooms.delete(roomId);
 
     this.logger.log(`User ${userId} left room ${roomId}`);
+  }
+
+  private memberToPublic(m: Member) {
+    return {
+      userId: m.userId,
+      name: m.name,
+      role: m.role,
+      micOn: m.micOn,
+      camOn: m.camOn,
+      screenSharing: m.screenSharing,
+    };
   }
 }
