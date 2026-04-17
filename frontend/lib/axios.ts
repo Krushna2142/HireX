@@ -1,13 +1,42 @@
-// ...existing imports
-import axios from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-const api = axios.create({
+const api: AxiosInstance = axios.create({
   baseURL: API_URL,
 });
 
-// ...existing interceptors
+// ✅ REQUEST INTERCEPTOR - Attach JWT to every request
+api.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = typeof window !== 'undefined' 
+      ? localStorage.getItem('jc_token')
+      : null;
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+
+// ✅ RESPONSE INTERCEPTOR - Handle 401 by clearing token
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('jc_token');
+        localStorage.removeItem('user');
+        // Optional: redirect to login
+        // window.location.href = '/?auth=login';
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 export default api;
 
@@ -27,7 +56,6 @@ export type InterviewStage =
   | 'WITHDRAWN';
 
 export const interviewApi = {
-  // existing methods...
   startMockSession: (payload: {
     jobTitle: string;
     company: string;
@@ -90,7 +118,6 @@ export const interviewApi = {
   getRoomAccess: (roomId: string) =>
     api.get(`/interviews/room/${encodeURIComponent(roomId)}/access`),
 
-  // ✅ ADD THIS
   getLivekitToken: (roomId: string) =>
     api.post(`/interviews/room/${encodeURIComponent(roomId)}/token`),
 };
