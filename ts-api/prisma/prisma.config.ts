@@ -1,7 +1,6 @@
 /* eslint-disable prettier/prettier */
 // prisma/prisma.config.ts
-import { defineConfig } from 'prisma/config';
-import * as fs   from 'fs';
+import * as fs from 'fs';
 import * as path from 'path';
 
 function loadEnv(): Record<string, string> {
@@ -30,9 +29,9 @@ if (!databaseUrl) {
   );
 }
 
-export default defineConfig({
+export const prismaConfig = {
   schema: 'prisma/schema.prisma',
-  datasource: {          // ← correct property name (not datasourceUrl)
-    url: databaseUrl,    // ← url lives here in config file, not in schema.prisma
+  datasource: {
+    url: databaseUrl,
   },
-});
+};

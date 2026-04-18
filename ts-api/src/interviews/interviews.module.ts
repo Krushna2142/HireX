@@ -12,7 +12,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 
 import { InterviewsController } from './interviews.controller';
-import { InterviewGateway } from './interview.gateway';
+import { InterviewGateway } from './gateway/interview.gateway';
 import { InterviewsService } from './interviews.service';
 import { WebRTCGateway } from './webrtc/webrtc.gateway';
 import { WebRTCService } from './webrtc/webrtc.service';

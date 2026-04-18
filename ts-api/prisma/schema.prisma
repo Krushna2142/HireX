@@ -2,9 +2,9 @@ generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters", "partialIndexes"]
 }
-
 datasource db {
   provider = "postgresql"
+  
 }
 
 enum InterviewStage {
@@ -299,9 +299,6 @@ model recruiter_interview_rounds {
   created_at       DateTime  @default(now()) @db.Timestamptz(6)
   updated_at       DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  // Relation to the interview_rooms table created below. This keeps the
-  // meeting_room_id column for backward compatibility while providing a
-  // Prisma-level relation to the canonical rooms table.
   meetingRoom      interview_rooms? @relation(fields: [meeting_room_id], references: [id])
 
   @@unique([interview_id, round_number])
@@ -464,4 +461,90 @@ model interview_events_log {
   @@map("interview_events_log")
   @@index([session_id], map: "idx_events_session")
   @@index([room_id], map: "idx_events_room")
+}
+
+// ======================== NEW: INTERVIEW RECORDINGS ========================
+model interview_recordings {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id            String   @map("session_id") @db.Uuid
+  recruiter_round_id    String   @map("recruiter_round_id") @db.Uuid
+  storage_path          String
+  duration_secs         Int?     @map("duration_secs")
+  file_size_bytes       Int?     @map("file_size_bytes")
+  status                String   @default("processing")
+  transcription_status  String   @default("pending")
+  created_at            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("interview_recordings")
+  @@index([session_id], map: "idx_recordings_session")
+  @@index([recruiter_round_id], map: "idx_recordings_round")
+}
+
+// ======================== NEW: AI ASSESSMENTS & FEEDBACK ========================
+model interview_ai_assessments {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id              String   @map("session_id") @db.Uuid
+  recruiter_round_id      String?  @map("recruiter_round_id") @db.Uuid
+  overall_score           Float    @map("overall_score")
+  technical_score         Float?   @map("technical_score")
+  communication_score     Float?   @map("communication_score")
+  problem_solving_score   Float?   @map("problem_solving_score")
+  strengths               String[] @default([])
+  weaknesses              String[] @default([])
+  recommendations         String[] @default([])
+  assessment_json         Json     @default("{}")
+  created_at              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("interview_ai_assessments")
+  @@index([session_id], map: "idx_ai_assessments_session")
+  @@index([recruiter_round_id], map: "idx_ai_assessments_round")
+}
+
+// ======================== NEW: RECRUITER AI NOTES ========================
+model recruiter_interview_notes {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interview_round_id    String   @map("interview_round_id") @db.Uuid
+  recruiter_id          String   @map("recruiter_id") @db.Uuid
+  note_text             String
+  ai_generated          Boolean  @default(false) @map("ai_generated")
+  confidence_score      Float?   @map("confidence_score")
+  timestamp             DateTime @default(now()) @map("timestamp") @db.Timestamptz(6)
+
+  @@map("recruiter_interview_notes")
+  @@index([interview_round_id], map: "idx_recruiter_notes_round")
+  @@index([recruiter_id], map: "idx_recruiter_notes_recruiter")
+}
+
+// ======================== NEW: MOCK INTERVIEW SESSIONS ========================
+model mock_interview_sessions {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  candidate_id          String   @map("candidate_id") @db.Uuid
+  job_title             String   @map("job_title")
+  topic                 String
+  difficulty            String   @default("mid")
+  status                String   @default("active")
+  total_questions       Int      @default(0) @map("total_questions")
+  completed_questions   Int      @default(0) @map("completed_questions")
+  overall_score         Float?   @map("overall_score")
+  started_at            DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completed_at          DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@map("mock_interview_sessions")
+  @@index([candidate_id], map: "idx_mock_interviews_candidate")
+  @@index([status], map: "idx_mock_interviews_status")
+}
+
+// ======================== NEW: MOCK INTERVIEW ANSWERS ========================
+model mock_interview_answers {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  session_id            String   @map("session_id") @db.Uuid
+  question_number       Int      @map("question_number")
+  question              String
+  user_answer           String   @map("user_answer")
+  ai_feedback           String?  @map("ai_feedback")
+  answer_score          Float?   @map("answer_score")
+  submitted_at          DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
+
+  @@map("mock_interview_answers")
+  @@index([session_id], map: "idx_mock_answers_session")
 }

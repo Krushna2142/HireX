@@ -6,13 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
   private pool: Pool;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService, // ← ADD THIS
+  ) {
     const connectionString = this.config.get<string>('database.connectionString');
 
     if (!connectionString) {
@@ -22,22 +26,18 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // ── Strip sslmode from the connection string so pg Pool config controls SSL ──
-    // Supabase pooler URLs include ?sslmode=require which causes pg to attempt
-    // full certificate verification — conflicting with rejectUnauthorized: false.
-    // We remove it from the URL and handle SSL entirely via the pool config object.
     const cleanConnectionString = connectionString
-      .replace(/[?&]sslmode=[^&]*/g, '')   // remove sslmode param
-      .replace(/[?&]ssl=[^&]*/g, '')        // remove ssl param (if present)
-      .replace(/\?$/, '');                  // clean trailing ? if it was the only param
+      .replace(/[?&]sslmode=[^&]*/g, '')
+      .replace(/[?&]ssl=[^&]*/g, '')
+      .replace(/\?$/, '');
 
     this.pool = new Pool({
       connectionString: cleanConnectionString,
       ssl: {
-        rejectUnauthorized: false,  // ← Supabase uses self-signed intermediate CA
+        rejectUnauthorized: false,
       },
-      max:                    10,
-      idleTimeoutMillis:   30_000,
+      max: 10,
+      idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     });
 
@@ -48,10 +48,15 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     try {
+      // Test pg connection
       const client = await this.pool.connect();
       await client.query('SELECT 1');
       client.release();
-      this.logger.log('✅ Database connection established successfully.');
+      this.logger.log('✅ PostgreSQL pool connected.');
+
+      // Test Prisma connection
+      await this.prisma.$queryRaw`SELECT 1`;
+      this.logger.log('✅ Prisma connected.');
     } catch (error) {
       this.logger.error(
         `[FATAL] Cannot connect to database: ${(error as Error).message}`,
@@ -61,15 +66,18 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Use raw pg pool (legacy queries)
+   */
   async query<T extends QueryResultRow = Record<string, unknown>>(
     text: string,
     params?: unknown[],
   ): Promise<QueryResult<T>> {
-    const start  = Date.now();
+    const start = Date.now();
     const client = await this.pool.connect();
 
     try {
-      const result   = await client.query<T>(text, params);
+      const result = await client.query<T>(text, params);
       const duration = Date.now() - start;
 
       if (duration > 1000) {
@@ -87,6 +95,13 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Get Prisma client (for new features)
+   */
+  getPrisma() {
+    return this.prisma;
   }
 
   async getClient(): Promise<PoolClient> {
@@ -113,6 +128,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.pool.end();
-    this.logger.log('Database pool closed.');
+    await this.prisma.$disconnect();
+    this.logger.log('Database connections closed.');
   }
 }

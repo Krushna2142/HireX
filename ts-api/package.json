@@ -22,6 +22,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@nativedocuments/docx-wasm": "^2.2.13-1561490777",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bullmq": "^11.0.4",
