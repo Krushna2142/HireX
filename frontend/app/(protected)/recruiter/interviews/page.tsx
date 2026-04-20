@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { interviewApi } from '@/lib/axios';
+import { interviewApi, type InterviewStage } from '@/lib/axios';
 
 type InterviewItem = {
   id: string;
-  current_stage: string;
+  current_stage: InterviewStage;
   status_code: number;
   final_status: string | null;
   updated_at: string;
@@ -19,14 +19,27 @@ type InterviewItem = {
 type RoundItem = {
   id: string;
   round_number: number;
-  round_type: 'hr' | 'technical' | 'managerial' | 'assignment';
+  round_type: RoundType;
   scheduled_at: string | null;
   duration_mins: number | null;
-  mode: 'video' | 'phone' | 'offline' | null;
+  mode: InterviewMode | null;
   meeting_join_url: string | null;
-  result: 'pending' | 'pass' | 'fail' | 'no_show' | 'reschedule' | null;
+  result: RoundResult | null;
   score: number | null;
   feedback: string | null;
+};
+
+type RoundType = 'hr' | 'technical' | 'managerial' | 'assignment';
+type InterviewMode = 'video' | 'phone' | 'offline';
+type RoundResult = 'pending' | 'pass' | 'fail' | 'no_show' | 'reschedule';
+
+type InterviewEvent = {
+  id: string;
+  event_type: string;
+  from_stage?: string | null;
+  to_stage?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
 };
 
 const S = {
@@ -64,27 +77,40 @@ const stages = [
   'REJECTED',
   'ON_HOLD',
   'WITHDRAWN',
-] as const;
+] as const satisfies readonly InterviewStage[];
 
 export default function RecruiterInterviewsPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<InterviewItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rounds, setRounds] = useState<RoundItem[]>([]);
+  const [events, setEvents] = useState<InterviewEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [schedOpen, setSchedOpen] = useState(false);
   const [schedBusy, setSchedBusy] = useState(false);
-  const [roundType, setRoundType] = useState<'hr' | 'technical' | 'managerial' | 'assignment'>('technical');
+  const [roundType, setRoundType] = useState<RoundType>('technical');
   const [scheduledAt, setScheduledAt] = useState('');
   const [durationMins, setDurationMins] = useState(45);
-  const [mode, setMode] = useState<'video' | 'phone' | 'offline'>('video');
+  const [mode, setMode] = useState<InterviewMode>('video');
 
   const [updatingStage, setUpdatingStage] = useState(false);
 
   const selectedInterview = useMemo(
     () => items.find((x) => x.id === selectedId) ?? null,
     [items, selectedId],
+  );
+
+  const stats = useMemo(
+    () => ({
+      total: items.length,
+      scheduled: items.filter((item) => item.current_stage === 'INTERVIEW_SCHEDULED').length,
+      active: items.filter((item) =>
+        ['INTERVIEW_IN_PROGRESS', 'INTERVIEW_PASSED', 'FINAL_REVIEW', 'OFFERED'].includes(item.current_stage),
+      ).length,
+      hired: items.filter((item) => item.current_stage === 'HIRED').length,
+    }),
+    [items],
   );
 
   const loadList = async () => {
@@ -95,8 +121,8 @@ export default function RecruiterInterviewsPage() {
       setItems(data);
       setSelectedId((prev) => (prev && data.some((x) => x.id === prev) ? prev : data[0]?.id ?? null));
       setError(null);
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Failed to load recruiter interviews');
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, 'Failed to load recruiter interviews'));
     } finally {
       setLoading(false);
     }
@@ -106,8 +132,10 @@ export default function RecruiterInterviewsPage() {
     try {
       const res = await interviewApi.getRecruiterInterview(id);
       setRounds((res.data?.rounds ?? []) as RoundItem[]);
+      setEvents((res.data?.events ?? []) as InterviewEvent[]);
     } catch {
       setRounds([]);
+      setEvents([]);
     }
   };
 
@@ -147,43 +175,43 @@ export default function RecruiterInterviewsPage() {
         mode,
       });
       setSchedOpen(false);
+      setScheduledAt('');
       await loadDetail(selectedInterview.id);
       await loadList();
-    } catch (e: any) {
-      alert(e?.response?.data?.message ?? 'Failed to schedule round');
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to schedule round'));
     } finally {
       setSchedBusy(false);
     }
   };
 
-  const updateStage = async (stage: (typeof stages)[number]) => {
+  const updateStage = async (stage: InterviewStage) => {
     if (!selectedInterview) return;
     try {
       setUpdatingStage(true);
       await interviewApi.updateStage(selectedInterview.id, stage);
       await loadList();
       await loadDetail(selectedInterview.id);
-    } catch (e: any) {
-      alert(e?.response?.data?.message ?? 'Failed to update stage');
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to update stage'));
     } finally {
       setUpdatingStage(false);
     }
   };
 
-  const submitRoundResult = async (roundId: string, result: 'pending' | 'pass' | 'fail' | 'no_show' | 'reschedule') => {
+  const submitRoundResult = async (roundId: string, result: RoundResult) => {
     try {
       await interviewApi.submitRoundResult(roundId, { result });
       if (selectedInterview) await loadDetail(selectedInterview.id);
       await loadList();
-    } catch (e: any) {
-      alert(e?.response?.data?.message ?? 'Failed to update round result');
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to update round result'));
     }
   };
 
   const joinRoom = (round: RoundItem) => {
     if (!selectedInterview) return;
-    const roomId = `jc-${selectedInterview.id}-r${round.round_number}`;
-    window.location.href = `/interviews/room/${roomId}`;
+    window.location.href = buildInterviewRoomPath(selectedInterview.id, round.round_number);
   };
 
   return (
@@ -194,6 +222,30 @@ export default function RecruiterInterviewsPage() {
       </p>
 
       {error && <div style={{ color: '#FCA5A5', marginBottom: 12 }}>{error}</div>}
+
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 16 }}>
+        {[
+          { label: 'Tracked', value: stats.total, color: S.blue },
+          { label: 'Scheduled', value: stats.scheduled, color: S.purple },
+          { label: 'Active Review', value: stats.active, color: S.amber },
+          { label: 'Hired', value: stats.hired, color: S.green },
+        ].map((card) => (
+          <div
+            key={card.label}
+            style={{
+              padding: 14,
+              borderRadius: 10,
+              border: `1px solid ${card.color}33`,
+              background: `${card.color}14`,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 800, color: card.color, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              {card.label}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 26, fontWeight: 800 }}>{card.value}</div>
+          </div>
+        ))}
+      </section>
 
       {nextRound && selectedInterview && (
         <section style={{ marginBottom: 16, padding: 14, border: `1px solid ${S.blue}44`, borderRadius: 10, background: `${S.blue}14` }}>
@@ -272,8 +324,8 @@ export default function RecruiterInterviewsPage() {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <select
                     disabled={updatingStage}
-                    defaultValue={selectedInterview.current_stage}
-                    onChange={(e) => void updateStage(e.target.value as (typeof stages)[number])}
+                    value={selectedInterview.current_stage}
+                    onChange={(e) => void updateStage(e.target.value as InterviewStage)}
                     style={{
                       background: 'rgba(255,255,255,.05)',
                       border: `1px solid ${S.border}`,
@@ -310,7 +362,7 @@ export default function RecruiterInterviewsPage() {
                 <div style={{ marginTop: 12, padding: 10, border: `1px solid ${S.border}`, borderRadius: 10, background: 'rgba(255,255,255,.03)' }}>
                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Schedule New Round</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8 }}>
-                    <select value={roundType} onChange={(e) => setRoundType(e.target.value as any)} style={{ ...inputStyle }}>
+                    <select value={roundType} onChange={(e) => setRoundType(e.target.value as RoundType)} style={inputStyle}>
                       <option value="hr">HR</option>
                       <option value="technical">Technical</option>
                       <option value="managerial">Managerial</option>
@@ -333,7 +385,7 @@ export default function RecruiterInterviewsPage() {
                       style={inputStyle}
                     />
 
-                    <select value={mode} onChange={(e) => setMode(e.target.value as any)} style={inputStyle}>
+                    <select value={mode} onChange={(e) => setMode(e.target.value as InterviewMode)} style={inputStyle}>
                       <option value="video">Video</option>
                       <option value="phone">Phone</option>
                       <option value="offline">Offline</option>
@@ -381,6 +433,15 @@ export default function RecruiterInterviewsPage() {
 
                       <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button onClick={() => joinRoom(r)} style={linkBtn}>Join Room</button>
+                        <button
+                          onClick={() => {
+                            if (!selectedInterview) return;
+                            window.location.href = `/recruiter/interviews/${selectedInterview.id}/feedback?roundId=${r.id}`;
+                          }}
+                          style={miniBtn(S.purple, '#140C2C')}
+                        >
+                          Feedback
+                        </button>
                         <button onClick={() => void submitRoundResult(r.id, 'pass')} style={miniBtn(S.green, '#052E16')}>Mark Pass</button>
                         <button onClick={() => void submitRoundResult(r.id, 'fail')} style={miniBtn(S.red, '#fff')}>Mark Fail</button>
                         <button onClick={() => void submitRoundResult(r.id, 'no_show')} style={miniBtn(S.amber, '#111827')}>No Show</button>
@@ -395,6 +456,24 @@ export default function RecruiterInterviewsPage() {
                     </div>
                   ))}
                 </div>
+              )}
+
+              {events.length > 0 && (
+                <>
+                  <h3 style={{ margin: '16px 0 8px', fontSize: 14 }}>Tracking Timeline</h3>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {events.slice(0, 8).map((event) => (
+                      <div key={event.id} style={{ border: `1px solid ${S.border}`, borderRadius: 8, padding: 10 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700 }}>
+                          {formatEvent(event)}
+                        </div>
+                        <div style={{ marginTop: 4, fontSize: 11, color: S.muted }}>
+                          {new Date(event.created_at).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -435,3 +514,70 @@ const miniBtn = (bg: string, color: string): React.CSSProperties => ({
   fontSize: 12,
   cursor: 'pointer',
 });
+
+function formatEvent(event: InterviewEvent): string {
+  if (event.event_type === 'stage_changed' || event.event_type === 'STATUS_CHANGED') {
+    return `Stage moved from ${event.from_stage ?? 'unknown'} to ${event.to_stage ?? 'unknown'}`;
+  }
+
+  if (event.event_type === 'round_scheduled') {
+    const roundNumber = getNumber(event.metadata, 'round_number');
+    return roundNumber ? `Round ${roundNumber} scheduled` : 'Round scheduled';
+  }
+
+  if (event.event_type === 'ROUND_COMPLETED' || event.event_type === 'round_result_submitted') {
+    const roundId = getString(event.metadata, 'roundId') ?? getString(event.metadata, 'round_id');
+    const result = getString(event.metadata, 'result');
+    if (result) {
+      return `${roundId ? `Round ${roundId}` : 'Interview round'} marked ${result.replaceAll('_', ' ')}`;
+    }
+  }
+
+  const labels: Record<string, string> = {
+    round_scheduled: 'Round scheduled',
+    round_result_submitted: 'Round result submitted',
+    room_started: 'Live room started',
+    room_ended: 'Live room ended',
+    STATUS_CHANGED: 'Status changed',
+    ROUND_COMPLETED: 'Round completed',
+  };
+
+  return labels[event.event_type] ?? event.event_type.replaceAll('_', ' ');
+}
+
+function buildInterviewRoomPath(interviewId: string, roundNumber: number): string {
+  return `/interviews/room/jc-${interviewId}-r${roundNumber}`;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'data' in error.response &&
+    typeof error.response.data === 'object' &&
+    error.response.data !== null &&
+    'message' in error.response.data &&
+    typeof error.response.data.message === 'string'
+  ) {
+    return error.response.data.message;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function getNumber(metadata: InterviewEvent['metadata'], key: string): number | null {
+  const value = metadata?.[key];
+  return typeof value === 'number' ? value : null;
+}
+
+function getString(metadata: InterviewEvent['metadata'], key: string): string | null {
+  const value = metadata?.[key];
+  return typeof value === 'string' ? value : null;
+}

@@ -343,7 +343,18 @@ export class AuthService {
     return { message: 'Password reset successful. You can now log in.' };
   }
 
-  async getMe(userId: string) {
+  async getMe(userId: string, role?: string) {
+    if (role === 'admin' && userId.startsWith('admin:')) {
+      return {
+        id: userId,
+        full_name: 'Platform Admin',
+        email: 'admin@jobcrawler.local',
+        role: 'admin',
+        password_hash: '',
+        created_at: new Date(0),
+      };
+    }
+
     const result = await this.db.query<UserRow>(
       'SELECT id, full_name, email, role, created_at FROM users WHERE id = $1',
       [userId],

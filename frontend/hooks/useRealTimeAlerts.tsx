@@ -240,9 +240,7 @@ export function useMyApplications() {
       },
     ];
     await mutate(optimistic, false);
-    try { await api.post(`/jobs/${jobId}/apply`); }
-    catch { await mutate(); }
-    await mutate();
+    void mutate();
   };
 
   return {

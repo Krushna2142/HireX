@@ -2,7 +2,7 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const TOKEN_KEY = 'jc_token';
 
-export type UserRole = 'candidate' | 'recruiter';
+export type UserRole = 'candidate' | 'recruiter' | 'admin';
 
 export interface User {
   id: string;
@@ -18,7 +18,7 @@ export interface AuthResponse {
 }
 
 export function roleRedirectPath(role: UserRole): string {
-
+  if (role === 'admin') return '/admin/dashboard';
   return '/dashboard';
 }
 
@@ -54,7 +54,12 @@ async function parseError(res: Response, fallback: string): Promise<Error> {
   return err;
 }
 
-export async function register(full_name: string, email: string, password: string, role: UserRole): Promise<AuthResponse> {
+export async function register(
+  full_name: string,
+  email: string,
+  password: string,
+  role: Exclude<UserRole, 'admin'>,
+): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

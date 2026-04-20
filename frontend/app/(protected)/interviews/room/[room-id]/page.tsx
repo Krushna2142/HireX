@@ -1,211 +1,135 @@
 'use client';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// /app/(protected)/interviews/room/[room-id]/page.tsx
+// frontend/app/(protected)/interviews/room/[room-id]/page.tsx
 //
-// Production Google Meet-like video conferencing room.
+// Production-grade live interview room.
 //
 // Architecture:
-//   - LiveKit provides the WebRTC transport layer (STUN/TURN, SFU)
-//   - Custom React UI built on top of LiveKit's hooks
-//   - Three phases: pre-join → connected → ended
-//   - Side panels: chat, participants, AI scoring notes (recruiter only)
-//   - Full Google Meet feature parity: grid layout, controls, screen share
-// ─────────────────────────────────────────────────────────────────────────────
+//   - Uses useWebRTCRoom hook (existing) for all WebRTC + socket logic
+//   - Clean video grid with participant tiles
+//   - Controls bar: mic, camera, screen share, chat, leave, end (recruiter)
+//   - Chat panel (slide-in)
+//   - Interview timer
+//   - Recruiter: "End & Give Feedback" button after minimum 5 mins
+//   - Candidate: can view current stage + notes
+//   - Error states handled gracefully
+//
+// Route params:
+//   roomId format: jc-{interviewId}-r{roundNumber}
 
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+  useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { interviewApi } from '@/lib/axios';
-import { useAuth } from '@/components/providers/AuthProvider';
-import {
-  LiveKitRoom,
-  RoomAudioRenderer,
-  useConnectionState,
-  useLocalParticipant,
-  useParticipants,
-  useTracks,
-  VideoTrack,
-  TrackReference,
-} from '@livekit/components-react';
-import { ConnectionState, Track } from 'livekit-client';
-import '@livekit/components-styles';
+import { useAuth }              from '@/components/providers/AuthProvider';
+import { useWebRTCRoom }        from '@/hooks/useWebRTCRoom';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Utility: format timer
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Panel = 'chat' | 'participants' | 'notes' | null;
-
-interface ChatMsg {
-  id: string;
-  sender: string;
-  text: string;
-  ts: number;
-  isMe: boolean;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CSS-in-JS tokens (matches the app dark theme)
-// ─────────────────────────────────────────────────────────────────────────────
-const T = {
-  bg:       '#0A0D14',
-  surface:  '#111827',
-  card:     '#161D2B',
-  border:   'rgba(255,255,255,0.08)',
-  muted:    'rgba(255,255,255,0.45)',
-  faint:    'rgba(255,255,255,0.2)',
-  text:     '#F1F5F9',
-  sky:      '#38BDF8',
-  green:    '#10B981',
-  amber:    '#F59E0B',
-  red:      '#EF4444',
-  purple:   '#A78BFA',
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Type Guards
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * ✅ FIXED: Type guard to check if track is a real TrackReference (not placeholder)
- */
-function isTrackReference(track: any): track is TrackReference {
-  return (
-    track &&
-    typeof track === 'object' &&
-    'publication' in track &&
-    track.publication !== undefined
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Utility
-// ─────────────────────────────────────────────────────────────────────────────
-function useClock() {
-  const [time, setTime] = useState('');
-  useEffect(() => {
-    const update = () => setTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
-    update();
-    const iv = setInterval(update, 10_000);
-    return () => clearInterval(iv);
-  }, []);
-  return time;
-}
-
-function useMeetDuration(connected: boolean) {
-  const [secs, setSecs] = useState(0);
-  const startRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!connected) return;
-    startRef.current = Date.now();
-    const iv = setInterval(() => setSecs(Math.floor((Date.now() - startRef.current!) / 1000)), 1000);
-    return () => clearInterval(iv);
-  }, [connected]);
-  const m = Math.floor(secs / 60);
+function formatTime(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
-  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ParticipantTile — renders a single video participant
+// VideoTile
 // ─────────────────────────────────────────────────────────────────────────────
-function ParticipantTile({ track, isLocal, name }: {
-  track: TrackReference;  // ✅ FIXED: Accept only valid TrackReference, not placeholder
-  isLocal: boolean;
-  name: string;
+
+function VideoTile({
+  stream,
+  name,
+  isSelf,
+  micOn,
+  camOn,
+  isActive,
+}: {
+  stream:   MediaStream | null;
+  name:     string;
+  isSelf:   boolean;
+  micOn:    boolean;
+  camOn:    boolean;
+  isActive: boolean;
 }) {
-  const [speaking, setSpeaking] = useState(false);
-  const participant = track.participant;
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (!participant) return;
-    const check = () => setSpeaking(participant.isSpeaking);
-    const iv = setInterval(check, 200);
-    return () => clearInterval(iv);
-  }, [participant]);
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
 
-  const isMuted = participant?.isMicrophoneEnabled === false;
-  const isCamOff = participant?.isCameraEnabled === false;
-  const displayName = name || participant?.identity || 'Participant';
-  const initials = displayName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+  const initials = name
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <div style={{
-      position: 'relative',
-      borderRadius: 12,
-      overflow: 'hidden',
-      background: T.card,
-      border: speaking ? `2px solid ${T.green}` : `1px solid ${T.border}`,
-      transition: 'border-color 0.2s ease',
-      boxShadow: speaking ? `0 0 16px ${T.green}40` : 'none',
-      aspectRatio: '16/9',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
+      position: 'relative', borderRadius: 12, overflow: 'hidden',
+      background: '#0B0F1C', aspectRatio: '16/9',
+      border: isActive ? '2px solid #38BDF8' : '1px solid rgba(255,255,255,0.08)',
+      transition: 'border-color 0.2s',
+      boxShadow: isActive ? '0 0 20px rgba(56,189,248,0.2)' : 'none',
     }}>
-      {/* Video or avatar */}
-      {isCamOff ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      {stream && camOn ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted={isSelf}
+          playsInline
+          style={{
+            width: '100%', height: '100%', objectFit: 'cover',
+            transform: isSelf ? 'scaleX(-1)' : 'none',
+          }}
+        />
+      ) : (
+        <div style={{
+          width: '100%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 8,
+        }}>
           <div style={{
             width: 64, height: 64, borderRadius: '50%',
-            background: `linear-gradient(135deg, ${T.purple}, ${T.sky})`,
+            background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 24, fontWeight: 700, color: '#fff',
+            fontSize: 22, fontWeight: 700, color: '#fff',
           }}>
             {initials}
           </div>
-          <span style={{ fontSize: 12, color: T.muted }}>{displayName}</span>
+          {!camOn && (
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Camera off</span>
+          )}
         </div>
-      ) : (
-        // ✅ FIXED: Only render VideoTrack for valid TrackReference
-        isTrackReference(track) && (
-          <VideoTrack
-            trackRef={track}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        )
       )}
 
-      {/* Bottom overlay */}
+      {/* Name badge */}
       <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
-        padding: '20px 10px 8px',
-        background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        position: 'absolute', bottom: 8, left: 8,
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'rgba(0,0,0,0.65)', borderRadius: 8,
+        padding: '4px 10px', backdropFilter: 'blur(4px)',
       }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>
-          {displayName}{isLocal && ' (You)'}
+          {name}{isSelf ? ' (You)' : ''}
         </span>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {isMuted && (
-            <div style={{
-              width: 22, height: 22, borderRadius: '50%', background: T.red,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10,
-            }}>🔇</div>
-          )}
-          {speaking && !isMuted && (
-            <div style={{
-              width: 22, height: 22, borderRadius: '50%', background: T.green,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10,
-            }}>🎤</div>
-          )}
-        </div>
+        {!micOn && <span style={{ fontSize: 12 }}>🔇</span>}
       </div>
 
-      {/* Local label */}
-      {isLocal && (
+      {/* Self label */}
+      {isSelf && (
         <div style={{
           position: 'absolute', top: 8, right: 8,
-          fontSize: 10, padding: '2px 6px', borderRadius: 4,
-          background: 'rgba(0,0,0,0.5)', color: T.muted,
+          background: 'rgba(56,189,248,0.2)', border: '1px solid rgba(56,189,248,0.4)',
+          borderRadius: 6, padding: '2px 7px', fontSize: 10, color: '#38BDF8', fontWeight: 700,
         }}>
-          You
+          YOU
         </div>
       )}
     </div>
@@ -213,1055 +137,543 @@ function ParticipantTile({ track, isLocal, name }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VideoGrid — responsive layout based on participant count
+// ChatPanel
 // ─────────────────────────────────────────────────────────────────────────────
-function VideoGrid({ localName, isRecruiter }: { localName: string; isRecruiter: boolean }) {
-  // ✅ FIXED: Get all tracks including placeholders
-  const allTracks = useTracks([
-    { source: Track.Source.Camera, withPlaceholder: true },
-    { source: Track.Source.ScreenShare, withPlaceholder: false },
-  ]);
 
-  // ✅ FIXED: Filter to only valid TrackReference objects
-  const cameraTracks = allTracks.filter(isTrackReference);
-
-  const { localParticipant } = useLocalParticipant();
-  const participants = useParticipants();
-
-  const count = Math.max(1, cameraTracks.length);
-
-  const gridStyle = useMemo((): React.CSSProperties => {
-    if (count === 1) return {
-      display: 'grid',
-      gridTemplateColumns: '1fr',
-      gridTemplateRows: '1fr',
-    };
-    if (count === 2) return {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-    };
-    if (count <= 4) return {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gridTemplateRows: 'repeat(2, 1fr)',
-    };
-    if (count <= 6) return {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(3, 1fr)',
-      gridTemplateRows: 'repeat(2, 1fr)',
-    };
-    return {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(3, 1fr)',
-      gridTemplateRows: 'repeat(3, 1fr)',
-    };
-  }, [count]);
-
-  return (
-    <div style={{
-      flex: 1,
-      padding: '12px',
-      overflow: 'hidden',
-      ...gridStyle,
-      gap: 8,
-    }}>
-      {cameraTracks.map((track) => {
-        const pid = track.participant.identity;
-        const isLocal = pid === localParticipant?.identity;
-        const p = participants.find(x => x.identity === pid);
-        const displayName = p?.name || pid || (isLocal ? localName : 'Participant');
-        return (
-          <ParticipantTile
-            key={`${pid}-${track.source}`}
-            track={track}
-            isLocal={isLocal}
-            name={displayName}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ControlButton — reusable control bar button
-// ─────────────────────────────────────────────────────────────────────────────
-function ControlBtn({
-  icon, label, active, danger, onClick, disabled,
+function ChatPanel({
+  messages,
+  onSend,
+  onClose,
+  selfId,
 }: {
-  icon: string; label: string; active?: boolean;
-  danger?: boolean; onClick?: () => void; disabled?: boolean;
+  messages: { userId: string; name: string; message: string; timestamp: string }[];
+  onSend:   (msg: string) => void;
+  onClose:  () => void;
+  selfId:   string;
 }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      title={label}
-      style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-        padding: '10px 16px', borderRadius: 12, border: 'none',
-        background: danger
-          ? (hovered ? `${T.red}CC` : `${T.red}AA`)
-          : active === false
-          ? (hovered ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.08)')
-          : (hovered ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'),
-        color: danger ? '#fff' : active === false ? T.amber : T.text,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
-        transition: 'all 0.15s ease',
-        fontFamily: 'Sora, sans-serif',
-        minWidth: 64,
-      }}
-    >
-      <span style={{ fontSize: 20 }}>{icon}</span>
-      <span style={{ fontSize: 10, fontWeight: 500, color: T.muted, whiteSpace: 'nowrap' }}>{label}</span>
-    </button>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ControlBar — bottom controls (mic, cam, screen, chat, participants, end)
-// ─────────────────────────────────────────────────────────────────────────────
-function ControlBar({
-  roomId,
-  activePanel,
-  onPanelToggle,
-  onLeave,
-  isRecruiter,
-  isHost,
-}: {
-  roomId: string;
-  activePanel: Panel;
-  onPanelToggle: (p: Panel) => void;
-  onLeave: () => void;
-  isRecruiter: boolean;
-  isHost: boolean;
-}) {
-  const { localParticipant } = useLocalParticipant();
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
-  const [screenOn, setScreenOn] = useState(false);
-
-  const toggleMic = useCallback(() => {
-    localParticipant?.setMicrophoneEnabled(!micOn);
-    setMicOn(v => !v);
-  }, [localParticipant, micOn]);
-
-  const toggleCam = useCallback(() => {
-    localParticipant?.setCameraEnabled(!camOn);
-    setCamOn(v => !v);
-  }, [localParticipant, camOn]);
-
-  const toggleScreen = useCallback(async () => {
-    try {
-      await localParticipant?.setScreenShareEnabled(!screenOn);
-      setScreenOn(v => !v);
-    } catch { /* User cancelled */ }
-  }, [localParticipant, screenOn]);
-
-  return (
-    <div style={{
-      height: 80,
-      background: 'rgba(17,24,39,0.95)',
-      backdropFilter: 'blur(12px)',
-      borderTop: `1px solid ${T.border}`,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0 24px',
-      flexShrink: 0,
-    }}>
-      {/* Left — meeting info */}
-      <div style={{ fontSize: 12, color: T.muted, minWidth: 140 }}>
-        <div style={{ color: T.text, fontWeight: 600, fontSize: 13 }}>{roomId}</div>
-        <div>Interview Room</div>
-      </div>
-
-      {/* Center — main controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <ControlBtn
-          icon={micOn ? '🎤' : '🔇'}
-          label={micOn ? 'Mute' : 'Unmute'}
-          active={micOn}
-          onClick={toggleMic}
-        />
-        <ControlBtn
-          icon={camOn ? '📹' : '📵'}
-          label={camOn ? 'Stop Video' : 'Start Video'}
-          active={camOn}
-          onClick={toggleCam}
-        />
-        <ControlBtn
-          icon={screenOn ? '🖥️' : '📺'}
-          label={screenOn ? 'Stop Share' : 'Share Screen'}
-          active={screenOn}
-          onClick={() => void toggleScreen()}
-        />
-
-        {/* Divider */}
-        <div style={{ width: 1, height: 36, background: T.border, margin: '0 4px' }} />
-
-        <ControlBtn
-          icon='💬'
-          label='Chat'
-          active={activePanel === 'chat'}
-          onClick={() => onPanelToggle(activePanel === 'chat' ? null : 'chat')}
-        />
-        <ControlBtn
-          icon='👥'
-          label='People'
-          active={activePanel === 'participants'}
-          onClick={() => onPanelToggle(activePanel === 'participants' ? null : 'participants')}
-        />
-        {isRecruiter && (
-          <ControlBtn
-            icon='🧠'
-            label='AI Notes'
-            active={activePanel === 'notes'}
-            onClick={() => onPanelToggle(activePanel === 'notes' ? null : 'notes')}
-          />
-        )}
-
-        {/* Divider */}
-        <div style={{ width: 1, height: 36, background: T.border, margin: '0 4px' }} />
-
-        <ControlBtn
-          icon='📞'
-          label={isHost ? 'End for All' : 'Leave'}
-          danger
-          onClick={onLeave}
-        />
-      </div>
-
-      {/* Right — spacer for balance */}
-      <div style={{ minWidth: 140 }} />
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ChatPanel — in-room text chat using LiveKit data channel
-// ─────────────────────────────────────────────────────────────────────────────
-function ChatPanel({ name }: { name: string }) {
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [draft, setDraft] = useState('');
-  const { localParticipant } = useLocalParticipant();
+  const [draft, setDraft]     = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const room = (localParticipant as any)?._room;
-    if (!room) return;
-    const handler = (payload: Uint8Array, participant: any) => {
-      try {
-        const data = JSON.parse(new TextDecoder().decode(payload));
-        if (data.type === 'chat') {
-          setMessages(prev => [...prev, {
-            id: `${Date.now()}-${Math.random()}`,
-            sender: data.sender,
-            text: data.text,
-            ts: Date.now(),
-            isMe: participant?.identity === localParticipant?.identity,
-          }]);
-        }
-      } catch { /* ignore malformed */ }
-    };
-    room.on('dataReceived', handler);
-    return () => room.off('dataReceived', handler);
-  }, [localParticipant]);
-
-  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length]);
 
   const send = () => {
-    const text = draft.trim();
-    if (!text) return;
-    try {
-      const payload = new TextEncoder().encode(JSON.stringify({ type: 'chat', sender: name, text }));
-      localParticipant?.publishData(payload, { reliable: true });
-      setMessages(prev => [...prev, {
-        id: `${Date.now()}-local`,
-        sender: name,
-        text,
-        ts: Date.now(),
-        isMe: true,
-      }]);
-      setDraft('');
-    } catch { /* room might not support data */ }
+    const t = draft.trim();
+    if (!t) return;
+    onSend(t);
+    setDraft('');
   };
 
-  const fmt = (ts: number) => new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, fontWeight: 700, fontSize: 14, color: T.text }}>
-        In-call Messages
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      width: 300, height: '100%',
+      background: '#0D1220', borderLeft: '1px solid rgba(255,255,255,0.07)',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#F1F5F9' }}>💬 Chat</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', fontSize: 18 }}>✕</button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {messages.length === 0 && (
-          <div style={{ color: T.muted, fontSize: 12, textAlign: 'center', marginTop: 24 }}>
-            Messages are only seen by people in the call
-          </div>
+          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.2)', textAlign: 'center', marginTop: 20 }}>
+            No messages yet
+          </p>
         )}
-        {messages.map(m => (
-          <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: m.isMe ? 'flex-end' : 'flex-start' }}>
-            <span style={{ fontSize: 10, color: T.muted }}>{m.isMe ? 'You' : m.sender} · {fmt(m.ts)}</span>
-            <div style={{
-              maxWidth: '80%', padding: '8px 12px', borderRadius: m.isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-              background: m.isMe ? `${T.sky}22` : 'rgba(255,255,255,0.05)',
-              color: T.text, fontSize: 13, lineHeight: 1.5,
-              border: `1px solid ${m.isMe ? `${T.sky}33` : T.border}`,
-            }}>
-              {m.text}
-            </div>
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-      <div style={{ padding: 12, borderTop: `1px solid ${T.border}`, display: 'flex', gap: 8 }}>
-        <input
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder='Send a message…'
-          style={{
-            flex: 1, padding: '8px 12px', borderRadius: 8,
-            background: 'rgba(255,255,255,0.05)', border: `1px solid ${T.border}`,
-            color: T.text, fontSize: 13, outline: 'none', fontFamily: 'Sora, sans-serif',
-          }}
-        />
-        <button
-          onClick={send}
-          style={{
-            padding: '8px 14px', borderRadius: 8, border: 'none',
-            background: T.sky, color: '#001018', fontWeight: 700,
-            cursor: 'pointer', fontSize: 13,
-          }}
-        >
-          ➤
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ParticipantsPanel
-// ─────────────────────────────────────────────────────────────────────────────
-function ParticipantsPanel({ localName }: { localName: string }) {
-  const participants = useParticipants();
-  const { localParticipant } = useLocalParticipant();
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, fontWeight: 700, fontSize: 14, color: T.text }}>
-        People ({participants.length})
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-        {participants.map(p => {
-          const isLocal = p.identity === localParticipant?.identity;
-          const initials = (p.name || p.identity || 'P').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+        {messages.map((msg, i) => {
+          const isSelf = msg.userId === selfId;
           return (
-            <div key={p.identity} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '8px 10px', borderRadius: 8,
-              background: p.isSpeaking ? 'rgba(16,185,129,0.08)' : 'transparent',
-              transition: 'background 0.2s',
-            }}>
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isSelf ? 'flex-end' : 'flex-start' }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 3 }}>
+                {isSelf ? 'You' : msg.name}
+              </span>
               <div style={{
-                width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                background: `linear-gradient(135deg, ${T.purple}, ${T.sky})`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 13, fontWeight: 700, color: '#fff',
-                border: p.isSpeaking ? `2px solid ${T.green}` : '2px solid transparent',
+                maxWidth: '85%', padding: '8px 12px', borderRadius: isSelf ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+                background: isSelf ? 'rgba(124,58,237,0.25)' : 'rgba(255,255,255,0.08)',
+                border: isSelf ? '1px solid rgba(124,58,237,0.35)' : '1px solid rgba(255,255,255,0.08)',
+                fontSize: 13, color: '#F1F5F9', wordBreak: 'break-word', lineHeight: 1.5,
               }}>
-                {initials}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>
-                  {p.name || p.identity}{isLocal && ' (You)'}
-                </div>
-                {p.isSpeaking && <div style={{ fontSize: 10, color: T.green }}>Speaking…</div>}
-              </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {!p.isMicrophoneEnabled && <span title='Muted' style={{ fontSize: 12 }}>🔇</span>}
-                {!p.isCameraEnabled && <span title='Camera off' style={{ fontSize: 12 }}>📵</span>}
+                {msg.message}
               </div>
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AINotesPanel — recruiter interview scorecard assistant
-// ─────────────────────────────────────────────────────────────────────────────
-function AINotesPanel({ interviewId }: { interviewId?: string }) {
-  const CRITERIA = [
-    { id: 'technical',     label: 'Technical Knowledge', weight: 30 },
-    { id: 'problemSolving', label: 'Problem Solving',    weight: 25 },
-    { id: 'communication', label: 'Communication',       weight: 20 },
-    { id: 'cultureFit',    label: 'Culture Fit',         weight: 15 },
-    { id: 'enthusiasm',    label: 'Enthusiasm',          weight: 10 },
-  ];
-
-  const [scores, setScores] = useState<Record<string, number>>(
-    Object.fromEntries(CRITERIA.map(c => [c.id, 3]))
-  );
-  const [notes, setNotes] = useState('');
-  const [rec, setRec] = useState<'Strong Hire' | 'Hire' | 'No Hire' | 'Strong No Hire'>('Hire');
-  const [saved, setSaved] = useState(false);
-
-  const weightedScore = Math.round(
-    CRITERIA.reduce((sum, c) => sum + (scores[c.id] ?? 3) * c.weight, 0) / 5
-  );
-
-  const scoreColor = weightedScore >= 75 ? T.green : weightedScore >= 55 ? T.amber : T.red;
-
-  const handleSave = async () => {
-    // In production: POST to /api/recruiter/interviews/:id/scorecard
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
-      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}` }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: T.text }}>🧠 AI Scorecard</div>
-        <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>Weighted score: {' '}
-          <span style={{ color: scoreColor, fontWeight: 700 }}>{weightedScore}/100</span>
-        </div>
+        <div ref={bottomRef} />
       </div>
 
-      <div style={{ flex: 1, padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Scoring sliders */}
-        {CRITERIA.map(c => (
-          <div key={c.id}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{c.label}</span>
-              <span style={{ fontSize: 11, color: T.muted }}>{c.weight}% · {scores[c.id] ?? 3}/5</span>
-            </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {[1,2,3,4,5].map(v => (
-                <button
-                  key={v}
-                  onClick={() => setScores(s => ({ ...s, [c.id]: v }))}
-                  style={{
-                    flex: 1, height: 24, borderRadius: 4, border: 'none',
-                    background: (scores[c.id] ?? 3) >= v
-                      ? (v >= 4 ? T.green : v >= 3 ? T.amber : T.red)
-                      : 'rgba(255,255,255,0.06)',
-                    cursor: 'pointer', transition: 'background 0.15s',
-                    opacity: (scores[c.id] ?? 3) >= v ? 1 : 0.4,
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-
-        {/* Recommendation */}
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginBottom: 6 }}>Hire Recommendation</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-            {(['Strong Hire', 'Hire', 'No Hire', 'Strong No Hire'] as const).map(r => (
-              <button
-                key={r}
-                onClick={() => setRec(r)}
-                style={{
-                  padding: '6px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                  border: rec === r
-                    ? `1px solid ${r.includes('No') ? T.red : T.green}`
-                    : `1px solid ${T.border}`,
-                  background: rec === r
-                    ? (r.includes('No') ? `${T.red}20` : `${T.green}20`)
-                    : 'rgba(255,255,255,0.03)',
-                  color: rec === r ? (r.includes('No') ? T.red : T.green) : T.muted,
-                  cursor: 'pointer', fontFamily: 'Sora, sans-serif',
-                }}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginBottom: 6 }}>Observations</div>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            rows={5}
-            placeholder='Key observations, strengths, concerns…'
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              padding: '8px 10px', borderRadius: 8,
-              background: 'rgba(255,255,255,0.04)', border: `1px solid ${T.border}`,
-              color: T.text, fontSize: 12, resize: 'vertical', outline: 'none',
-              fontFamily: 'Sora, sans-serif', lineHeight: 1.6,
-            }}
-          />
-        </div>
-
-        <button
-          onClick={() => void handleSave()}
+      {/* Input */}
+      <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: 8 }}>
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Type a message…"
           style={{
-            width: '100%', padding: '10px', borderRadius: 8,
-            background: saved ? T.green : `${T.purple}22`,
-            color: saved ? '#fff' : T.purple,
-            fontWeight: 700, fontSize: 13, cursor: 'pointer',
-            fontFamily: 'Sora, sans-serif', transition: 'all 0.2s',
-            border: `1px solid ${saved ? T.green : `${T.purple}44`}` as any,
+            flex: 1, padding: '8px 12px', borderRadius: 8,
+            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+            color: '#F1F5F9', fontSize: 13, outline: 'none',
           }}
-        >
-          {saved ? '✓ Saved!' : 'Save Scorecard'}
-        </button>
+        />
+        <button onClick={send} disabled={!draft.trim()} style={{
+          padding: '8px 12px', borderRadius: 8, border: 'none',
+          background: draft.trim() ? '#38BDF8' : 'rgba(255,255,255,0.06)',
+          color: draft.trim() ? '#001018' : 'rgba(255,255,255,0.2)',
+          fontSize: 14, cursor: draft.trim() ? 'pointer' : 'not-allowed',
+        }}>→</button>
       </div>
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MeetHeader — top bar with room info, timer, connection status
+// ControlButton
 // ─────────────────────────────────────────────────────────────────────────────
-function MeetHeader({ roomId, duration, onLayout }: {
-  roomId: string;
-  duration: string;
-  onLayout: () => void;
-}) {
-  const connState = useConnectionState();
-  const participants = useParticipants();
-  const clock = useClock();
 
-  const stateColor = connState === ConnectionState.Connected ? T.green
-    : connState === ConnectionState.Reconnecting ? T.amber : T.red;
-  const stateDot = connState === ConnectionState.Connected ? '●' : '○';
-
-  return (
-    <div style={{
-      height: 56, flexShrink: 0,
-      background: 'rgba(17,24,39,0.9)',
-      backdropFilter: 'blur(12px)',
-      borderBottom: `1px solid ${T.border}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 20px',
-    }}>
-      {/* Left */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontSize: 18, fontWeight: 800, color: T.sky, letterSpacing: '0.05em' }}>⬡</span>
-        <div>
-          <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Interview Room</span>
-          <span style={{ fontSize: 11, color: T.muted, marginLeft: 8 }}>{roomId}</span>
-        </div>
-        <span style={{ color: stateColor, fontSize: 11, fontFamily: 'monospace' }}>
-          {stateDot} {connState}
-        </span>
-      </div>
-
-      {/* Center — timer */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <span style={{
-          fontSize: 13, fontFamily: 'monospace', fontWeight: 700,
-          color: T.text, background: 'rgba(255,255,255,0.05)',
-          padding: '4px 12px', borderRadius: 6,
-        }}>
-          {duration}
-        </span>
-        <span style={{ fontSize: 12, color: T.muted }}>{clock}</span>
-        <span style={{ fontSize: 12, color: T.muted }}>👥 {participants.length}</span>
-      </div>
-
-      {/* Right */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={onLayout}
-          title='Change layout'
-          style={{
-            padding: '6px 12px', borderRadius: 6, border: `1px solid ${T.border}`,
-            background: 'rgba(255,255,255,0.04)', color: T.muted,
-            fontSize: 12, cursor: 'pointer', fontFamily: 'Sora, sans-serif',
-          }}
-        >
-          ⊞ Layout
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MeetRoom — the full meeting UI, rendered inside LiveKitRoom
-// ─────────────────────────────────────────────────────────────────────────────
-function MeetRoom({
-  roomId, interviewId, user, onLeave, isRecruiter, isHost,
+function ControlBtn({
+  icon, label, onClick, active = false, danger = false, disabled = false, badge,
 }: {
-  roomId: string;
-  interviewId?: string;
-  user: { id: string; full_name?: string; role?: string } | null;
-  onLeave: () => void;
-  isRecruiter: boolean;
-  isHost: boolean;
+  icon:      string;
+  label:     string;
+  onClick:   () => void;
+  active?:   boolean;
+  danger?:   boolean;
+  disabled?: boolean;
+  badge?:    number;
 }) {
-  const [panel, setPanel] = useState<Panel>(null);
-  const connState = useConnectionState();
-  const connected = connState === ConnectionState.Connected;
-  const duration = useMeetDuration(connected);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        style={{
+          position: 'relative', width: 48, height: 48, borderRadius: 12,
+          border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+          background: danger ? 'rgba(239,68,68,0.9)' : active ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.1)',
+          color: danger ? '#fff' : active ? '#38BDF8' : '#E2E8F0',
+          fontSize: 20, transition: 'all 0.15s', opacity: disabled ? 0.5 : 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        {icon}
+        {badge !== undefined && badge > 0 && (
+          <div style={{
+            position: 'absolute', top: -4, right: -4,
+            width: 18, height: 18, borderRadius: '50%',
+            background: '#F87171', border: '2px solid #080C14',
+            fontSize: 10, color: '#fff', fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {badge > 9 ? '9+' : badge}
+          </div>
+        )}
+      </button>
+      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>{label}</span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Room Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function InterviewRoomPage() {
+  const params   = useParams<Record<string, string | string[]>>();
+  const router   = useRouter();
+  const roomId   = getRouteParam(params, 'room-id');
+  const { user, loading: authLoading } = useAuth();
+
+  const [chatOpen,    setChatOpen]    = useState(false);
+  const [elapsed,     setElapsed]     = useState(0);
+  const [endPrompt,   setEndPrompt]   = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Parse interviewId + roundNumber from roomId (format: jc-{uuid}-r{n})
+  const parsed = useMemo(() => {
+    const m = /^jc-([a-f0-9-]+)-r(\d+)$/i.exec(roomId);
+    if (!m) return null;
+    return { interviewId: m[1], roundNumber: Number(m[2]) };
+  }, [roomId]);
+
+  // ── WebRTC ──────────────────────────────────────────────────────────────
+  const {
+    connectionState,
+    connected,
+    connecting,
+    localStream,
+    peers,
+    messages,
+    micOn,
+    camOn,
+    screenSharing,
+    error: rtcError,
+    roomEnded,
+    join,
+    leave,
+    toggleMic,
+    toggleCam,
+    startScreenShare,
+    stopScreenShare,
+    sendMessage,
+    endRoom,
+    canEndRoom,
+  } = useWebRTCRoom({
+    roomId,
+    user: user ? { id: user.id, full_name: user.full_name, role: user.role } : null,
+  });
+
+  // Auto-join when auth ready
+  useEffect(() => {
+    if (!authLoading && user?.id && roomId && !connected && !connecting) {
+      void join();
+    }
+  }, [authLoading, user?.id, roomId, connected, connecting, join]);
+
+  const timerActive = connected && (peers.length > 0 || elapsed > 0);
+
+  useEffect(() => {
+    if (timerActive) {
+      timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [timerActive]);
+
+  // Room ended — redirect
+  useEffect(() => {
+    if (roomEnded) {
+      const base = user?.role === 'recruiter' ? '/recruiter/interviews' : '/interviews';
+      setTimeout(() => router.push(base), 2500);
+    }
+  }, [roomEnded, router, user?.role]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (connected) leave();
+    };
+  }, [connected, leave]);
+
+  const handleScreenShare = useCallback(async () => {
+    try {
+      if (screenSharing) await stopScreenShare();
+      else               await startScreenShare();
+    } catch { /* user cancelled — non-fatal */ }
+  }, [screenSharing, startScreenShare, stopScreenShare]);
 
   const handleLeave = () => {
-    onLeave();
+    leave();
+    router.push(user?.role === 'recruiter' ? '/recruiter/interviews' : '/interviews');
   };
 
-  const name = user?.full_name ?? user?.role ?? 'Participant';
+  const handleEndRoom = () => {
+    if (canEndRoom) endRoom();
+  };
+
+  // ── Loading states ───────────────────────────────────────────────────────
+
+  if (authLoading || connecting) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Sora', sans-serif" }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 48, height: 48, borderRadius: '50%', border: '3px solid rgba(56,189,248,0.2)', borderTopColor: '#38BDF8', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: 0 }}>
+            {authLoading ? 'Authenticating…' : 'Connecting to interview room…'}
+          </p>
+          <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, marginTop: 6 }}>{roomId}</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Sora', sans-serif" }}>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ color: '#F87171', fontSize: 15, marginBottom: 16 }}>Authentication required</p>
+          <button onClick={() => router.push('/?auth=login')} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#38BDF8', color: '#001018', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (rtcError && connectionState === 'error') {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Sora', sans-serif" }}>
+        <div style={{ textAlign: 'center', maxWidth: 400 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h2 style={{ color: '#F87171', fontSize: 18, margin: '0 0 8px' }}>Cannot Join Room</h2>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: '0 0 20px', lineHeight: 1.6 }}>{rtcError}</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <button onClick={() => void join()} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#38BDF8', color: '#001018', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+              Retry
+            </button>
+            <button onClick={handleLeave} style={{ padding: '10px 20px', borderRadius: 8, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', fontSize: 13, cursor: 'pointer' }}>
+              Leave
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (roomEnded) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Sora', sans-serif" }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🏁</div>
+          <h2 style={{ color: '#F1F5F9', fontSize: 18, margin: '0 0 8px' }}>Interview Complete</h2>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: '0 0 6px' }}>
+            Duration: <strong style={{ color: '#38BDF8' }}>{formatTime(elapsed)}</strong>
+          </p>
+          <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 12, margin: 0 }}>Redirecting…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main room UI ─────────────────────────────────────────────────────────
+
+  const allParticipants = [
+    { userId: user.id, stream: localStream, name: user.full_name ?? 'You', isSelf: true, micOn, camOn },
+    ...peers.map(p => ({ userId: p.userId, stream: p.stream, name: p.name ?? 'Participant', isSelf: false, micOn: p.micOn, camOn: p.camOn })),
+  ];
+
+  const gridCols = allParticipants.length === 1 ? 1 : allParticipants.length <= 4 ? 2 : 3;
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', height: '100vh',
-      background: T.bg, fontFamily: 'Sora, sans-serif', color: T.text,
-      overflow: 'hidden',
+      display: 'flex', height: '100vh', background: '#030712',
+      fontFamily: "'Sora', sans-serif", color: '#E2E8F0', overflow: 'hidden',
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
       `}</style>
 
-      {/* Render all remote audio */}
-      <RoomAudioRenderer />
+      {/* ── Main area ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
-      {/* Top bar */}
-      <MeetHeader
-        roomId={roomId}
-        duration={duration}
-        onLayout={() => {}}
-      />
+        {/* ── Top bar ── */}
+        <div style={{
+          padding: '10px 16px', background: 'rgba(0,0,0,0.4)',
+          backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', gap: 12,
+          borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0,
+        }}>
+          {/* Room info */}
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: connected ? '#10B981' : '#FBBF24', boxShadow: connected ? '0 0 6px #10B981' : 'none' }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#F1F5F9' }}>
+                Interview Room
+              </span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}>
+                {roomId.slice(0, 20)}…
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+              {peers.length + 1} participant{peers.length !== 0 ? 's' : ''} · {user.role}
+            </div>
+          </div>
 
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        {/* Video grid */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {/* Timer */}
+          {timerActive && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 12px', borderRadius: 8,
+              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#F87171', animation: 'spin 2s linear infinite' }} />
+              <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: '#F1F5F9' }}>
+                {formatTime(elapsed)}
+              </span>
+            </div>
+          )}
+
+          {/* Recruiter: End Room */}
+          {canEndRoom && (
+            <button
+              onClick={() => setEndPrompt(true)}
+              style={{
+                padding: '7px 16px', borderRadius: 8,
+                background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                color: '#F87171', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              🏁 End Room
+            </button>
+          )}
+        </div>
+
+        {/* ── Video grid ── */}
+        <div style={{ flex: 1, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {connected ? (
-            <VideoGrid localName={name} isRecruiter={isRecruiter} />
+            <div style={{
+              display: 'grid', gap: 10, width: '100%', height: '100%',
+              gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+              gridAutoRows: '1fr',
+            }}>
+              {allParticipants.map(p => (
+                <VideoTile
+                  key={p.userId}
+                  stream={p.stream}
+                  name={p.name}
+                  isSelf={p.isSelf}
+                  micOn={p.micOn}
+                  camOn={p.camOn}
+                  isActive={false}
+                />
+              ))}
+            </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
-              <div style={{ width: 40, height: 40, borderRadius: '50%', border: `3px solid ${T.sky}33`, borderTopColor: T.sky, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />
-              <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-              <p style={{ color: T.muted, fontSize: 14 }}>
-                {connState === ConnectionState.Reconnecting ? 'Reconnecting…' : 'Connecting to room…'}
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(56,189,248,0.2)', borderTopColor: '#38BDF8', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Connecting…</p>
+            </div>
+          )}
+
+          {/* Waiting for others */}
+          {connected && peers.length === 0 && (
+            <div style={{
+              position: 'absolute', top: '50%', left: '50%',
+              transform: 'translate(-50%, -50%)',
+              background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+              padding: '20px 32px', borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.1)',
+              textAlign: 'center', pointerEvents: 'none',
+            }}>
+              <p style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 600, color: '#F1F5F9' }}>
+                Waiting for others to join…
+              </p>
+              <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+                Share the room link or wait for the other participant
               </p>
             </div>
           )}
         </div>
 
-        {/* Side panel */}
-        {panel && (
-          <div style={{
-            width: 320, borderLeft: `1px solid ${T.border}`,
-            background: T.surface, display: 'flex', flexDirection: 'column',
-            animation: 'fadeIn 0.2s ease',
-          }}>
-            {/* Panel header with close */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '6px 12px', borderBottom: `1px solid ${T.border}` }}>
-              <button
-                onClick={() => setPanel(null)}
-                style={{ background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 16 }}
-              >
-                ✕
-              </button>
-            </div>
-            {panel === 'chat' && <ChatPanel name={name} />}
-            {panel === 'participants' && <ParticipantsPanel localName={name} />}
-            {panel === 'notes' && <AINotesPanel interviewId={interviewId} />}
-          </div>
-        )}
-      </div>
-
-      {/* Bottom control bar */}
-      <ControlBar
-        roomId={roomId}
-        activePanel={panel}
-        onPanelToggle={setPanel}
-        onLeave={handleLeave}
-        isRecruiter={isRecruiter}
-        isHost={isHost}
-      />
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PreJoin — waiting room / permission check
-// ─────────────────────────────────────────────────────────────────────────────
-function PreJoin({ roomId, user, onJoin, error }: {
-  roomId: string;
-  user: { id: string; full_name?: string; role?: string } | null;
-  onJoin: () => void;
-  error: string;
-}) {
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [previewReady, setPreviewReady] = useState(false);
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [camEnabled, setCamEnabled] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(s => {
-        if (!alive) { s.getTracks().forEach(t => t.stop()); return; }
-        streamRef.current = s;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = s;
-          void localVideoRef.current.play();
-        }
-        setPreviewReady(true);
-      })
-      .catch(() => setPreviewReady(false));
-    return () => {
-      alive = false;
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
-  }, []);
-
-  const togglePreviewMic = () => {
-    streamRef.current?.getAudioTracks().forEach(t => { t.enabled = !micEnabled; });
-    setMicEnabled(v => !v);
-  };
-  const togglePreviewCam = () => {
-    streamRef.current?.getVideoTracks().forEach(t => { t.enabled = !camEnabled; });
-    setCamEnabled(v => !v);
-  };
-
-  const name = user?.full_name || 'You';
-  const initials = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-
-  return (
-    <div style={{
-      minHeight: '100vh', background: T.bg,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'Sora, sans-serif', color: T.text,
-    }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap');`}</style>
-
-      <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32,
-        maxWidth: 900, width: '100%', margin: 24,
-      }}>
-        {/* Camera preview */}
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 6 }}>
-            Ready to join?
-          </h1>
-          <p style={{ fontSize: 14, color: T.muted, marginBottom: 24, lineHeight: 1.6 }}>
-            {roomId}
-          </p>
-
-          <div style={{
-            aspectRatio: '16/9', borderRadius: 16, overflow: 'hidden',
-            background: T.card, border: `1px solid ${T.border}`,
-            position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {previewReady && camEnabled ? (
-              <video
-                ref={localVideoRef}
-                muted
-                playsInline
-                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
-              />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                  width: 72, height: 72, borderRadius: '50%',
-                  background: `linear-gradient(135deg, ${T.purple}, ${T.sky})`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 26, fontWeight: 700, color: '#fff',
-                }}>
-                  {initials}
-                </div>
-                <span style={{ fontSize: 13, color: T.muted }}>Camera is off</span>
-              </div>
-            )}
-
-            {/* Preview controls overlay */}
-            <div style={{
-              position: 'absolute', bottom: 12,
-              display: 'flex', gap: 8,
-            }}>
-              <button onClick={togglePreviewMic} style={{
-                width: 40, height: 40, borderRadius: '50%', border: 'none',
-                background: micEnabled ? 'rgba(0,0,0,0.6)' : T.red,
-                color: '#fff', cursor: 'pointer', fontSize: 16,
-              }}>
-                {micEnabled ? '🎤' : '🔇'}
-              </button>
-              <button onClick={togglePreviewCam} style={{
-                width: 40, height: 40, borderRadius: '50%', border: 'none',
-                background: camEnabled ? 'rgba(0,0,0,0.6)' : T.red,
-                color: '#fff', cursor: 'pointer', fontSize: 16,
-              }}>
-                {camEnabled ? '📹' : '📵'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Join panel */}
+        {/* ── Controls bar ── */}
         <div style={{
-          padding: 32, borderRadius: 20,
-          background: T.surface, border: `1px solid ${T.border}`,
-          display: 'flex', flexDirection: 'column', gap: 20,
-          justifyContent: 'center',
+          padding: '14px 20px', background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(12px)',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
+          flexShrink: 0,
         }}>
-          <div>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Joining as
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-                background: `linear-gradient(135deg, ${T.purple}, ${T.sky})`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 14, fontWeight: 700, color: '#fff',
-              }}>
-                {initials}
-              </div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{name}</div>
-                <div style={{ fontSize: 11, color: T.muted, textTransform: 'capitalize' }}>{user?.role}</div>
-              </div>
-            </div>
-          </div>
+          <ControlBtn
+            icon={micOn ? '🎤' : '🔇'}
+            label={micOn ? 'Mute' : 'Unmute'}
+            active={micOn}
+            onClick={toggleMic}
+          />
+          <ControlBtn
+            icon={camOn ? '📷' : '📵'}
+            label={camOn ? 'Stop Video' : 'Start Video'}
+            active={camOn}
+            onClick={toggleCam}
+          />
+          <ControlBtn
+            icon={screenSharing ? '🖥️' : '🖥'}
+            label={screenSharing ? 'Stop Share' : 'Share Screen'}
+            active={screenSharing}
+            onClick={() => void handleScreenShare()}
+          />
+          <ControlBtn
+            icon="💬"
+            label="Chat"
+            active={chatOpen}
+            onClick={() => setChatOpen(p => !p)}
+            badge={chatOpen ? 0 : messages.length}
+          />
 
-          {/* Device status */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              { icon: micEnabled ? '🎤' : '🔇', label: 'Microphone', status: micEnabled ? 'On' : 'Muted', ok: micEnabled },
-              { icon: camEnabled ? '📹' : '📵', label: 'Camera', status: camEnabled ? 'On' : 'Off', ok: camEnabled },
-            ].map(d => (
-              <div key={d.label} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(255,255,255,0.03)', border: `1px solid ${T.border}`,
-              }}>
-                <span style={{ fontSize: 16 }}>{d.icon}</span>
-                <span style={{ flex: 1, fontSize: 13, color: T.text }}>{d.label}</span>
-                <span style={{ fontSize: 11, color: d.ok ? T.green : T.amber, fontWeight: 600 }}>{d.status}</span>
-              </div>
-            ))}
-          </div>
+          {/* Spacer */}
+          <div style={{ width: 1, height: 40, background: 'rgba(255,255,255,0.1)' }} />
 
-          {error && (
-            <div style={{
-              padding: '10px 14px', borderRadius: 8,
-              background: `${T.red}15`, border: `1px solid ${T.red}33`,
-              fontSize: 12, color: T.red, lineHeight: 1.5,
-            }}>
-              {error}
-            </div>
-          )}
+          {canEndRoom ? (
+            <ControlBtn
+              icon="🏁"
+              label="End & Feedback"
+              danger
+              onClick={() => {
+                router.push(`/recruiter/interviews/${parsed?.interviewId}/feedback`);
+              }}
+            />
+          ) : null}
 
-          <button
-            onClick={onJoin}
-            disabled={!!error}
-            style={{
-              width: '100%', padding: '14px', borderRadius: 12, border: 'none',
-              background: error ? 'rgba(255,255,255,0.05)' : `linear-gradient(135deg, ${T.sky}, #0284C7)`,
-              color: error ? T.muted : '#fff',
-              fontSize: 15, fontWeight: 700, cursor: error ? 'not-allowed' : 'pointer',
-              fontFamily: 'Sora, sans-serif',
-              boxShadow: error ? 'none' : `0 4px 20px ${T.sky}40`,
-            }}
-          >
-            Join Now
-          </button>
-
-          <p style={{ fontSize: 11, color: T.faint, textAlign: 'center', margin: 0 }}>
-            Others will see you when you join
-          </p>
+          <ControlBtn
+            icon="📵"
+            label="Leave"
+            danger
+            onClick={handleLeave}
+          />
         </div>
       </div>
+
+      {/* ── Chat panel ── */}
+      {chatOpen && (
+        <ChatPanel
+          messages={messages}
+          onSend={sendMessage}
+          onClose={() => setChatOpen(false)}
+          selfId={user.id}
+        />
+      )}
+
+      {/* ── End room confirmation ── */}
+      {endPrompt && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.8)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            width: 400, background: '#0D1220',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 16, padding: '1.5rem', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🏁</div>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 700, color: '#F1F5F9' }}>
+              End Interview?
+            </h3>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'rgba(255,255,255,0.4)', lineHeight: 1.6 }}>
+              This will disconnect all participants. You&apos;ll be redirected to submit feedback.
+              Duration: <strong style={{ color: '#38BDF8' }}>{formatTime(elapsed)}</strong>
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setEndPrompt(false)} style={{
+                flex: 1, padding: '10px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.5)', fontSize: 13, cursor: 'pointer',
+              }}>
+                Continue Interview
+              </button>
+              <button onClick={handleEndRoom} style={{
+                flex: 1, padding: '10px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg, #DC2626, #EF4444)',
+                color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              }}>
+                End Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RoomEndedScreen
-// ─────────────────────────────────────────────────────────────────────────────
-function RoomEndedScreen({ isRecruiter, router }: { isRecruiter: boolean; router: ReturnType<typeof useRouter> }) {
-  return (
-    <div style={{
-      minHeight: '100vh', background: T.bg,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'Sora, sans-serif', color: T.text, flexDirection: 'column', gap: 20,
-    }}>
-      <div style={{ fontSize: 64 }}>👋</div>
-      <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>You left the meeting</h1>
-      <p style={{ color: T.muted, fontSize: 14, margin: 0 }}>Your meeting has ended</p>
-      <div style={{ display: 'flex', gap: 12 }}>
-        <button
-          onClick={() => router.push(isRecruiter ? '/recruiter/interviews' : '/interviews')}
-          style={{
-            padding: '12px 24px', borderRadius: 10,
-            border: `1px solid ${T.sky}33`,
-            background: `${T.sky}22`, color: T.sky,
-            fontWeight: 700, fontSize: 14, cursor: 'pointer',
-            fontFamily: 'Sora, sans-serif',
-          }}
-        >
-          Back to Interviews
-        </button>
-        <button
-          onClick={() => router.push('/dashboard')}
-          style={{
-            padding: '12px 24px', borderRadius: 10,
-            border: `1px solid ${T.border}`,
-            background: 'rgba(255,255,255,0.04)', color: T.muted,
-            fontWeight: 600, fontSize: 14, cursor: 'pointer',
-            fontFamily: 'Sora, sans-serif',
-          }}
-        >
-          Dashboard
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// InterviewRoomPage — the main export
-// ─────────────────────────────────────────────────────────────────────────────
-export default function InterviewRoomPage() {
-  const params = useParams();
-  const router = useRouter();
-  const { user } = useAuth();
-
-  const roomId = (params?.['room-id'] as string) ?? (params?.roomId as string) ?? '';
-
-  const [phase, setPhase] = useState<'prejoin' | 'connecting' | 'connected' | 'ended'>('prejoin');
-  const [token, setToken] = useState('');
-  const [serverUrl, setServerUrl] = useState('');
-  const [accessError, setAccessError] = useState('');
-  const [interviewId, setInterviewId] = useState<string | undefined>();
-  const [loading, setLoading] = useState(true);
-
-  const isRecruiter = user?.role === 'recruiter';
-  const isCandidate = user?.role === 'candidate';
-
-  // ── Validate room access on mount ────────────────────────────────────────
-  useEffect(() => {
-    if (!user || !roomId) { setLoading(false); return; }
-    let mounted = true;
-
-    interviewApi.getRoomAccess(roomId)
-      .then(res => {
-        if (!mounted) return;
-        const data = res.data as any;
-        if (!data.allowed) {
-          setAccessError(data.reason === 'room_link_expired'
-            ? `Room link expired. Scheduled: ${data.scheduledAt ? new Date(data.scheduledAt).toLocaleString() : 'N/A'}`
-            : 'You do not have access to this room.');
-        }
-        if (data.interviewId) setInterviewId(data.interviewId);
-      })
-      .catch((e: any) => {
-        if (!mounted) return;
-        setAccessError(e?.response?.data?.message ?? 'Could not verify room access.');
-      })
-      .finally(() => { if (mounted) setLoading(false); });
-
-    return () => { mounted = false; };
-  }, [roomId, user]);
-
-  // ── Fetch LiveKit token when user clicks Join ────────────────────────────
-  const handleJoin = useCallback(async () => {
-    if (!user || !roomId) return;
-    setPhase('connecting');
-
-    try {
-      const res = await interviewApi.getLivekitToken(roomId);
-      const data = res.data as any;
-      if (!data.token || !data.url) throw new Error('Invalid token response from server');
-      setToken(data.token);
-      setServerUrl(data.url);
-      setPhase('connected');
-    } catch (e: any) {
-      const msg = e?.response?.data?.message ?? e?.message ?? 'Failed to get room token';
-      setAccessError(msg);
-      setPhase('prejoin');
-    }
-  }, [user, roomId]);
-
-  const handleLeave = useCallback(() => {
-    setToken('');
-    setPhase('ended');
-  }, []);
-
-  // ── Render states ────────────────────────────────────────────────────────
-
-  if (!user) return (
-    <div style={{ minHeight: '100vh', background: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Sora, sans-serif', color: T.text }}>
-      Please log in to join the interview.
-    </div>
-  );
-
-  if (!roomId) return (
-    <div style={{ minHeight: '100vh', background: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Sora, sans-serif', color: T.text }}>
-      Invalid room ID.
-    </div>
-  );
-
-  if (loading) return (
-    <div style={{ minHeight: '100vh', background: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, fontFamily: 'Sora, sans-serif', color: T.text }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-      <div style={{ width: 36, height: 36, borderRadius: '50%', border: `3px solid ${T.sky}33`, borderTopColor: T.sky, animation: 'spin 0.8s linear infinite' }} />
-      <span style={{ color: T.muted, fontSize: 14 }}>Checking room access…</span>
-    </div>
-  );
-
-  if (phase === 'ended') {
-    return <RoomEndedScreen isRecruiter={isRecruiter} router={router} />;
-  }
-
-  if (phase === 'prejoin' || phase === 'connecting') {
-    return (
-      <PreJoin
-        roomId={roomId}
-        user={user}
-        onJoin={() => void handleJoin()}
-        error={accessError}
-      />
-    );
-  }
-
-  // phase === 'connected' — render LiveKit room
-  if (!token || !serverUrl) return null;
-
-  return (
-    <LiveKitRoom
-      token={token}
-      serverUrl={serverUrl}
-      connect
-      audio
-      video
-      onDisconnected={handleLeave}
-      onError={(e) => { console.error('[LiveKit]', e); }}
-      style={{ height: '100vh', overflow: 'hidden' }}
-    >
-      <MeetRoom
-        roomId={roomId}
-        interviewId={interviewId}
-        user={user}
-        onLeave={handleLeave}
-        isRecruiter={isRecruiter}
-        isHost={isRecruiter}
-      />
-    </LiveKitRoom>
-  );
+function getRouteParam(
+  params: Record<string, string | string[]> | null | undefined,
+  key: string,
+): string {
+  const value = params?.[key];
+  return typeof value === 'string' ? value : '';
 }

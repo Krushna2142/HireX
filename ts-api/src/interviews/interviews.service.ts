@@ -508,7 +508,7 @@ export class InterviewsService {
     });
     if (!row) throw new NotFoundException('Interview not found');
 
-    const [job, rounds] = await Promise.all([
+    const [job, rounds, events] = await Promise.all([
       this.prisma.job.findUnique({
         where: { id: row.job_id },
         select: { id: true, title: true, company: true },
@@ -516,6 +516,11 @@ export class InterviewsService {
       this.prisma.recruiter_interview_rounds.findMany({
         where: { interview_id: row.id },
         orderBy: { round_number: 'asc' },
+      }),
+      this.prisma.recruiter_interview_events.findMany({
+        where: { interview_id: row.id },
+        orderBy: { created_at: 'desc' },
+        take: 30,
       }),
     ]);
 
@@ -529,6 +534,7 @@ export class InterviewsService {
       job_title: job?.title ?? null,
       company: job?.company ?? null,
       rounds,
+      events,
     };
   }
 

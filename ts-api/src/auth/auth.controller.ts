@@ -56,7 +56,7 @@ export class AuthController {
 
   @Get('me')
   async me(@Req() req: any): Promise<UserRow> {
-    return this.auth.getMe(req.user.id);
+    return this.auth.getMe(req.user.id, req.user.role);
   }
 
   @Public()

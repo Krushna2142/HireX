@@ -68,9 +68,9 @@ const recommendationWeight: Record<string, number> = {
 };
 
 export default function RecruiterInterviewLivePage() {
-  const params = useParams<{ interviewId: string }>();
+  const params = useParams<Record<string, string | string[]>>();
   const router = useRouter();
-  const interviewId = params?.interviewId;
+  const interviewId = getRouteParam(params, 'interview-id');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -98,8 +98,8 @@ export default function RecruiterInterviewLivePage() {
           d.rounds.find((r) => r.result === 'pending') ?? d.rounds[d.rounds.length - 1];
         setSelectedRoundId(inProgressRound.id);
       }
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Failed to load interview details');
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, 'Failed to load interview details'));
     } finally {
       setLoading(false);
     }
@@ -187,12 +187,12 @@ export default function RecruiterInterviewLivePage() {
         feedback,
       });
 
-      await interviewApi.updateStage(interviewId!, suggestedStage);
+      await interviewApi.updateStage(interviewId, suggestedStage);
 
       alert('Evaluation submitted successfully.');
       await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Failed to submit evaluation');
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, 'Failed to submit evaluation'));
     } finally {
       setSaving(false);
     }
@@ -201,10 +201,10 @@ export default function RecruiterInterviewLivePage() {
   const quickStage = async (stage: InterviewStage) => {
     try {
       setSaving(true);
-      await interviewApi.updateStage(interviewId!, stage);
+      await interviewApi.updateStage(interviewId, stage);
       await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Failed to update stage');
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, 'Failed to update stage'));
     } finally {
       setSaving(false);
     }
@@ -320,7 +320,7 @@ export default function RecruiterInterviewLivePage() {
           <label style={styles.label}>Hire Recommendation (mandatory)</label>
           <select
             value={recommendation}
-            onChange={(e) => setRecommendation(e.target.value as any)}
+            onChange={(e) => setRecommendation(e.target.value as 'Strong Hire' | 'Hire' | 'No Hire' | 'Strong No Hire')}
             style={styles.select}
           >
             <option>Strong Hire</option>
@@ -361,6 +361,37 @@ export default function RecruiterInterviewLivePage() {
       </div>
     </main>
   );
+}
+
+function getRouteParam(
+  params: Record<string, string | string[]> | null | undefined,
+  key: string,
+): string {
+  const value = params?.[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'data' in error.response &&
+    typeof error.response.data === 'object' &&
+    error.response.data !== null &&
+    'message' in error.response.data &&
+    typeof error.response.data.message === 'string'
+  ) {
+    return error.response.data.message;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
 }
 
 function CheckRow({

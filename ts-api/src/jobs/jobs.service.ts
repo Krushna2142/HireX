@@ -57,6 +57,7 @@ export interface BrowseFilters {
 // ── Typed DB row interfaces ───────────────────────────────────────────────────
 
 interface CountRow      { count: string; }
+interface SourceCountRow { source: string; count: string; }
 interface ProfileRow {
   top_skills: string[];
   experience_level: string;
@@ -160,7 +161,7 @@ export class JobsService {
 
     const where = conditions.join(' AND ');
 
-    const [countResult, rowsResult] = await Promise.all([
+    const [countResult, rowsResult, sourceResult] = await Promise.all([
       this.db.query<CountRow>(
         `SELECT COUNT(*) FROM jobs j WHERE ${where}`,
         params,
@@ -179,6 +180,13 @@ export class JobsService {
          LIMIT $${idx} OFFSET $${idx + 1}`,
         [...params, limit, offset],
       ),
+      this.db.query<SourceCountRow>(
+        `SELECT j.source, COUNT(*) AS count
+         FROM jobs j
+         WHERE ${where}
+         GROUP BY j.source`,
+        params,
+      ),
     ]);
 
     let jobs: UnifiedJob[] = rowsResult.rows.map(r => this.mapRow(r));
@@ -188,16 +196,20 @@ export class JobsService {
       jobs.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
     }
 
-    // ✅ Count all four sources separately for frontend display
-    const internal = jobs.filter(j => j.source === 'internal').length;
-    const serpapi  = jobs.filter(j => j.source === 'serpapi').length;
-    const linkedin = jobs.filter(j => j.source === 'linkedin').length;
-    const indeed   = jobs.filter(j => j.source === 'indeed').length;
+    const sourceCounts = sourceResult.rows.reduce<Record<string, number>>((acc, row) => {
+      acc[row.source] = parseInt(row.count, 10);
+      return acc;
+    }, {});
 
     return {
       jobs,
       total:   parseInt(countResult.rows[0].count, 10),
-      sources: { internal, serpapi, linkedin, indeed },
+      sources: {
+        internal: sourceCounts.internal ?? 0,
+        serpapi: sourceCounts.serpapi ?? 0,
+        linkedin: sourceCounts.linkedin ?? 0,
+        indeed: sourceCounts.indeed ?? 0,
+      },
     };
   }
 
@@ -223,8 +235,8 @@ export class JobsService {
       profileResult.rows[0];
 
     const skills      = this.toStringArray(top_skills);
-    const expLevel   = experience_level as string | null;
-    const curTitle   = current_title    as string | null;
+    const expLevel = experience_level as string | null;
+    const curTitle = current_title;
     const targetRoles = this.toStringArray(target_roles);
     const preferredLocation = this.toStringArray(preferred_locations)[0] ?? 'India';
 
@@ -420,7 +432,7 @@ Return JSON only.`,
     );
 
     const job = rows[0];
-    this.logger.log(`Job created: ${job.id} by recruiter: ${recruiterId}`);
+    this.logger.log(`Job created: ${String(job.id)} by recruiter: ${recruiterId}`);
 
     // Notify matching candidates via alert rows
     void this.alerts.notifyMatchingCandidates(job);

@@ -14,6 +14,7 @@ const PROTECTED = [
   '/alerts',
   '/analyze',
   '/interviews',
+  '/admin',
   '/recruiter',
   '/candidate',
 ];
@@ -48,6 +49,7 @@ export const config = {
     '/alerts/:path*',
     '/analyze/:path*',
     '/interviews/:path*',
+    '/admin/:path*',
     '/recruiter/:path*',
     '/candidate/:path*',
   ],

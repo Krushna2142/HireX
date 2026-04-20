@@ -21,6 +21,8 @@ import { InterviewsModule }          from './interviews/interviews.module';
 import { LivekitModule }             from './livekit/livekit.module';
 import { RecommendationsModule }     from './recommendations/recommendatyions.module';
 import { OllamaModule }              from './ollama/ollama.module';
+import { FeedbackModule }            from './feedback/feedback.module';
+import { AdminModule }               from './admin/admin.module';
 import { PrismaModule }              from '../prisma/prisma.module';
 import { JwtAuthGuard }              from './auth/guards/jwt-auth.guard';
 import { RolesGuard }                from './auth/guards/roles.guard';  // ← add this
@@ -94,6 +96,8 @@ const REDIS_ENABLED =
     CandidatesModule,
     RecruitersModule,
     InterviewsModule,
+    FeedbackModule,
+    AdminModule,
     RecommendationsModule,
     LivekitModule,
   ],

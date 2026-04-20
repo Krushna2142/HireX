@@ -24,7 +24,7 @@ export interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<AuthResponse>;
-  register: (fullName: string, email: string, password: string, role: UserRole) => Promise<AuthResponse>;
+  register: (fullName: string, email: string, password: string, role: Exclude<UserRole, 'admin'>) => Promise<AuthResponse>;
   logout: () => void;
 }
 
@@ -94,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fullName: string,
     email: string,
     password: string,
-    role: UserRole,
+    role: Exclude<UserRole, 'admin'>,
   ): Promise<AuthResponse> => {
     localStorage.removeItem('user'); // prevent stale role
     const res = await apiRegister(fullName, email, password, role);

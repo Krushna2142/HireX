@@ -2,6 +2,8 @@
 
 'use client';
 
+import { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAlerts } from '@/hooks/useRealTimeAlerts';
 
 const ALERT_ICONS: Record<string, string> = {
@@ -11,6 +13,13 @@ const ALERT_ICONS: Record<string, string> = {
   offer:       '🎉',
   update:      '🔔',
   system:      '⚙️',
+  application_update: '📋',
+  job_match: '✨',
+  new_applicant: '🆕',
+  interview_scheduled: '📅',
+  interview_reminder: '⏰',
+  interview_stage: '🧭',
+  interview_round_result: '📝',
 };
 
 function timeAgo(iso: string): string {
@@ -22,7 +31,27 @@ function timeAgo(iso: string): string {
 }
 
 export default function AlertsPage() {
+  const router = useRouter();
   const { alerts, unreadCount, loading, markRead, markAllRead } = useAlerts();
+  const role = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = localStorage.getItem('user');
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as { role?: string };
+      return parsed.role ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handleOpenAlert = async (alertId: string, href: string | null) => {
+    await markRead(alertId);
+    if (href) {
+      router.push(href);
+    }
+  };
 
   return (
     <>
@@ -124,7 +153,13 @@ export default function AlertsPage() {
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{
-                      margin: 0, fontSize: 13, lineHeight: 1.55,
+                      margin: 0, fontSize: 12, lineHeight: 1.35,
+                      color: 'rgba(255,255,255,0.45)',
+                    }}>
+                      {alert.title}
+                    </p>
+                    <p style={{
+                      margin: '3px 0 0', fontSize: 13, lineHeight: 1.55,
                       fontWeight: alert.read ? 400 : 600,
                       color: alert.read ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.88)',
                     }}>
@@ -133,6 +168,27 @@ export default function AlertsPage() {
                     <p style={{ margin: '4px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.28)' }}>
                       {timeAgo(alert.created_at)}
                     </p>
+                    {getAlertHref(alert, role) && (
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleOpenAlert(alert.id, getAlertHref(alert, role));
+                        }}
+                        style={{
+                          marginTop: 8,
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          border: '1px solid rgba(167,139,250,0.25)',
+                          background: 'rgba(167,139,250,0.08)',
+                          color: '#C4B5FD',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Open tracking
+                      </button>
+                    )}
                   </div>
                   {!alert.read && (
                     <div style={{
@@ -148,4 +204,30 @@ export default function AlertsPage() {
       </div>
     </>
   );
+}
+
+function getAlertHref(
+  alert: { type: string; metadata?: Record<string, unknown> },
+  role: string | null,
+): string | null {
+  const interviewId = typeof alert.metadata?.interviewId === 'string' ? alert.metadata.interviewId : null;
+  const roundNumber = typeof alert.metadata?.roundNumber === 'number' ? alert.metadata.roundNumber : null;
+
+  if (alert.type.startsWith('interview') && interviewId) {
+    if (roundNumber) {
+      return `/interviews/room/jc-${interviewId}-r${roundNumber}`;
+    }
+
+    return role === 'recruiter' ? `/recruiter/interviews` : '/interviews';
+  }
+
+  if (alert.type === 'application_update') {
+    return role === 'recruiter' ? '/recruiter/candidates' : '/applications';
+  }
+
+  if (alert.type === 'job_match') {
+    return '/jobs';
+  }
+
+  return null;
 }

@@ -51,6 +51,7 @@ export class JobsController {
     @Query('salaryMin') salaryMin?: string,
     @Query('skills')    skills?: string,
     @Query('page')      page?: string,
+    @Query('limit')     limit?: string,
     @Query('source')    source?: string,
   ) {
     return this.jobs.browseJobs(req.user?.id ?? null, {
@@ -59,7 +60,8 @@ export class JobsController {
       salaryMin: salaryMin ? parseInt(salaryMin, 10) : undefined,
       skills:    skills    ? skills.split(',')       : undefined,
       page:      page      ? parseInt(page, 10)      : 1,
-      source:    (source as 'internal' | 'serpapi' | 'all') ?? 'all',
+      limit:     limit     ? parseInt(limit, 10)     : undefined,
+      source:    (source as 'internal' | 'serpapi' | 'linkedin' | 'indeed' | 'all') ?? 'all',
     });
   }
 
