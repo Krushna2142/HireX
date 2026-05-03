@@ -48,10 +48,13 @@ interface ExistingFeedback {
   communication_score: number;
   problem_solving_score: number;
   culture_fit_score: number;
+  overall_score: number;
   recommendation: FeedbackRecommendation;
   strengths?: string | null;
   improvements?: string | null;
   notes?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

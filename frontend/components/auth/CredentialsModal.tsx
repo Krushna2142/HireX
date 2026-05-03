@@ -11,6 +11,8 @@ import { FaGithub } from 'react-icons/fa';
 import zxcvbn from 'zxcvbn';
 import { UserRole, roleRedirectPath } from '@/lib/auth';
 
+type PublicUserRole = Exclude<UserRole, 'admin'>;
+
 const ROLES: Record<UserRole, {
   label: string;
   icon: string;
@@ -38,6 +40,15 @@ const ROLES: Record<UserRole, {
     border: 'rgba(244,114,182,0.40)',
     gradient: 'linear-gradient(135deg,#9D174D,#EC4899)',
   },
+  admin: {
+    label: 'Admin',
+    icon: '🛡️',
+    description: 'Manage platform users, jobs, and system operations',
+    accent: '#A78BFA',
+    bg: 'rgba(167,139,250,0.12)',
+    border: 'rgba(167,139,250,0.40)',
+    gradient: 'linear-gradient(135deg,#5B21B6,#8B5CF6)',
+  },
 };
 
 const STRENGTH_META = [
@@ -60,8 +71,8 @@ export default function CredentialsModal({
   const overlayRef = useRef<HTMLDivElement>(null);
 
   const [panel, setPanel] = useState<'login' | 'register'>('login');
-  const [role, setRole] = useState<UserRole>('candidate');
-  const [loginRole, setLoginRole] = useState<UserRole | null>(null);
+  const [role, setRole] = useState<PublicUserRole>('candidate');
+  const [loginRole, setLoginRole] = useState<PublicUserRole | null>(null);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -203,7 +214,7 @@ export default function CredentialsModal({
                   </p>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    {(['candidate', 'recruiter'] as UserRole[]).map((r) => (
+                    {(['candidate', 'recruiter'] as PublicUserRole[]).map((r) => (
                       <button
                         key={r}
                         type="button"
@@ -347,7 +358,7 @@ export default function CredentialsModal({
                   </p>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-                    {(['candidate', 'recruiter'] as UserRole[]).map((r) => (
+                    {(['candidate', 'recruiter'] as PublicUserRole[]).map((r) => (
                       <button
                         key={r}
                         type="button"

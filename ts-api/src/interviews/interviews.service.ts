@@ -4,6 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  InterviewRoundResult,
+  InterviewStatus,
+  InterviewType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export type AnswerEvaluation = {
@@ -49,7 +55,7 @@ type RoomAccessResult = {
   roundId?: string;
   role?: string;
   userId?: string;
-  hostUserId?: string;
+  hostUserId?: string | null;
   interviewStage?: string;
   scheduledAt?: string | null;
   expiresAt?: string | null;
@@ -75,10 +81,6 @@ const STAGE_TO_CODE: Record<string, number> = {
 export class InterviewsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // MOCK INTERVIEW (used by interviews.controller.ts)
-  // ───────────────────────────────────────────────────────────────────────────
-
   async startSession(
     userId: string,
     jobTitle: string,
@@ -88,64 +90,71 @@ export class InterviewsService {
   ) {
     if (!jobTitle?.trim()) throw new BadRequestException('jobTitle is required');
 
-    const session = await this.prisma.interview_sessions.create({
+    const session = await this.prisma.interview.create({
       data: {
-        candidate_id: userId,
-        job_id: jobId ?? null,
-        job_title: jobTitle.trim(),
-        company: company ?? null,
-        session_type: sessionType ?? 'technical',
-        status: 'in_progress',
-        total_questions: 5,
+        candidateUserId: userId,
+        jobId: jobId ?? null,
+        createdByUserId: userId,
+        type: InterviewType.AI_MOCK,
+        status: InterviewStatus.IN_PROGRESS,
+        title: `${jobTitle.trim()} mock interview`,
+        jobTitle: jobTitle.trim(),
+        companyName: company ?? null,
+        metadata: {
+          sessionType: sessionType ?? 'technical',
+          totalQuestions: 5,
+          currentStage: 'INTERVIEW_IN_PROGRESS',
+          statusCode: STAGE_TO_CODE.INTERVIEW_IN_PROGRESS,
+        },
       },
     });
 
     const starterQuestions = [
       {
-        question_number: 1,
+        questionNumber: 1,
         question: `Tell me about yourself and your fit for ${jobTitle}.`,
         category: 'behavioral',
         difficulty: 'easy',
-        ideal_answer: 'Structured summary of experience, strengths, and relevance to role.',
+        idealAnswer: 'Structured summary of experience, strengths, and relevance to role.',
       },
       {
-        question_number: 2,
+        questionNumber: 2,
         question: `Explain a challenging problem you solved in your recent project.`,
         category: 'problem_solving',
         difficulty: 'medium',
-        ideal_answer: 'Context, challenge, action, result with measurable impact.',
+        idealAnswer: 'Context, challenge, action, result with measurable impact.',
       },
       {
-        question_number: 3,
-        question: `How do you ensure quality while delivering under deadlines?`,
+        questionNumber: 3,
+        question: 'How do you ensure quality while delivering under deadlines?',
         category: 'execution',
         difficulty: 'medium',
-        ideal_answer: 'Testing, prioritization, tradeoff communication, risk mitigation.',
+        idealAnswer: 'Testing, prioritization, tradeoff communication, risk mitigation.',
       },
       {
-        question_number: 4,
-        question: `Describe your approach to collaboration with cross-functional teams.`,
+        questionNumber: 4,
+        question: 'Describe your approach to collaboration with cross-functional teams.',
         category: 'communication',
         difficulty: 'easy',
-        ideal_answer: 'Clear communication, ownership, conflict handling, alignment.',
+        idealAnswer: 'Clear communication, ownership, conflict handling, alignment.',
       },
       {
-        question_number: 5,
-        question: `Why do you want to join this company?`,
+        questionNumber: 5,
+        question: 'Why do you want to join this company?',
         category: 'motivation',
         difficulty: 'easy',
-        ideal_answer: 'Company alignment, role impact, growth path.',
+        idealAnswer: 'Company alignment, role impact, growth path.',
       },
     ];
 
-    await this.prisma.interview_questions.createMany({
+    await this.prisma.interviewQuestion.createMany({
       data: starterQuestions.map((q) => ({
-        session_id: session.id,
+        interviewId: session.id,
         ...q,
       })),
     });
 
-    return session;
+    return this.toSessionResponse(session);
   }
 
   async submitAnswer(
@@ -154,13 +163,13 @@ export class InterviewsService {
     answer: string,
     timeTakenSecs: number,
   ): Promise<InterviewQuestionRow & { evaluation: AnswerEvaluation; idealAnswer: string }> {
-    const q = await this.prisma.interview_questions.findUnique({
+    const q = await this.prisma.interviewQuestion.findUnique({
       where: { id: questionId },
-      include: { interview_sessions: true },
+      include: { interview: true },
     });
 
     if (!q) throw new NotFoundException('Question not found');
-    if (q.interview_sessions.candidate_id !== userId) {
+    if (q.interview.candidateUserId !== userId) {
       throw new ForbiddenException('Not allowed');
     }
 
@@ -171,36 +180,36 @@ export class InterviewsService {
       len < 60
         ? 'Answer too short; add context, action, and result.'
         : len < 160
-        ? 'Good start; include stronger measurable outcomes.'
-        : 'Strong answer structure and detail.';
+          ? 'Good start; include stronger measurable outcomes.'
+          : 'Strong answer structure and detail.';
 
-    const updated = await this.prisma.interview_questions.update({
+    const updated = await this.prisma.interviewQuestion.update({
       where: { id: questionId },
       data: {
-        user_answer: clean,
-        time_taken_secs: timeTakenSecs,
-        answered_at: new Date(),
+        userAnswer: clean,
+        timeTakenSecs,
+        answeredAt: new Date(),
         score,
         feedback,
       },
     });
 
     return {
-      ...(updated as InterviewQuestionRow),
+      ...this.toQuestionRow(updated),
       evaluation: { score, feedback },
-      idealAnswer: q.ideal_answer ?? '',
+      idealAnswer: q.idealAnswer ?? '',
     };
   }
 
   async completeSession(sessionId: string, userId: string) {
-    const session = await this.prisma.interview_sessions.findUnique({
+    const session = await this.prisma.interview.findUnique({
       where: { id: sessionId },
     });
     if (!session) throw new NotFoundException('Session not found');
-    if (session.candidate_id !== userId) throw new ForbiddenException('Not allowed');
+    if (session.candidateUserId !== userId) throw new ForbiddenException('Not allowed');
 
-    const qs = await this.prisma.interview_questions.findMany({
-      where: { session_id: sessionId },
+    const qs = await this.prisma.interviewQuestion.findMany({
+      where: { interviewId: sessionId },
     });
 
     const scored = qs.filter((x) => typeof x.score === 'number');
@@ -213,175 +222,156 @@ export class InterviewsService {
           )
         : null;
 
-    return this.prisma.interview_sessions.update({
+    const metadata = this.withStage(session.metadata, 'INTERVIEW_PASSED');
+
+    const updated = await this.prisma.interview.update({
       where: { id: sessionId },
       data: {
-        status: 'completed',
-        overall_score: overall,
-        completed_at: new Date(),
+        status: InterviewStatus.COMPLETED,
+        overallScore: overall,
+        completedAt: new Date(),
+        metadata,
       },
     });
+
+    return this.toSessionResponse(updated);
   }
 
   async getSessionHistory(userId: string) {
-    return this.prisma.interview_sessions.findMany({
-      where: { candidate_id: userId },
-      orderBy: { created_at: 'desc' },
+    const sessions = await this.prisma.interview.findMany({
+      where: {
+        candidateUserId: userId,
+        type: InterviewType.AI_MOCK,
+      },
+      orderBy: { createdAt: 'desc' },
     });
+
+    return sessions.map((session) => this.toSessionResponse(session));
   }
 
   async getSession(sessionId: string, userId: string) {
-    const session = await this.prisma.interview_sessions.findUnique({
+    const session = await this.prisma.interview.findUnique({
       where: { id: sessionId },
     });
     if (!session) throw new NotFoundException('Session not found');
-    if (session.candidate_id !== userId) throw new ForbiddenException('Not allowed');
+    if (session.candidateUserId !== userId) throw new ForbiddenException('Not allowed');
 
-    const questions = await this.prisma.interview_questions.findMany({
-      where: { session_id: sessionId },
-      orderBy: { question_number: 'asc' },
+    const questions = await this.prisma.interviewQuestion.findMany({
+      where: { interviewId: sessionId },
+      orderBy: { questionNumber: 'asc' },
     });
 
-    return { session, questions };
+    return {
+      session: this.toSessionResponse(session),
+      questions: questions.map((q) => this.toQuestionRow(q)),
+    };
   }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // RECRUITER INTERVIEW PIPELINE
-  // ───────────────────────────────────────────────────────────────────────────
 
   async listRecruiterInterviews(
     recruiterId: string,
     params?: { statusCode?: number; limit?: number },
   ) {
-    const rows = await this.prisma.recruiter_interviews.findMany({
+    const rows = await this.prisma.interview.findMany({
       where: {
-        recruiter_id: recruiterId,
-        ...(typeof params?.statusCode === 'number' ? { status_code: params.statusCode } : {}),
+        recruiterUserId: recruiterId,
+        type: { not: InterviewType.AI_MOCK },
       },
-      orderBy: { updated_at: 'desc' },
+      include: {
+        job: true,
+        candidate: true,
+      },
+      orderBy: { updatedAt: 'desc' },
       take: params?.limit ?? 30,
     });
 
-    if (!rows.length) return [];
-
-    const jobIds = [...new Set(rows.map((r) => r.job_id))];
-    const candidateIds = [...new Set(rows.map((r) => r.candidate_id))];
-
-    const [jobs, users] = await Promise.all([
-      this.prisma.job.findMany({
-        where: { id: { in: jobIds } },
-        select: { id: true, title: true, company: true },
-      }),
-      this.prisma.users.findMany({
-        where: { id: { in: candidateIds } },
-        select: { id: true, full_name: true, email: true },
-      }),
-    ]);
-
-    const jobMap = new Map(jobs.map((j) => [j.id, j]));
-    const userMap = new Map(users.map((u) => [u.id, u]));
-
-    return rows.map((r) => ({
-      id: r.id,
-      current_stage: r.current_stage,
-      status_code: r.status_code,
-      final_status: r.final_status,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      job_title: jobMap.get(r.job_id)?.title ?? null,
-      company: jobMap.get(r.job_id)?.company ?? null,
-      candidate_name: userMap.get(r.candidate_id)?.full_name ?? null,
-      candidate_email: userMap.get(r.candidate_id)?.email ?? null,
-    }));
+    return rows
+      .map((row) => this.toInterviewSummary(row))
+      .filter((row) => params?.statusCode === undefined || row.status_code === params.statusCode);
   }
 
   async getRecruiterInterview(recruiterId: string, interviewId: string) {
-    const row = await this.prisma.recruiter_interviews.findFirst({
-      where: { id: interviewId, recruiter_id: recruiterId },
+    const row = await this.prisma.interview.findFirst({
+      where: { id: interviewId, recruiterUserId: recruiterId },
+      include: {
+        job: true,
+        candidate: true,
+        rounds: { orderBy: { roundNumber: 'asc' } },
+      },
     });
     if (!row) throw new NotFoundException('Interview not found');
 
-    const [job, candidate, rounds] = await Promise.all([
-      this.prisma.job.findUnique({
-        where: { id: row.job_id },
-        select: { id: true, title: true, company: true },
-      }),
-      this.prisma.users.findUnique({
-        where: { id: row.candidate_id },
-        select: { id: true, full_name: true, email: true },
-      }),
-      this.prisma.recruiter_interview_rounds.findMany({
-        where: { interview_id: row.id },
-        orderBy: { round_number: 'asc' },
-      }),
-    ]);
-
     return {
-      id: row.id,
-      current_stage: row.current_stage,
-      status_code: row.status_code,
-      final_status: row.final_status,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      candidate_id: row.candidate_id,
-      recruiter_id: row.recruiter_id,
-      job_id: row.job_id,
-      job_title: job?.title ?? null,
-      company: job?.company ?? null,
-      candidate_name: candidate?.full_name ?? null,
-      candidate_email: candidate?.email ?? null,
-      rounds,
+      ...this.toInterviewSummary(row),
+      candidate_id: row.candidateUserId,
+      recruiter_id: row.recruiterUserId,
+      job_id: row.jobId,
+      rounds: row.rounds,
     };
   }
 
   async scheduleRound(recruiterId: string, interviewId: string, payload: ScheduleRoundInput) {
-    const interview = await this.prisma.recruiter_interviews.findFirst({
-      where: { id: interviewId, recruiter_id: recruiterId },
+    const interview = await this.prisma.interview.findFirst({
+      where: { id: interviewId, recruiterUserId: recruiterId },
     });
     if (!interview) throw new NotFoundException('Interview not found');
 
     const scheduledAt = new Date(payload.scheduledAt);
     if (Number.isNaN(scheduledAt.getTime())) throw new BadRequestException('Invalid scheduledAt');
 
-    const lastRound = await this.prisma.recruiter_interview_rounds.findFirst({
-      where: { interview_id: interviewId },
-      orderBy: { round_number: 'desc' },
+    const lastRound = await this.prisma.recruiterInterviewRound.findFirst({
+      where: { interviewId },
+      orderBy: { roundNumber: 'desc' },
     });
 
-    const nextRoundNumber = (lastRound?.round_number ?? 0) + 1;
-    const roomId = `jc-${interviewId}-r${nextRoundNumber}`;
-    const joinUrl = `/interviews/room/${roomId}`;
+    const nextRoundNumber = (lastRound?.roundNumber ?? 0) + 1;
+    const slug = `jc-${interviewId}-r${nextRoundNumber}`;
+    const joinUrl = `/interviews/room/${slug}`;
 
-    const round = await this.prisma.recruiter_interview_rounds.create({
+    const room = await this.prisma.interviewRoom.create({
       data: {
-        interview_id: interviewId,
-        round_number: nextRoundNumber,
-        round_type: payload.roundType,
-        scheduled_at: scheduledAt,
-        duration_mins: payload.durationMins ?? 45,
+        interviewId,
+        roomName: `Round ${nextRoundNumber}`,
+        provider: 'internal',
+        providerRoomId: slug,
+        maxParticipants: 4,
         mode: payload.mode ?? 'video',
-        interviewer_id: payload.interviewerId ?? recruiterId,
-        meeting_provider: 'internal',
-        meeting_room_id: roomId,
-        meeting_join_url: joinUrl,
-        result: 'pending',
+        hostUserId: recruiterId,
+        joinUrl,
       },
     });
 
-    await this.prisma.recruiter_interviews.update({
+    const round = await this.prisma.recruiterInterviewRound.create({
+      data: {
+        interviewId,
+        roundNumber: nextRoundNumber,
+        roundType: payload.roundType,
+        scheduledAt,
+        durationMins: payload.durationMins ?? 45,
+        mode: payload.mode ?? 'video',
+        interviewerId: payload.interviewerId ?? recruiterId,
+        meetingProvider: 'internal',
+        meetingRoomId: room.id,
+        meetingJoinUrl: joinUrl,
+        result: InterviewRoundResult.PENDING,
+      },
+    });
+
+    await this.prisma.interview.update({
       where: { id: interviewId },
       data: {
-        current_stage: 'INTERVIEW_SCHEDULED',
-        status_code: STAGE_TO_CODE.INTERVIEW_SCHEDULED,
+        status: InterviewStatus.SCHEDULED,
+        scheduledStartAt: scheduledAt,
+        scheduledEndAt: new Date(scheduledAt.getTime() + (round.durationMins ?? 45) * 60 * 1000),
+        metadata: this.withStage(interview.metadata, 'INTERVIEW_SCHEDULED'),
       },
     });
 
-    await this.prisma.recruiter_interview_events.create({
+    await this.prisma.interviewEventLog.create({
       data: {
-        interview_id: interviewId,
-        actor_user_id: recruiterId,
-        event_type: 'round_scheduled',
-        metadata: { round_id: round.id, round_number: round.round_number, room_id: roomId },
+        interviewId,
+        actorUserId: recruiterId,
+        eventType: 'round_scheduled',
+        payload: { roundId: round.id, roundNumber: round.roundNumber, roomId: room.id, joinUrl },
       },
     });
 
@@ -389,30 +379,30 @@ export class InterviewsService {
   }
 
   async updateStage(recruiterId: string, interviewId: string, stage: string) {
-    const interview = await this.prisma.recruiter_interviews.findFirst({
-      where: { id: interviewId, recruiter_id: recruiterId },
+    const interview = await this.prisma.interview.findFirst({
+      where: { id: interviewId, recruiterUserId: recruiterId },
     });
     if (!interview) throw new NotFoundException('Interview not found');
     if (!(stage in STAGE_TO_CODE)) throw new BadRequestException('Invalid stage');
 
-    const updated = await this.prisma.recruiter_interviews.update({
+    const updated = await this.prisma.interview.update({
       where: { id: interviewId },
       data: {
-        current_stage: stage as any,
-        status_code: STAGE_TO_CODE[stage],
-        final_status: ['HIRED', 'REJECTED', 'WITHDRAWN'].includes(stage)
-          ? stage
-          : interview.final_status,
+        status: this.stageToInterviewStatus(stage),
+        completedAt: this.isTerminalStage(stage) ? new Date() : interview.completedAt,
+        metadata: this.withStage(interview.metadata, stage),
       },
     });
 
-    await this.prisma.recruiter_interview_events.create({
+    await this.prisma.interviewEventLog.create({
       data: {
-        interview_id: interviewId,
-        actor_user_id: recruiterId,
-        event_type: 'stage_changed',
-        from_stage: interview.current_stage,
-        to_stage: stage,
+        interviewId,
+        actorUserId: recruiterId,
+        eventType: 'stage_changed',
+        payload: {
+          fromStage: this.currentStage(interview),
+          toStage: stage,
+        },
       },
     });
 
@@ -420,127 +410,87 @@ export class InterviewsService {
   }
 
   async submitRoundResult(recruiterId: string, roundId: string, payload: RoundResultInput) {
-    const round = await this.prisma.recruiter_interview_rounds.findUnique({ where: { id: roundId } });
-    if (!round) throw new NotFoundException('Round not found');
-
-    const interview = await this.prisma.recruiter_interviews.findUnique({
-      where: { id: round.interview_id },
+    const round = await this.prisma.recruiterInterviewRound.findUnique({
+      where: { id: roundId },
+      include: { interview: true },
     });
-    if (!interview || interview.recruiter_id !== recruiterId) throw new ForbiddenException('Not allowed');
+    if (!round) throw new NotFoundException('Round not found');
+    if (round.interview.recruiterUserId !== recruiterId) {
+      throw new ForbiddenException('Not allowed');
+    }
 
-    const updatedRound = await this.prisma.recruiter_interview_rounds.update({
+    const result = this.toRoundResult(payload.result);
+    const updatedRound = await this.prisma.recruiterInterviewRound.update({
       where: { id: roundId },
       data: {
-        result: payload.result,
+        result,
         score: payload.score ?? null,
         feedback: payload.feedback ?? null,
       },
     });
 
-    if (payload.result === 'pass') {
-      await this.prisma.recruiter_interviews.update({
-        where: { id: interview.id },
+    const nextStage =
+      result === InterviewRoundResult.PASSED
+        ? 'INTERVIEW_PASSED'
+        : result === InterviewRoundResult.FAILED
+          ? 'INTERVIEW_FAILED'
+          : null;
+
+    if (nextStage) {
+      await this.prisma.interview.update({
+        where: { id: round.interviewId },
         data: {
-          current_stage: 'INTERVIEW_PASSED',
-          status_code: STAGE_TO_CODE.INTERVIEW_PASSED,
-        },
-      });
-    } else if (payload.result === 'fail') {
-      await this.prisma.recruiter_interviews.update({
-        where: { id: interview.id },
-        data: {
-          current_stage: 'INTERVIEW_FAILED',
-          status_code: STAGE_TO_CODE.INTERVIEW_FAILED,
+          status: InterviewStatus.COMPLETED,
+          metadata: this.withStage(round.interview.metadata, nextStage),
         },
       });
     }
 
-    await this.prisma.recruiter_interview_events.create({
+    await this.prisma.interviewEventLog.create({
       data: {
-        interview_id: interview.id,
-        actor_user_id: recruiterId,
-        event_type: 'round_result_submitted',
-        metadata: { round_id: roundId, result: payload.result, score: payload.score ?? null },
+        interviewId: round.interviewId,
+        actorUserId: recruiterId,
+        eventType: 'round_result_submitted',
+        payload: { roundId, result: payload.result, score: payload.score ?? null },
       },
     });
 
     return updatedRound;
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // CANDIDATE VIEWS
-  // ───────────────────────────────────────────────────────────────────────────
-
   async listCandidateInterviews(candidateId: string, params?: { statusCode?: number; limit?: number }) {
-    const rows = await this.prisma.recruiter_interviews.findMany({
+    const rows = await this.prisma.interview.findMany({
       where: {
-        candidate_id: candidateId,
-        ...(typeof params?.statusCode === 'number' ? { status_code: params.statusCode } : {}),
+        candidateUserId: candidateId,
+        type: { not: InterviewType.AI_MOCK },
       },
-      orderBy: { updated_at: 'desc' },
+      include: { job: true },
+      orderBy: { updatedAt: 'desc' },
       take: params?.limit ?? 30,
     });
 
-    if (!rows.length) return [];
-
-    const jobIds = [...new Set(rows.map((r) => r.job_id))];
-    const jobs = await this.prisma.job.findMany({
-      where: { id: { in: jobIds } },
-      select: { id: true, title: true, company: true },
-    });
-    const jobMap = new Map(jobs.map((j) => [j.id, j]));
-
-    return rows.map((r) => ({
-      id: r.id,
-      current_stage: r.current_stage,
-      status_code: r.status_code,
-      final_status: r.final_status,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      job_title: jobMap.get(r.job_id)?.title ?? null,
-      company: jobMap.get(r.job_id)?.company ?? null,
-    }));
+    return rows
+      .map((row) => this.toInterviewSummary(row))
+      .filter((row) => params?.statusCode === undefined || row.status_code === params.statusCode);
   }
 
   async getCandidateInterview(candidateId: string, interviewId: string) {
-    const row = await this.prisma.recruiter_interviews.findFirst({
-      where: { id: interviewId, candidate_id: candidateId },
+    const row = await this.prisma.interview.findFirst({
+      where: { id: interviewId, candidateUserId: candidateId },
+      include: {
+        job: true,
+        rounds: { orderBy: { roundNumber: 'asc' } },
+        eventLogs: { orderBy: { createdAt: 'desc' }, take: 30 },
+      },
     });
     if (!row) throw new NotFoundException('Interview not found');
 
-    const [job, rounds, events] = await Promise.all([
-      this.prisma.job.findUnique({
-        where: { id: row.job_id },
-        select: { id: true, title: true, company: true },
-      }),
-      this.prisma.recruiter_interview_rounds.findMany({
-        where: { interview_id: row.id },
-        orderBy: { round_number: 'asc' },
-      }),
-      this.prisma.recruiter_interview_events.findMany({
-        where: { interview_id: row.id },
-        orderBy: { created_at: 'desc' },
-        take: 30,
-      }),
-    ]);
-
     return {
-      id: row.id,
-      current_stage: row.current_stage,
-      status_code: row.status_code,
-      final_status: row.final_status,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      job_title: job?.title ?? null,
-      company: job?.company ?? null,
-      rounds,
-      events,
+      ...this.toInterviewSummary(row),
+      rounds: row.rounds,
+      events: row.eventLogs,
     };
   }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // ROOM ACCESS VALIDATION
-  // ───────────────────────────────────────────────────────────────────────────
 
   async validateRoomAccess(roomId: string, userId: string, role: string) {
     return this.validateRoomAccessWithContext(roomId, userId, role);
@@ -554,23 +504,24 @@ export class InterviewsService {
     const roundNumber = Number(m[2]);
 
     const [interview, round] = await Promise.all([
-      this.prisma.recruiter_interviews.findUnique({ where: { id: interviewId } }),
-      this.prisma.recruiter_interview_rounds.findFirst({
-        where: { interview_id: interviewId, round_number: roundNumber },
+      this.prisma.interview.findUnique({ where: { id: interviewId } }),
+      this.prisma.recruiterInterviewRound.findFirst({
+        where: { interviewId, roundNumber },
       }),
     ]);
 
     if (!interview || !round) return { allowed: false, reason: 'room_not_found' };
 
-    const isCandidate = role === 'candidate' && interview.candidate_id === userId;
-    const isRecruiter = role === 'recruiter' && interview.recruiter_id === userId;
+    const normalizedRole = role.toLowerCase();
+    const isCandidate =
+      ['candidate', 'jobseeker', 'job_seeker'].includes(normalizedRole) &&
+      interview.candidateUserId === userId;
+    const isRecruiter = normalizedRole === 'recruiter' && interview.recruiterUserId === userId;
     if (!isCandidate && !isRecruiter) return { allowed: false, reason: 'forbidden' };
 
-    // Expiring room URL policy:
-    // Join opens 30 minutes before schedule and expires 2 hours after round end.
-    if (round.scheduled_at) {
-      const scheduledAt = round.scheduled_at.getTime();
-      const durationMs = (round.duration_mins ?? 45) * 60 * 1000;
+    if (round.scheduledAt) {
+      const scheduledAt = round.scheduledAt.getTime();
+      const durationMs = (round.durationMins ?? 45) * 60 * 1000;
       const startsAtMs = scheduledAt - 30 * 60 * 1000;
       const expiresAtMs = scheduledAt + durationMs + 2 * 60 * 60 * 1000;
       const now = Date.now();
@@ -584,9 +535,9 @@ export class InterviewsService {
           roundId: round.id,
           role,
           userId,
-          hostUserId: interview.recruiter_id,
-          interviewStage: interview.current_stage,
-          scheduledAt: round.scheduled_at.toISOString(),
+          hostUserId: interview.recruiterUserId,
+          interviewStage: this.currentStage(interview),
+          scheduledAt: round.scheduledAt.toISOString(),
           expiresAt: new Date(expiresAtMs).toISOString(),
         };
       }
@@ -599,47 +550,180 @@ export class InterviewsService {
       roundId: round.id,
       role,
       userId,
-      hostUserId: interview.recruiter_id,
-      interviewStage: interview.current_stage,
-      scheduledAt: round.scheduled_at ? round.scheduled_at.toISOString() : null,
-      expiresAt: round.scheduled_at
-        ? new Date(round.scheduled_at.getTime() + ((round.duration_mins ?? 45) + 120) * 60 * 1000).toISOString()
+      hostUserId: interview.recruiterUserId,
+      interviewStage: this.currentStage(interview),
+      scheduledAt: round.scheduledAt ? round.scheduledAt.toISOString() : null,
+      expiresAt: round.scheduledAt
+        ? new Date(round.scheduledAt.getTime() + ((round.durationMins ?? 45) + 120) * 60 * 1000).toISOString()
         : null,
     };
   }
 
   async markRoomStarted(interviewId: string, roundId: string, actorUserId: string) {
-    const interview = await this.prisma.recruiter_interviews.findUnique({ where: { id: interviewId } });
+    const interview = await this.prisma.interview.findUnique({ where: { id: interviewId } });
     if (!interview) return;
 
-    if (interview.current_stage !== 'INTERVIEW_IN_PROGRESS') {
-      await this.prisma.recruiter_interviews.update({
+    if (interview.status !== InterviewStatus.IN_PROGRESS) {
+      await this.prisma.interview.update({
         where: { id: interviewId },
         data: {
-          current_stage: 'INTERVIEW_IN_PROGRESS',
-          status_code: STAGE_TO_CODE.INTERVIEW_IN_PROGRESS,
+          status: InterviewStatus.IN_PROGRESS,
+          metadata: this.withStage(interview.metadata, 'INTERVIEW_IN_PROGRESS'),
         },
       });
     }
 
-    await this.prisma.recruiter_interview_events.create({
+    await this.prisma.interviewEventLog.create({
       data: {
-        interview_id: interviewId,
-        actor_user_id: actorUserId,
-        event_type: 'room_started',
-        metadata: { round_id: roundId },
+        interviewId,
+        actorUserId,
+        eventType: 'room_started',
+        payload: { roundId },
       },
     });
   }
 
   async markRoomEnded(interviewId: string, roundId: string, actorUserId: string) {
-    await this.prisma.recruiter_interview_events.create({
+    await this.prisma.interviewEventLog.create({
       data: {
-        interview_id: interviewId,
-        actor_user_id: actorUserId,
-        event_type: 'room_ended',
-        metadata: { round_id: roundId },
+        interviewId,
+        actorUserId,
+        eventType: 'room_ended',
+        payload: { roundId },
       },
     });
+  }
+
+  private toQuestionRow(q: {
+    id: string;
+    interviewId: string;
+    questionNumber: number;
+    question: string;
+    category: string | null;
+    difficulty: string;
+    idealAnswer: string | null;
+    userAnswer: string | null;
+    score: number | null;
+    feedback: string | null;
+    timeTakenSecs: number | null;
+    answeredAt: Date | null;
+    createdAt: Date;
+  }): InterviewQuestionRow {
+    return {
+      id: q.id,
+      session_id: q.interviewId,
+      question_number: q.questionNumber,
+      question: q.question,
+      category: q.category,
+      difficulty: q.difficulty,
+      ideal_answer: q.idealAnswer,
+      user_answer: q.userAnswer,
+      score: q.score,
+      feedback: q.feedback,
+      time_taken_secs: q.timeTakenSecs,
+      answered_at: q.answeredAt,
+      created_at: q.createdAt,
+    };
+  }
+
+  private toSessionResponse(interview: {
+    id: string;
+    candidateUserId: string;
+    jobId: string | null;
+    jobTitle: string | null;
+    companyName: string | null;
+    type: InterviewType;
+    status: InterviewStatus;
+    overallScore: number | null;
+    completedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    metadata: Prisma.JsonValue;
+  }) {
+    const metadata = this.metadataRecord(interview.metadata);
+
+    return {
+      id: interview.id,
+      candidate_id: interview.candidateUserId,
+      job_id: interview.jobId,
+      job_title: interview.jobTitle,
+      company: interview.companyName,
+      session_type: metadata.sessionType ?? interview.type.toLowerCase(),
+      status: interview.status.toLowerCase(),
+      total_questions: metadata.totalQuestions ?? null,
+      overall_score: interview.overallScore,
+      completed_at: interview.completedAt,
+      created_at: interview.createdAt,
+      updated_at: interview.updatedAt,
+    };
+  }
+
+  private toInterviewSummary(row: any) {
+    const metadata = this.metadataRecord(row.metadata);
+
+    return {
+      id: row.id,
+      current_stage: metadata.currentStage ?? this.currentStage(row),
+      status_code: metadata.statusCode ?? STAGE_TO_CODE[metadata.currentStage as string] ?? null,
+      final_status: metadata.finalStatus ?? null,
+      created_at: row.createdAt,
+      updated_at: row.updatedAt,
+      job_title: row.jobTitle ?? row.job?.title ?? null,
+      company: row.companyName ?? row.job?.companyName ?? null,
+      candidate_name: row.candidate?.fullName ?? null,
+      candidate_email: row.candidate?.email ?? null,
+    };
+  }
+
+  private metadataRecord(value: Prisma.JsonValue | null | undefined): Record<string, any> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, any>)
+      : {};
+  }
+
+  private currentStage(interview: { metadata: Prisma.JsonValue; status: InterviewStatus }): string {
+    const metadata = this.metadataRecord(interview.metadata);
+    if (typeof metadata.currentStage === 'string') return metadata.currentStage;
+    return interview.status === InterviewStatus.IN_PROGRESS
+      ? 'INTERVIEW_IN_PROGRESS'
+      : interview.status === InterviewStatus.COMPLETED
+        ? 'INTERVIEW_PASSED'
+        : 'INTERVIEW_SCHEDULED';
+  }
+
+  private withStage(metadata: Prisma.JsonValue, stage: string): Prisma.InputJsonObject {
+    return {
+      ...this.metadataRecord(metadata),
+      currentStage: stage,
+      statusCode: STAGE_TO_CODE[stage],
+      finalStatus: this.isTerminalStage(stage) ? stage : this.metadataRecord(metadata).finalStatus ?? null,
+    };
+  }
+
+  private stageToInterviewStatus(stage: string): InterviewStatus {
+    if (stage === 'INTERVIEW_IN_PROGRESS') return InterviewStatus.IN_PROGRESS;
+    if (this.isTerminalStage(stage)) return InterviewStatus.COMPLETED;
+    if (stage === 'ON_HOLD' || stage === 'WITHDRAWN') return InterviewStatus.CANCELLED;
+    return InterviewStatus.SCHEDULED;
+  }
+
+  private isTerminalStage(stage: string): boolean {
+    return ['INTERVIEW_PASSED', 'INTERVIEW_FAILED', 'HIRED', 'REJECTED'].includes(stage);
+  }
+
+  private toRoundResult(result: RoundResultInput['result']): InterviewRoundResult {
+    switch (result) {
+      case 'pass':
+        return InterviewRoundResult.PASSED;
+      case 'fail':
+        return InterviewRoundResult.FAILED;
+      case 'no_show':
+        return InterviewRoundResult.NO_SHOW;
+      case 'reschedule':
+        return InterviewRoundResult.CANCELLED;
+      case 'pending':
+      default:
+        return InterviewRoundResult.PENDING;
+    }
   }
 }

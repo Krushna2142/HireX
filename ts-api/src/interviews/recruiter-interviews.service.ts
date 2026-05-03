@@ -3,8 +3,14 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import {
+  ApplicationStatus,
+  InterviewRoundResult,
+  InterviewStatus,
+  InterviewType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DatabaseService } from '../database/database.service';
 import { AlertsService } from '../alerts/alerts.service';
 
 const STAGE_TO_CODE: Record<string, number> = {
@@ -27,66 +33,69 @@ export type StageKey = keyof typeof STAGE_TO_CODE;
 
 const RESULT_TO_STAGE: Partial<Record<string, StageKey>> = {
   pass: 'INTERVIEW_PASSED',
+  passed: 'INTERVIEW_PASSED',
   fail: 'INTERVIEW_FAILED',
+  failed: 'INTERVIEW_FAILED',
   no_show: 'ON_HOLD',
   reschedule: 'INTERVIEW_SCHEDULED',
-};
-
-type ApplicationSeedRow = {
-  id: string;
-  job_id: string;
-  candidate_id: string;
-};
-
-type RecruiterInterviewRow = {
-  id: string;
-  application_id: string;
-  job_id: string;
-  candidate_id: string;
-  recruiter_id: string;
-  current_stage: string;
-};
-
-type RecruiterInterviewRoundRow = {
-  id: string;
-  interview_id: string;
-  round_number: number;
-  recruiter_id?: string;
 };
 
 @Injectable()
 export class RecruiterInterviewsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly db: DatabaseService,
     private readonly alerts: AlertsService,
   ) {}
 
   async initInterview(applicationId: string, recruiterId: string) {
-    const { rows } = await this.db.query<ApplicationSeedRow>(
-      `SELECT a.id, a.job_id, a.candidate_id
-       FROM applications a
-       JOIN jobs j ON j.id = a.job_id
-       WHERE a.id = $1 AND j.recruiter_id = $2`,
-      [applicationId, recruiterId],
-    );
-    if (!rows.length) throw new NotFoundException('Application not found');
+    const app = await this.prisma.jobApplication.findFirst({
+      where: {
+        id: applicationId,
+        job: { recruiterUserId: recruiterId },
+      },
+      include: {
+        job: true,
+        candidate: true,
+      },
+    });
+    if (!app) throw new NotFoundException('Application not found');
 
-    const app = rows[0];
+    const existing = await this.prisma.interview.findFirst({
+      where: {
+        applicationId,
+        recruiterUserId: recruiterId,
+      },
+      include: {
+        job: true,
+        candidate: true,
+        rounds: { orderBy: { roundNumber: 'asc' } },
+      },
+    });
 
-    await this.db.query(
-      `INSERT INTO recruiter_interviews (application_id, job_id, candidate_id, recruiter_id, current_stage, status_code)
-       VALUES ($1, $2, $3, $4, 'APPLIED', 100)
-       ON CONFLICT (application_id) DO NOTHING`,
-      [app.id, app.job_id, app.candidate_id, recruiterId],
-    );
+    if (existing) return this.toInterviewDetail(existing);
 
-    const detail = await this.db.query(
-      `SELECT * FROM recruiter_interviews WHERE application_id = $1`,
-      [applicationId],
-    );
+    const interview = await this.prisma.interview.create({
+      data: {
+        applicationId: app.id,
+        jobId: app.jobId,
+        candidateUserId: app.candidateUserId,
+        recruiterUserId: recruiterId,
+        createdByUserId: recruiterId,
+        type: InterviewType.RECRUITER_LIVE,
+        status: InterviewStatus.SCHEDULED,
+        title: `${app.job.title} interview`,
+        jobTitle: app.job.title,
+        companyName: app.job.companyName,
+        metadata: this.withStage({}, 'APPLIED'),
+      },
+      include: {
+        job: true,
+        candidate: true,
+        rounds: { orderBy: { roundNumber: 'asc' } },
+      },
+    });
 
-    return detail.rows[0];
+    return this.toInterviewDetail(interview);
   }
 
   async scheduleRound(
@@ -100,110 +109,103 @@ export class RecruiterInterviewsService {
       interviewerId?: string;
     },
   ) {
-    const interview = await this.db.query<RecruiterInterviewRow>(
-      `SELECT * FROM recruiter_interviews WHERE id = $1 AND recruiter_id = $2`,
-      [interviewId, recruiterId],
-    );
-    if (!interview.rows.length)
-      throw new NotFoundException('Interview not found');
+    const interview = await this.prisma.interview.findFirst({
+      where: { id: interviewId, recruiterUserId: recruiterId },
+      include: { job: true, candidate: true },
+    });
+    if (!interview) throw new NotFoundException('Interview not found');
 
-    const n = await this.db.query<{ next_round: number }>(
-      `SELECT COALESCE(MAX(round_number), 0) + 1 AS next_round
-       FROM recruiter_interview_rounds
-       WHERE interview_id = $1`,
-      [interviewId],
-    );
-    const roundNumber = n.rows[0].next_round;
+    const scheduledAt = new Date(payload.scheduledAt);
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new NotFoundException('Invalid schedule time');
+    }
 
-    const roomId = `jc-${interviewId}-r${roundNumber}`;
-    const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/interviews/room/${roomId}`;
+    const lastRound = await this.prisma.recruiterInterviewRound.findFirst({
+      where: { interviewId },
+      orderBy: { roundNumber: 'desc' },
+    });
+    const roundNumber = (lastRound?.roundNumber ?? 0) + 1;
+    const roomSlug = `jc-${interviewId}-r${roundNumber}`;
+    const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/interviews/room/${roomSlug}`;
 
-    const { rows } = await this.db.query<RecruiterInterviewRoundRow>(
-      `INSERT INTO recruiter_interview_rounds
-       (interview_id, round_number, round_type, scheduled_at, duration_mins, mode, interviewer_id, meeting_provider, meeting_room_id, meeting_join_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'internal',$8,$9)
-       RETURNING *`,
-      [
+    const room = await this.prisma.interviewRoom.create({
+      data: {
+        interviewId,
+        roomName: `Round ${roundNumber}`,
+        provider: 'internal',
+        providerRoomId: roomSlug,
+        maxParticipants: 4,
+        mode: payload.mode ?? 'video',
+        hostUserId: recruiterId,
+        joinUrl,
+      },
+    });
+
+    const round = await this.prisma.recruiterInterviewRound.create({
+      data: {
         interviewId,
         roundNumber,
-        payload.roundType,
-        payload.scheduledAt,
-        payload.durationMins ?? 45,
-        payload.mode ?? 'video',
-        payload.interviewerId ?? null,
-        roomId,
-        joinUrl,
-      ],
-    );
+        roundType: payload.roundType,
+        scheduledAt,
+        durationMins: payload.durationMins ?? 45,
+        mode: payload.mode ?? 'video',
+        interviewerId: payload.interviewerId ?? recruiterId,
+        meetingProvider: 'internal',
+        meetingRoomId: room.id,
+        meetingJoinUrl: joinUrl,
+        result: InterviewRoundResult.PENDING,
+      },
+    });
 
-    await this.db.query(
-      `INSERT INTO recruiter_interview_events
-       (interview_id, actor_user_id, event_type, metadata)
-       VALUES ($1, $2, 'round_scheduled', $3::jsonb)`,
-      [
+    await this.updateStage(interviewId, recruiterId, 'INTERVIEW_SCHEDULED', true);
+
+    await this.prisma.interview.update({
+      where: { id: interviewId },
+      data: {
+        scheduledStartAt: scheduledAt,
+        scheduledEndAt: new Date(scheduledAt.getTime() + (round.durationMins ?? 45) * 60 * 1000),
+      },
+    });
+
+    await this.prisma.interviewEventLog.create({
+      data: {
         interviewId,
-        recruiterId,
-        JSON.stringify({
-          roundId: rows[0].id,
-          round_number: roundNumber,
+        actorUserId: recruiterId,
+        eventType: 'round_scheduled',
+        payload: {
+          roundId: round.id,
+          roundNumber,
           roundType: payload.roundType,
           scheduledAt: payload.scheduledAt,
           mode: payload.mode ?? 'video',
-        }),
-      ],
-    );
+          roomId: room.id,
+          joinUrl,
+        },
+      },
+    });
 
-    await this.updateStage(
-      interviewId,
-      recruiterId,
-      'INTERVIEW_SCHEDULED',
-      true,
-    );
-
-    const [jobRow, candidateRow] = await Promise.all([
-      this.db.query<{ title: string }>(`SELECT title FROM jobs WHERE id = $1`, [
-        interview.rows[0].job_id,
-      ]),
-      this.db.query<{ full_name: string }>(
-        `SELECT full_name FROM users WHERE id = $1`,
-        [interview.rows[0].candidate_id],
-      ),
-    ]);
-
-    const jobTitle = jobRow.rows[0]?.title ?? 'your application';
-    const candidateName = candidateRow.rows[0]?.full_name ?? 'candidate';
-    const when = new Date(payload.scheduledAt).toLocaleString();
+    const when = scheduledAt.toLocaleString();
+    const candidateName = interview.candidate.fullName ?? 'candidate';
+    const jobTitle = interview.job?.title ?? interview.jobTitle ?? 'your application';
 
     await this.alerts.createBulkAlerts([
       {
-        userId: interview.rows[0].candidate_id,
+        userId: interview.candidateUserId,
         type: 'interview_scheduled',
         title: 'Interview round scheduled',
         message: `${payload.roundType} round scheduled for ${jobTitle} on ${when}.`,
-        metadata: {
-          interviewId,
-          roundId: rows[0].id,
-          roundNumber,
-          joinUrl,
-          scheduledAt: payload.scheduledAt,
-        },
+        metadata: { interviewId, roundId: round.id, roundNumber, joinUrl, scheduledAt: payload.scheduledAt },
       },
       {
         userId: recruiterId,
         type: 'interview_scheduled',
         title: 'Interview round scheduled',
         message: `${candidateName} is scheduled for round ${roundNumber} (${payload.roundType}) on ${when}.`,
-        metadata: {
-          interviewId,
-          roundId: rows[0].id,
-          roundNumber,
-          joinUrl,
-          scheduledAt: payload.scheduledAt,
-        },
+        metadata: { interviewId, roundId: round.id, roundNumber, joinUrl, scheduledAt: payload.scheduledAt },
       },
     ]);
 
-    return rows[0];
+    return round;
   }
 
   async updateStage(
@@ -215,82 +217,91 @@ export class RecruiterInterviewsService {
     const code = STAGE_TO_CODE[stage];
     if (!code) throw new NotFoundException('Invalid stage');
 
-    const interview = await this.db.query<RecruiterInterviewRow>(
-      `SELECT * FROM recruiter_interviews WHERE id = $1`,
-      [interviewId],
-    );
-    if (!interview.rows.length)
-      throw new NotFoundException('Interview not found');
+    const interview = await this.prisma.interview.findUnique({
+      where: { id: interviewId },
+      include: { job: true },
+    });
+    if (!interview) throw new NotFoundException('Interview not found');
 
-    const current = interview.rows[0];
-    if (!skipAuth && current.recruiter_id !== actorUserId) {
+    if (!skipAuth && interview.recruiterUserId !== actorUserId) {
       throw new ForbiddenException('Not allowed');
     }
 
-    const finalStatus =
-      stage === 'REJECTED'
-        ? 'rejected'
-        : stage === 'HIRED'
-          ? 'selected'
-          : stage === 'SHORTLISTED'
-            ? 'shortlisted'
-            : stage === 'ON_HOLD'
-              ? 'on_hold'
-              : 'in_progress';
+    const fromStage = this.currentStage(interview.metadata);
+    const updated = await this.prisma.interview.update({
+      where: { id: interviewId },
+      data: {
+        status: this.stageToInterviewStatus(stage),
+        completedAt: this.isTerminalStage(stage) ? new Date() : interview.completedAt,
+        metadata: this.withStage(interview.metadata, stage),
+      },
+    });
 
-    const { rows } = await this.db.query(
-      `UPDATE recruiter_interviews
-       SET current_stage = $1, status_code = $2, final_status = $3, updated_at = NOW()
-       WHERE id = $4
-       RETURNING *`,
-      [stage, code, finalStatus, interviewId],
-    );
+    const applicationStatus = this.stageToApplicationStatus(stage);
+    if (applicationStatus && interview.applicationId) {
+      const previous = await this.prisma.jobApplication.findUnique({
+        where: { id: interview.applicationId },
+        select: { status: true },
+      });
 
-    await this.db.query(
-      `INSERT INTO recruiter_interview_events
-       (interview_id, actor_user_id, event_type, from_stage, to_stage, metadata)
-       VALUES ($1, $2, 'STATUS_CHANGED', $3, $4, $5::jsonb)`,
-      [
+      await this.prisma.jobApplication.update({
+        where: { id: interview.applicationId },
+        data: {
+          status: applicationStatus,
+          lastStatusChangedAt: new Date(),
+        },
+      });
+
+      await this.prisma.candidateStatusEvent.create({
+        data: {
+          applicationId: interview.applicationId,
+          fromStatus: previous?.status ?? null,
+          toStatus: applicationStatus,
+          changedByUserId: actorUserId,
+          metadata: { interviewId, stage },
+        },
+      });
+    }
+
+    await this.prisma.interviewEventLog.create({
+      data: {
         interviewId,
         actorUserId,
-        current.current_stage,
-        stage,
-        JSON.stringify({ statusCode: code }),
-      ],
-    );
+        eventType: 'STATUS_CHANGED',
+        payload: { fromStage, toStage: stage, statusCode: code },
+      },
+    });
 
-    const { rows: jobRows } = await this.db.query<{ title: string }>(
-      `SELECT title FROM jobs WHERE id = $1`,
-      [current.job_id],
-    );
-    const jobTitle = jobRows[0]?.title ?? 'your application';
+    const jobTitle = interview.job?.title ?? interview.jobTitle ?? 'your application';
     const stageMessage = this.stageMessage(stage, jobTitle);
 
-    await this.alerts.createBulkAlerts([
+    const payloads = [
       {
-        userId: current.candidate_id,
+        userId: interview.candidateUserId,
         type: 'interview_stage',
         title: `Interview status: ${stage}`,
         message: stageMessage.candidate,
         metadata: { interviewId, stage, statusCode: code },
       },
-      {
-        userId: current.recruiter_id,
+    ];
+
+    if (interview.recruiterUserId) {
+      payloads.push({
+        userId: interview.recruiterUserId,
         type: 'interview_stage',
         title: `Interview status: ${stage}`,
         message: stageMessage.recruiter,
         metadata: { interviewId, stage, statusCode: code },
-      },
-    ]);
-
-    if (stage === 'REJECTED') {
-      await this.garbageRejectedResume(
-        current.candidate_id,
-        current.application_id,
-      );
+      });
     }
 
-    return rows[0];
+    await this.alerts.createBulkAlerts(payloads);
+
+    if (stage === 'REJECTED' && interview.applicationId) {
+      await this.garbageRejectedResume(interview.candidateUserId, interview.applicationId);
+    }
+
+    return updated;
   }
 
   async submitRoundResult(
@@ -298,121 +309,97 @@ export class RecruiterInterviewsService {
     recruiterId: string,
     payload: { result: string; score?: number; feedback?: string },
   ) {
-    const check = await this.db.query<RecruiterInterviewRoundRow>(
-      `SELECT r.*, i.recruiter_id, i.id AS interview_id
-       FROM recruiter_interview_rounds r
-       JOIN recruiter_interviews i ON i.id = r.interview_id
-       WHERE r.id = $1`,
-      [roundId],
-    );
-    if (!check.rows.length) throw new NotFoundException('Round not found');
-    if (check.rows[0].recruiter_id !== recruiterId)
+    const round = await this.prisma.recruiterInterviewRound.findUnique({
+      where: { id: roundId },
+      include: {
+        interview: {
+          include: { job: true },
+        },
+      },
+    });
+    if (!round) throw new NotFoundException('Round not found');
+    if (round.interview.recruiterUserId !== recruiterId) {
       throw new ForbiddenException('Not allowed');
+    }
 
-    const { rows } = await this.db.query<RecruiterInterviewRoundRow>(
-      `UPDATE recruiter_interview_rounds
-       SET result = $1, score = $2, feedback = $3, updated_at = NOW()
-       WHERE id = $4
-       RETURNING *`,
-      [
-        payload.result,
-        payload.score ?? null,
-        payload.feedback ?? null,
-        roundId,
-      ],
-    );
+    const result = this.toRoundResult(payload.result);
+    const updated = await this.prisma.recruiterInterviewRound.update({
+      where: { id: roundId },
+      data: {
+        result,
+        score: payload.score ?? null,
+        feedback: payload.feedback ?? null,
+      },
+    });
 
-    await this.db.query(
-      `INSERT INTO recruiter_interview_events
-       (interview_id, actor_user_id, event_type, metadata)
-       VALUES ($1, $2, 'ROUND_COMPLETED', $3::jsonb)`,
-      [
-        check.rows[0].interview_id,
-        recruiterId,
-        JSON.stringify({ roundId, result: payload.result }),
-      ],
-    );
+    await this.prisma.interviewEventLog.create({
+      data: {
+        interviewId: round.interviewId,
+        actorUserId: recruiterId,
+        eventType: 'ROUND_COMPLETED',
+        payload: { roundId, result: payload.result },
+      },
+    });
 
-    const { rows: interviewMeta } = await this.db.query<{
-      candidate_id: string;
-      recruiter_id: string;
-      job_title: string;
-    }>(
-      `SELECT i.candidate_id, i.recruiter_id, j.title AS job_title
-       FROM recruiter_interviews i
-       JOIN jobs j ON j.id = i.job_id
-       WHERE i.id = $1`,
-      [check.rows[0].interview_id],
-    );
-
-    const meta = interviewMeta[0];
-    const title = meta?.job_title ?? 'your interview';
     const nextStage = RESULT_TO_STAGE[payload.result];
     if (nextStage) {
-      await this.updateStage(
-        check.rows[0].interview_id,
-        recruiterId,
-        nextStage,
-        true,
-      );
+      await this.updateStage(round.interviewId, recruiterId, nextStage, true);
     }
 
+    const title = round.interview.job?.title ?? round.interview.jobTitle ?? 'your interview';
     const resultLabel = payload.result.replaceAll('_', ' ');
-    const roundNumber = rows[0]?.round_number ?? check.rows[0].round_number;
+    const payloads = [
+      {
+        userId: round.interview.candidateUserId,
+        type: 'interview_round_result',
+        title: 'Interview round updated',
+        message: `Round ${round.roundNumber} for ${title} is now marked ${resultLabel}.`,
+        metadata: { roundId, roundNumber: round.roundNumber, interviewId: round.interviewId, result: payload.result },
+      },
+    ];
 
-    if (meta) {
-      await this.alerts.createBulkAlerts([
-        {
-          userId: meta.candidate_id,
-          type: 'interview_round_result',
-          title: 'Interview round updated',
-          message: `Round ${roundNumber} for ${title} is now marked ${resultLabel}.`,
-          metadata: {
-            roundId,
-            roundNumber,
-            interviewId: check.rows[0].interview_id,
-            result: payload.result,
-          },
-        },
-        {
-          userId: meta.recruiter_id,
-          type: 'interview_round_result',
-          title: 'Interview round updated',
-          message: `Round ${roundNumber} for ${title} is now marked ${resultLabel}.`,
-          metadata: {
-            roundId,
-            roundNumber,
-            interviewId: check.rows[0].interview_id,
-            result: payload.result,
-          },
-        },
-      ]);
+    if (round.interview.recruiterUserId) {
+      payloads.push({
+        userId: round.interview.recruiterUserId,
+        type: 'interview_round_result',
+        title: 'Interview round updated',
+        message: `Round ${round.roundNumber} for ${title} is now marked ${resultLabel}.`,
+        metadata: { roundId, roundNumber: round.roundNumber, interviewId: round.interviewId, result: payload.result },
+      });
     }
 
-    return rows[0];
+    await this.alerts.createBulkAlerts(payloads);
+
+    return updated;
   }
 
   async getDashboard(recruiterId: string, jobId?: string) {
-    const params: Array<string | number> = [recruiterId];
-    let where = `WHERE recruiter_id = $1`;
-    if (jobId) {
-      params.push(jobId);
-      where += ` AND job_id = $2`;
+    const rows = await this.prisma.interview.findMany({
+      where: {
+        recruiterUserId: recruiterId,
+        ...(jobId ? { jobId } : {}),
+        type: { not: InterviewType.AI_MOCK },
+      },
+      select: { metadata: true },
+    });
+
+    const dashboard = {
+      total: rows.length,
+      shortlisted: 0,
+      rejected: 0,
+      scheduled: 0,
+      hired: 0,
+    };
+
+    for (const row of rows) {
+      const stage = this.currentStage(row.metadata);
+      if (stage === 'SHORTLISTED') dashboard.shortlisted += 1;
+      if (stage === 'REJECTED') dashboard.rejected += 1;
+      if (stage === 'INTERVIEW_SCHEDULED') dashboard.scheduled += 1;
+      if (stage === 'HIRED') dashboard.hired += 1;
     }
 
-    const { rows } = await this.db.query(
-      `SELECT
-         COUNT(*)::int as total,
-         COUNT(*) FILTER (WHERE current_stage='SHORTLISTED')::int as shortlisted,
-         COUNT(*) FILTER (WHERE current_stage='REJECTED')::int as rejected,
-         COUNT(*) FILTER (WHERE current_stage='INTERVIEW_SCHEDULED')::int as scheduled,
-         COUNT(*) FILTER (WHERE current_stage='HIRED')::int as hired
-       FROM recruiter_interviews
-       ${where}`,
-      params,
-    );
-
-    return rows[0];
+    return dashboard;
   }
 
   async listInterviews(
@@ -421,99 +408,184 @@ export class RecruiterInterviewsService {
     opts: { statusCode?: number; limit?: number },
   ) {
     const limit = Math.min(opts.limit ?? 20, 100);
-    const params: Array<string | number> = [limit];
-    let where = '';
+    const normalizedRole = role.toLowerCase();
 
-    if (role === 'recruiter') {
-      params.unshift(userId);
-      where = `WHERE i.recruiter_id = $1`;
-      if (opts.statusCode) {
-        params.push(opts.statusCode);
-        where += ` AND i.status_code = $${params.length}`;
-      }
-    } else {
-      params.unshift(userId);
-      where = `WHERE i.candidate_id = $1`;
-      if (opts.statusCode) {
-        params.push(opts.statusCode);
-        where += ` AND i.status_code = $${params.length}`;
-      }
-    }
+    const rows = await this.prisma.interview.findMany({
+      where: {
+        type: { not: InterviewType.AI_MOCK },
+        ...(normalizedRole === 'recruiter'
+          ? { recruiterUserId: userId }
+          : { candidateUserId: userId }),
+      },
+      include: { job: true, candidate: true },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+    });
 
-    const q =
-      role === 'recruiter'
-        ? `SELECT i.*, u.full_name as candidate_name, u.email as candidate_email, j.title as job_title, j.company
-         FROM recruiter_interviews i
-         LEFT JOIN users u ON u.id = i.candidate_id
-         LEFT JOIN jobs j ON j.id = i.job_id
-         ${where}
-         ORDER BY i.updated_at DESC
-         LIMIT $2`
-        : `SELECT i.*, j.title as job_title, j.company
-         FROM recruiter_interviews i
-         LEFT JOIN jobs j ON j.id = i.job_id
-         ${where}
-         ORDER BY i.updated_at DESC
-         LIMIT $2`;
-
-    const { rows } = await this.db.query(q, params);
-    return rows;
+    return rows
+      .map((row) => this.toInterviewSummary(row))
+      .filter((row) => opts.statusCode === undefined || row.status_code === opts.statusCode);
   }
 
   async getInterview(interviewId: string, userId: string, role: string) {
-    const { rows } = await this.db.query<RecruiterInterviewRow>(
-      `SELECT * FROM recruiter_interviews WHERE id = $1`,
-      [interviewId],
-    );
-    if (!rows.length) throw new NotFoundException('Interview not found');
+    const row = await this.prisma.interview.findUnique({
+      where: { id: interviewId },
+      include: {
+        job: true,
+        candidate: true,
+        rounds: { orderBy: { roundNumber: 'asc' } },
+        eventLogs: { orderBy: { createdAt: 'desc' }, take: 50 },
+      },
+    });
+    if (!row) throw new NotFoundException('Interview not found');
 
-    const i = rows[0];
-    if (role === 'recruiter' && i.recruiter_id !== userId)
+    const normalizedRole = role.toLowerCase();
+    if (normalizedRole === 'recruiter' && row.recruiterUserId !== userId) {
       throw new ForbiddenException('Not allowed');
-    if (role !== 'recruiter' && i.candidate_id !== userId)
+    }
+    if (normalizedRole !== 'recruiter' && row.candidateUserId !== userId) {
       throw new ForbiddenException('Not allowed');
+    }
 
-    const rounds = await this.db.query(
-      `SELECT * FROM recruiter_interview_rounds WHERE interview_id = $1 ORDER BY round_number`,
-      [interviewId],
-    );
-    const events = await this.db.query(
-      `SELECT * FROM recruiter_interview_events WHERE interview_id = $1 ORDER BY created_at DESC LIMIT 50`,
-      [interviewId],
-    );
-
-    return { interview: i, rounds: rounds.rows, events: events.rows };
+    return {
+      interview: this.toInterviewDetail(row),
+      rounds: row.rounds,
+      events: row.eventLogs,
+    };
   }
 
-  private async garbageRejectedResume(
-    candidateId: string,
-    applicationId: string,
-  ) {
-    const app = await this.db.query<{ resume_id: string | null }>(
-      `SELECT resume_id FROM applications WHERE id = $1`,
-      [applicationId],
-    );
-    if (!app.rows.length || !app.rows[0].resume_id) return;
+  private async garbageRejectedResume(candidateId: string, applicationId: string) {
+    const app = await this.prisma.jobApplication.findUnique({
+      where: { id: applicationId },
+      select: { resumeId: true },
+    });
+    if (!app?.resumeId) return;
 
-    const resumeId = app.rows[0].resume_id;
+    await this.prisma.resume.update({
+      where: { id: app.resumeId },
+      data: {
+        garbagedAt: new Date(),
+        garbageReason: 'rejected',
+      },
+    });
 
-    await this.db.query(
-      `UPDATE resumes
-       SET status='garbaged',
-           garbaged_at=NOW(),
-           garbage_reason='rejected',
-           content=NULL,
-           file_bytes=NULL
-       WHERE id = $1 AND user_id = $2`,
-      [resumeId, candidateId],
-    );
+    await this.prisma.jobseekerProfile.updateMany({
+      where: { userId: candidateId, activeResumeId: app.resumeId },
+      data: { activeResumeId: null },
+    });
+  }
 
-    await this.db.query(
-      `UPDATE candidate_profiles
-       SET active_resume_id = NULL
-       WHERE user_id = $1 AND active_resume_id = $2`,
-      [candidateId, resumeId],
-    );
+  private toInterviewDetail(row: any) {
+    return {
+      ...this.toInterviewSummary(row),
+      candidate_id: row.candidateUserId,
+      recruiter_id: row.recruiterUserId,
+      job_id: row.jobId,
+      application_id: row.applicationId,
+      rounds: row.rounds ?? [],
+    };
+  }
+
+  private toInterviewSummary(row: any) {
+    const metadata = this.metadataRecord(row.metadata);
+    const stage = this.currentStage(row.metadata);
+
+    return {
+      id: row.id,
+      current_stage: stage,
+      status_code: metadata.statusCode ?? STAGE_TO_CODE[stage] ?? null,
+      final_status: metadata.finalStatus ?? null,
+      created_at: row.createdAt,
+      updated_at: row.updatedAt,
+      job_title: row.jobTitle ?? row.job?.title ?? null,
+      company: row.companyName ?? row.job?.companyName ?? null,
+      candidate_name: row.candidate?.fullName ?? null,
+      candidate_email: row.candidate?.email ?? null,
+    };
+  }
+
+  private withStage(metadata: Prisma.JsonValue | Record<string, unknown>, stage: string): Prisma.InputJsonObject {
+    return {
+      ...this.metadataRecord(metadata),
+      currentStage: stage,
+      statusCode: STAGE_TO_CODE[stage],
+      finalStatus: this.isTerminalStage(stage) ? stage : this.metadataRecord(metadata).finalStatus ?? null,
+    };
+  }
+
+  private currentStage(metadata: Prisma.JsonValue): StageKey {
+    const record = this.metadataRecord(metadata);
+    return typeof record.currentStage === 'string' && record.currentStage in STAGE_TO_CODE
+      ? (record.currentStage as StageKey)
+      : 'APPLIED';
+  }
+
+  private metadataRecord(value: Prisma.JsonValue | Record<string, unknown> | null | undefined): Record<string, any> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, any>)
+      : {};
+  }
+
+  private stageToInterviewStatus(stage: StageKey): InterviewStatus {
+    if (stage === 'INTERVIEW_IN_PROGRESS') return InterviewStatus.IN_PROGRESS;
+    if (this.isTerminalStage(stage)) return InterviewStatus.COMPLETED;
+    if (stage === 'ON_HOLD' || stage === 'WITHDRAWN') return InterviewStatus.CANCELLED;
+    return InterviewStatus.SCHEDULED;
+  }
+
+  private stageToApplicationStatus(stage: StageKey): ApplicationStatus | null {
+    switch (stage) {
+      case 'APPLIED':
+        return ApplicationStatus.APPLIED;
+      case 'UNDER_REVIEW':
+        return ApplicationStatus.UNDER_REVIEW;
+      case 'SHORTLISTED':
+        return ApplicationStatus.SHORTLISTED;
+      case 'INTERVIEW_SCHEDULED':
+        return ApplicationStatus.INTERVIEW_SCHEDULED;
+      case 'INTERVIEW_IN_PROGRESS':
+        return ApplicationStatus.INTERVIEW_IN_PROGRESS;
+      case 'INTERVIEW_PASSED':
+        return ApplicationStatus.INTERVIEW_PASSED;
+      case 'INTERVIEW_FAILED':
+        return ApplicationStatus.INTERVIEW_FAILED;
+      case 'FINAL_REVIEW':
+        return ApplicationStatus.FINAL_REVIEW;
+      case 'OFFERED':
+        return ApplicationStatus.OFFERED;
+      case 'HIRED':
+        return ApplicationStatus.HIRED;
+      case 'REJECTED':
+        return ApplicationStatus.REJECTED;
+      case 'ON_HOLD':
+        return ApplicationStatus.ON_HOLD;
+      case 'WITHDRAWN':
+        return ApplicationStatus.WITHDRAWN;
+      default:
+        return null;
+    }
+  }
+
+  private isTerminalStage(stage: string): boolean {
+    return ['INTERVIEW_PASSED', 'INTERVIEW_FAILED', 'HIRED', 'REJECTED'].includes(stage);
+  }
+
+  private toRoundResult(result: string): InterviewRoundResult {
+    switch (result) {
+      case 'pass':
+      case 'passed':
+        return InterviewRoundResult.PASSED;
+      case 'fail':
+      case 'failed':
+        return InterviewRoundResult.FAILED;
+      case 'no_show':
+        return InterviewRoundResult.NO_SHOW;
+      case 'reschedule':
+        return InterviewRoundResult.CANCELLED;
+      case 'pending':
+      default:
+        return InterviewRoundResult.PENDING;
+    }
   }
 
   private stageMessage(stage: string, jobTitle: string) {

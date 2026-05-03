@@ -42,5 +42,9 @@ export interface IAIProvider {
     question: string;
     hints: string[];
     ideal_answer_points: string[];
+    followUpQuestions?: string[];
   }>;
+
+  // General-purpose provider prompt
+  askGeneral(prompt: string): Promise<string>;
 }

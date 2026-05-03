@@ -58,9 +58,9 @@ export class ResumesProcessor extends WorkerHost {
       return;
     }
 
-    // ── Step 3: Sync candidate_profiles ───────────────────────────────────
+    // ── Step 3: Sync jobseeker_profiles ───────────────────────────────────
     // This is the ONLY place profile sync happens.
-    // getRecommendations() reads candidate_profiles.top_skills — this row
+    // getRecommendations() reads jobseeker_profiles.top_skills; this row
     // must exist before the frontend polls for recommendations.
     //
     // Fields synced from AI output:
@@ -85,7 +85,7 @@ export class ResumesProcessor extends WorkerHost {
     const profileCompletion = this.analysisService.calculateCompletion(extracted);
 
     try {
-      await this.prisma.candidateProfile.upsert({
+      await this.prisma.jobseekerProfile.upsert({
         where: { userId: resume.userId },
 
         create: {
@@ -117,7 +117,7 @@ export class ResumesProcessor extends WorkerHost {
       });
 
       this.logger.log(
-        `[processor] ✅ candidate_profiles synced for user ${resume.userId} — ` +
+        `[processor] jobseeker_profiles synced for user ${resume.userId} — ` +
         `level: ${experienceLevel} | ` +
         `skills: [${topSkills.slice(0, 5).join(', ')}${topSkills.length > 5 ? '…' : ''}]`,
       );

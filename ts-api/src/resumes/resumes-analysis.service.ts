@@ -9,7 +9,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService }      from '../../prisma/prisma.service';
 import { LlmService }         from '../ollama/Llm.service';
-import { Prisma }             from '@prisma/client';
+import { Prisma, ResumeAnalysisStatus } from '@prisma/client';
 
 const pdfParse = require('pdf-parse');
 import * as mammoth from 'mammoth';
@@ -163,7 +163,10 @@ export class ResumeAnalysisService {
 
     await this.prisma.resume.update({
       where: { id: resumeId },
-      data:  { status: 'processing' },
+      data:  {
+        analysisStatus: ResumeAnalysisStatus.PROCESSING,
+        analysisError: null,
+      },
     });
 
     let rawText = '';
@@ -247,7 +250,7 @@ export class ResumeAnalysisService {
             topSkills:       extracted.topSkills                ?? [],
             industryTags:    extracted.industryTags             ?? [],
             trajectory:      extracted.trajectory               ?? '',
-            status:          'completed',
+            status:          ResumeAnalysisStatus.COMPLETED,
             processedAt:     new Date(),
           },
           update: {
@@ -264,7 +267,7 @@ export class ResumeAnalysisService {
             topSkills:       extracted.topSkills                ?? [],
             industryTags:    extracted.industryTags             ?? [],
             trajectory:      extracted.trajectory               ?? '',
-            status:          'completed',
+            status:          ResumeAnalysisStatus.COMPLETED,
             processedAt:     new Date(),
           },
         });
@@ -285,7 +288,13 @@ export class ResumeAnalysisService {
       try {
         const updateResult = await this.prisma.resume.update({
           where: { id: resumeId },
-          data:  { status: 'analyzed', content: rawText },
+          data:  {
+            analysisStatus: ResumeAnalysisStatus.COMPLETED,
+            extractedText: rawText,
+            analysisJson: toJson(extracted),
+            analysisError: null,
+            analyzedAt: new Date(),
+          },
         });
         this.logger.log(`[${resumeId}] ✅ Stage 4 complete —resume marked as ANALYZED`);
       } catch (statusErr) {
@@ -319,7 +328,10 @@ export class ResumeAnalysisService {
       try {
         await this.prisma.resume.update({
           where: { id: resumeId },
-          data:  { status: 'failed' },
+          data:  {
+            analysisStatus: ResumeAnalysisStatus.FAILED,
+            analysisError: error.message,
+          },
         });
         this.logger.warn(`[${resumeId}] ⚠️ Resume marked as FAILED`);
       } catch (finalErr) {

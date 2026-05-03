@@ -1,58 +1,83 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { DatabaseService } from '../database/database.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AlertsService } from '../alerts/alerts.service';
 
 @Injectable()
 export class InterviewRemindersService {
   private readonly logger = new Logger(InterviewRemindersService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly alerts: AlertsService,
+  ) {}
 
   @Cron('* * * * *')
   async sendUpcomingReminders() {
-    await this.processReminderWindow(30, 'notify_30_sent');
-    await this.processReminderWindow(15, 'notify_15_sent');
+    await this.processReminderWindow(30, 'notify30Sent');
+    await this.processReminderWindow(15, 'notify15Sent');
   }
 
-  private async processReminderWindow(minutes: number, flagColumn: 'notify_30_sent' | 'notify_15_sent') {
-    const { rows } = await this.db.query<any>(
-      `SELECT r.*, i.candidate_id, i.recruiter_id, j.title AS job_title, u.email AS candidate_email
-       FROM recruiter_interview_rounds r
-       JOIN recruiter_interviews i ON i.id = r.interview_id
-       LEFT JOIN jobs j ON j.id = i.job_id
-       LEFT JOIN users u ON u.id = i.candidate_id
-       WHERE r.scheduled_at IS NOT NULL
-         AND r.${flagColumn} = false
-         AND r.scheduled_at > NOW()
-         AND r.scheduled_at <= NOW() + ($1 || ' minutes')::interval`,
-      [minutes],
-    );
+  private async processReminderWindow(minutes: number, flagColumn: 'notify30Sent' | 'notify15Sent') {
+    const now = new Date();
+    const until = new Date(now.getTime() + minutes * 60 * 1000);
 
-    for (const row of rows) {
+    const rounds = await this.prisma.recruiterInterviewRound.findMany({
+      where: {
+        scheduledAt: {
+          gt: now,
+          lte: until,
+        },
+        [flagColumn]: false,
+      },
+      include: {
+        interview: {
+          include: {
+            job: true,
+            candidate: true,
+          },
+        },
+      },
+    });
+
+    for (const round of rounds) {
       const title = `Interview starts in ${minutes} minutes`;
-      const message = `${row.round_type} interview for ${row.job_title ?? 'your application'} starts soon.`;
+      const jobTitle = round.interview.job?.title ?? round.interview.jobTitle ?? 'your application';
+      const message = `${round.roundType} interview for ${jobTitle} starts soon.`;
+      const metadata = {
+        roundId: round.id,
+        joinUrl: round.meetingJoinUrl,
+        scheduledAt: round.scheduledAt,
+      };
 
-      // in-app/device notification (alerts)
-      await this.db.query(
-        `INSERT INTO alerts (user_id, type, title, message, metadata)
-         VALUES ($1, 'interview_reminder', $2, $3, $4::jsonb),
-                ($5, 'interview_reminder', $2, $3, $4::jsonb)`,
-        [
-          row.candidate_id,
+      const payloads = [
+        {
+          userId: round.interview.candidateUserId,
+          type: 'interview_reminder',
           title,
           message,
-          JSON.stringify({ roundId: row.id, joinUrl: row.meeting_join_url, scheduledAt: row.scheduled_at }),
-          row.recruiter_id,
-        ],
-      );
+          metadata,
+        },
+      ];
 
-      // Email integration point (plug your mailer here)
-      this.logger.log(`[EMAIL:${minutes}m] to=${row.candidate_email} subject="${title}"`);
+      if (round.interview.recruiterUserId) {
+        payloads.push({
+          userId: round.interview.recruiterUserId,
+          type: 'interview_reminder',
+          title,
+          message,
+          metadata,
+        });
+      }
 
-      await this.db.query(
-        `UPDATE recruiter_interview_rounds SET ${flagColumn} = true WHERE id = $1`,
-        [row.id],
-      );
+      await this.alerts.createBulkAlerts(payloads);
+
+      this.logger.log(`[EMAIL:${minutes}m] to=${round.interview.candidate.email} subject="${title}"`);
+
+      await this.prisma.recruiterInterviewRound.update({
+        where: { id: round.id },
+        data: { [flagColumn]: true },
+      });
     }
   }
 }

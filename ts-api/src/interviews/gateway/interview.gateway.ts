@@ -200,13 +200,13 @@ export class InterviewGateway
 
       // Store AI note in database
       if (data.context.interviewRoundId) {
-        await this.prisma.recruiter_interview_notes.create({
+        await this.prisma.recruiterInterviewNote.create({
           data: {
-            interview_round_id: data.context.interviewRoundId,
-            recruiter_id: socket.data.userId,
-            note_text: suggestion.text,
-            ai_generated: true,
-            confidence_score: suggestion.confidence,
+            interviewRoundId: data.context.interviewRoundId,
+            recruiterId: socket.data.userId,
+            noteText: suggestion.text,
+            aiGenerated: true,
+            confidenceScore: suggestion.confidence,
           },
         });
       }
@@ -234,11 +234,11 @@ export class InterviewGateway
     try {
       // Store message in database
       if (data.sessionId) {
-        await this.prisma.interview_chat_messages.create({
+        await this.prisma.interviewChatMessage.create({
           data: {
-            room_id: data.roomId,
-            session_id: data.sessionId,
-            sender_id: socket.data.userId,
+            roomId: data.roomId,
+            interviewId: data.sessionId,
+            senderId: socket.data.userId,
             message: data.message,
           },
         });
@@ -298,12 +298,12 @@ export class InterviewGateway
   ) {
     try {
       // Log recording event
-      await this.prisma.interview_events_log.create({
+      await this.prisma.interviewEventLog.create({
         data: {
-          session_id: data.sessionId,
-          room_id: data.roomId,
-          actor_user_id: socket.data.userId,
-          event_type: `recording_${data.status}`,
+          interviewId: data.sessionId,
+          roomId: data.roomId,
+          actorUserId: socket.data.userId,
+          eventType: `recording_${data.status}`,
           payload: { timestamp: new Date() },
         },
       });
