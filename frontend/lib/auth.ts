@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-const TOKEN_KEY = 'jc_token';
+const TOKEN_KEY = 'jc_access_token';
+const REFRESH_TOKEN_KEY = 'jc_refresh_token';
 
 export type UserRole = 'candidate' | 'recruiter' | 'admin';
 
@@ -13,7 +14,13 @@ export interface User {
 }
 
 export interface AuthResponse {
-  token: string;
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+}
+
+export interface RefreshResponse {
+  accessToken: string;
   user: User;
 }
 
@@ -22,9 +29,29 @@ export function roleRedirectPath(role: UserRole): string {
   return '/dashboard';
 }
 
+// ── Token Management ────────────────────────────────────────────────────────
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setTokens(accessToken: string, refreshToken: string): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(TOKEN_KEY, accessToken);
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+  // Also set cookie for middleware (optional)
+  if (typeof document !== 'undefined') {
+    const secure = process.env.NODE_ENV === 'production' ? ';Secure' : '';
+    const maxAge = 60 * 60 * 24 * 7;
+    document.cookie = `${TOKEN_KEY}=${accessToken};path=/;SameSite=Strict;max-age=${maxAge}${secure}`;
+  }
 }
 
 export function setToken(token: string): void {
@@ -39,11 +66,16 @@ export function setToken(token: string): void {
 }
 
 export function removeToken(): void {
-  if (typeof window !== 'undefined') localStorage.removeItem(TOKEN_KEY);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
   if (typeof document !== 'undefined') {
     document.cookie = `${TOKEN_KEY}=;path=/;max-age=0`;
   }
 }
+
+// ── API Helpers ─────────────────────────────────────────────────────────────
 
 async function parseError(res: Response, fallback: string): Promise<Error> {
   let body: any = null;
@@ -53,6 +85,39 @@ async function parseError(res: Response, fallback: string): Promise<Error> {
   (err as any).body = body;
   return err;
 }
+
+// ── Refresh Token ───────────────────────────────────────────────────────────
+
+export async function refreshAccessToken(): Promise<RefreshResponse> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    throw new Error('No refresh token available');
+  }
+
+  const res = await fetch(`${API_URL}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!res.ok) {
+    removeToken();
+    throw await parseError(res, 'Session expired');
+  }
+
+  const data: RefreshResponse = await res.json();
+  // Update access token (refresh token stays the same)
+  localStorage.setItem(TOKEN_KEY, data.accessToken);
+  
+  if (typeof document !== 'undefined') {
+    const secure = process.env.NODE_ENV === 'production' ? ';Secure' : '';
+    document.cookie = `${TOKEN_KEY}=${data.accessToken};path=/;SameSite=Strict;max-age=${60 * 60 * 24 * 7}${secure}`;
+  }
+
+  return data;
+}
+
+// ── Auth API Functions ──────────────────────────────────────────────────────
 
 export async function register(
   full_name: string,
@@ -67,7 +132,7 @@ export async function register(
   });
   if (!res.ok) throw await parseError(res, 'Registration failed');
   const data: AuthResponse = await res.json();
-  setToken(data.token);
+  setTokens(data.accessToken, data.refreshToken);
   return data;
 }
 
@@ -79,17 +144,54 @@ export async function login(email: string, password: string): Promise<AuthRespon
   });
   if (!res.ok) throw await parseError(res, 'Login failed');
   const data: AuthResponse = await res.json();
-  setToken(data.token);
+  setTokens(data.accessToken, data.refreshToken);
   return data;
+}
+
+export async function logout(): Promise<void> {
+  const token = getToken();
+  if (token) {
+    try {
+      await fetch(`${API_URL}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch {
+      // Logout should always succeed client-side
+      console.warn('Backend logout failed, clearing local state');
+    }
+  }
+  removeToken();
 }
 
 export async function getMe(): Promise<User | null> {
   const token = getToken();
   if (!token) return null;
+  
   const res = await fetch(`${API_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) { removeToken(); return null; }
+  
+  if (!res.ok) {
+    // Try refresh if 401
+    if (res.status === 401) {
+      try {
+        const refreshed = await refreshAccessToken();
+        const retryRes = await fetch(`${API_URL}/auth/me`, {
+          headers: { Authorization: `Bearer ${refreshed.accessToken}` },
+        });
+        if (retryRes.ok) return retryRes.json();
+      } catch {
+        // Refresh failed
+      }
+    }
+    removeToken();
+    return null;
+  }
+  
   return res.json();
 }
 

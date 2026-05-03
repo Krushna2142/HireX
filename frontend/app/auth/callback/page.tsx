@@ -4,7 +4,7 @@ import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { setToken, roleRedirectPath } from '@/lib/auth';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
 function OAuthCallbackInner() {
   const router = useRouter();
@@ -19,6 +19,7 @@ function OAuthCallbackInner() {
       }
 
       try {
+        // Store access token
         setToken(token);
 
         const res = await fetch(`${API_BASE}/auth/me`, {
@@ -42,8 +43,11 @@ function OAuthCallbackInner() {
   }, [params, router]);
 
   return (
-    <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>
-      Signing you in...
+    <main className="min-h-screen flex items-center justify-center bg-[#070B14]">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-[#38BDF8] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-white text-lg">Signing you in...</p>
+      </div>
     </main>
   );
 }
@@ -52,8 +56,8 @@ export default function OAuthCallbackPage() {
   return (
     <Suspense
       fallback={
-        <main style={{ maxWidth: 520, margin: '40px auto', padding: 16 }}>
-          Loading...
+        <main className="min-h-screen flex items-center justify-center bg-[#070B14]">
+          <p className="text-white">Loading...</p>
         </main>
       }
     >

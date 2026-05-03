@@ -38,6 +38,7 @@
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@supabase/supabase-js": "^2.99.1",
+    "argon2": "^0.44.0",
     "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.70.1",

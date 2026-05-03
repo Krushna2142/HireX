@@ -27,16 +27,28 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Authentication required');
     }
 
-    // Support both direct role and Supabase user_metadata.role
     const userRole: string | null =
       user.role ?? user.user_metadata?.role ?? null;
 
-    if (!requiredRoles.includes(userRole ?? '')) {
+    const normalizedRole = this.normalizeRole(userRole);
+    const normalizedRequired = requiredRoles.map((role) => this.normalizeRole(role));
+    const adminOverride =
+      normalizedRole === 'super_admin' && normalizedRequired.includes('admin');
+
+    if (!normalizedRequired.includes(normalizedRole ?? '') && !adminOverride) {
       throw new ForbiddenException(
-        `Requires role: ${requiredRoles.join(' or ')} — your role: ${userRole ?? 'none'}`,
+        `Requires role: ${requiredRoles.join(' or ')} - your role: ${userRole ?? 'none'}`,
       );
     }
 
     return true;
+  }
+
+  private normalizeRole(role?: string | null): string | null {
+    if (!role) return null;
+    const normalized = role.toLowerCase();
+    if (normalized === 'jobseeker') return 'candidate';
+    if (normalized === 'super_admin') return 'super_admin';
+    return normalized;
   }
 }
