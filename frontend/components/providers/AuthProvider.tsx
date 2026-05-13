@@ -2,38 +2,49 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
-  useState,
-  useCallback,
   useMemo,
-  ReactNode,
+  useState,
+  type ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getMe,
   getToken,
-  setToken,
   login as apiLogin,
+  logout as apiLogout,
   register as apiRegister,
   removeToken,
+  roleRedirectPath,
+  setToken,
 } from '@/lib/auth';
-import type { User, UserRole, AuthResponse } from '@/lib/auth';
+import type { AuthResponse, PublicAuthRole, User } from '@/lib/auth';
 
 export interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<AuthResponse>;
-  register: (fullName: string, email: string, password: string, role: Exclude<UserRole, 'admin'>) => Promise<AuthResponse>;
-  logout: () => void;
+  register: (
+    fullName: string,
+    email: string,
+    password: string,
+    role: PublicAuthRole,
+  ) => Promise<AuthResponse>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
-  login: async () => { throw new Error('AuthProvider not mounted'); },
-  register: async () => { throw new Error('AuthProvider not mounted'); },
-  logout: () => {},
+  login: async () => {
+    throw new Error('AuthProvider not mounted');
+  },
+  register: async () => {
+    throw new Error('AuthProvider not mounted');
+  },
+  logout: async () => {},
 });
 
 export function useAuth(): AuthContextValue {
@@ -48,98 +59,103 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    const boot = async () => {
+    async function boot() {
       try {
         const token = getToken();
+
         if (!token) {
           if (!cancelled) {
+            removeToken();
             setUser(null);
-            localStorage.removeItem('user');
-            setLoading(false); // ✅ SET LOADING FALSE IMMEDIATELY WHEN NO TOKEN
           }
           return;
         }
 
-        // keep cookie in sync for middleware
         setToken(token);
 
-        try {
-          const me = await getMe(); // SOURCE OF TRUTH
-          if (!cancelled) {
+        const me = await getMe();
+
+        if (!cancelled) {
+          if (me) {
             setUser(me);
             localStorage.setItem('user', JSON.stringify(me));
-          }
-        } catch (err) {
-          // getMe() failed — token is invalid, clear it
-          if (!cancelled) {
-            console.error('[Auth] getMe() failed:', err);
+          } else {
             removeToken();
-            localStorage.removeItem('user');
             setUser(null);
           }
         }
-      } catch (err) {
+      } catch (error) {
+        console.error('[AuthProvider] auth boot failed:', error);
+
         if (!cancelled) {
-          console.error('[Auth] boot() error:', err);
           removeToken();
-          localStorage.removeItem('user');
           setUser(null);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    };
+    }
 
     void boot();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
-    try {
-      localStorage.removeItem('user'); // prevent stale role
+  const login = useCallback(
+    async (email: string, password: string): Promise<AuthResponse> => {
+      localStorage.removeItem('user');
+
       const res = await apiLogin(email, password);
+
       setUser(res.user);
       localStorage.setItem('user', JSON.stringify(res.user));
-      return res;
-    } catch (err) {
-      // Clear state on login failure
-      removeToken();
-      localStorage.removeItem('user');
-      setUser(null);
-      throw err;
-    }
-  }, []);
 
-  const register = useCallback(async (
-    fullName: string,
-    email: string,
-    password: string,
-    role: Exclude<UserRole, 'admin'>,
-  ): Promise<AuthResponse> => {
-    try {
-      localStorage.removeItem('user'); // prevent stale role
+      router.replace(roleRedirectPath(res.user.role));
+
+      return res;
+    },
+    [router],
+  );
+
+  const register = useCallback(
+    async (
+      fullName: string,
+      email: string,
+      password: string,
+      role: PublicAuthRole,
+    ): Promise<AuthResponse> => {
+      localStorage.removeItem('user');
+
       const res = await apiRegister(fullName, email, password, role);
+
       setUser(res.user);
       localStorage.setItem('user', JSON.stringify(res.user));
-      return res;
-    } catch (err) {
-      // Clear state on register failure
-      removeToken();
-      localStorage.removeItem('user');
-      setUser(null);
-      throw err;
-    }
-  }, []);
 
-  const logout = useCallback(() => {
-    removeToken();
-    localStorage.removeItem('user');
+      router.replace(roleRedirectPath(res.user.role));
+
+      return res;
+    },
+    [router],
+  );
+
+  const logout = useCallback(async () => {
+    await apiLogout();
     setUser(null);
     router.replace('/');
   }, [router]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, login, register, logout }),
+    () => ({
+      user,
+      loading,
+      login,
+      register,
+      logout,
+    }),
     [user, loading, login, register, logout],
   );
 
