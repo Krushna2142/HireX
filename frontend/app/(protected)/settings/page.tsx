@@ -1,210 +1,549 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { useState } from 'react';
-import api from '@/lib/axios';
-import toast from 'react-hot-toast';
+import { useRouter } from 'next/navigation';
 
-export default function SettingsPage() {
-  const { user, logout } = useAuth();
-  const [loading, setLoading]       = useState(false);
-  const [passwords, setPasswords]   = useState({
-    current: '', newPass: '', confirm: '',
-  });
+const C = {
+  bg: '#070B14',
+  card: 'rgba(15,23,42,0.78)',
+  card2: 'rgba(2,6,23,0.82)',
+  border: 'rgba(255,255,255,0.08)',
+  borderStrong: 'rgba(167,139,250,0.32)',
+  text: '#F8FAFC',
+  muted: 'rgba(226,232,240,0.68)',
+  faint: 'rgba(226,232,240,0.42)',
+  purple: '#A78BFA',
+  sky: '#38BDF8',
+  pink: '#F472B6',
+  green: '#34D399',
+  amber: '#FBBF24',
+  red: '#F87171',
+};
 
-  async function handlePasswordChange(e: React.FormEvent) {
-    e.preventDefault();
-    if (passwords.newPass !== passwords.confirm) {
-      toast.error('New passwords do not match');
-      return;
-    }
-    if (passwords.newPass.length < 8) {
-      toast.error('Password must be at least 8 characters');
-      return;
-    }
+function normalizeRole(role?: string | null) {
+  const value = String(role ?? '').toLowerCase();
 
-    setLoading(true);
-    try {
-      await api.post('/auth/change-password', {
-        currentPassword: passwords.current,
-        newPassword:     passwords.newPass,
-      });
-      toast.success('Password updated successfully');
-      setPasswords({ current: '', newPass: '', confirm: '' });
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to update password');
-    } finally {
-      setLoading(false);
-    }
-  }
+  if (value === 'jobseeker' || value === 'job_seeker') return 'candidate';
+  if (value === 'recruiter') return 'recruiter';
+  if (value === 'admin') return 'admin';
+  if (value === 'super_admin') return 'super_admin';
 
-  const inputCls: React.CSSProperties = {
-    width:        '100%',
-    padding:      '10px 14px',
-    background:   'rgba(255,255,255,0.05)',
-    border:       '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '10px',
-    color:        '#F1F5F9',
-    fontSize:     '13px',
-    outline:      'none',
-  };
+  return value || 'user';
+}
 
-  const labelCls: React.CSSProperties = {
-    display:       'block',
-    fontSize:      '11px',
-    fontWeight:    600,
-    color:         'rgba(255,255,255,0.4)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    marginBottom:  '6px',
-  };
-
-  const cardCls: React.CSSProperties = {
-    background:   '#0D1424',
-    border:       '1px solid rgba(255,255,255,0.07)',
-    borderRadius: '14px',
-    padding:      '1.5rem',
-    marginBottom: '1rem',
-  };
-
+function SettingCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div style={{
-      fontFamily:  "'Sora', sans-serif",
-      background:  '#070B14',
-      minHeight:   '100vh',
-      padding:     '2rem',
-      color:       '#E2E8F0',
-      maxWidth:    '640px',
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600&display=swap');
-        input:focus { border-color: rgba(56,189,248,0.5) !important; }
-        input::placeholder { color: rgba(255,255,255,0.2); }
-      `}</style>
-
-      <h1 style={{ fontSize: '22px', fontWeight: 600, color: '#F1F5F9', margin: '0 0 1.75rem' }}>
-        Settings
-      </h1>
-
-      {/* Account info */}
-      <div style={cardCls}>
-        <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#F1F5F9', margin: '0 0 1rem' }}>
-          Account
-        </h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{
-            width:        '48px',
-            height:       '48px',
-            borderRadius: '12px',
-            background:   'linear-gradient(135deg, #0EA5E9, #8B5CF6)',
-            display:      'flex',
-            alignItems:   'center',
-            justifyContent: 'center',
-            fontSize:     '18px',
-            fontWeight:   700,
-            color:        '#fff',
-          }}>
-            {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-          </div>
-          <div>
-            <p style={{ fontSize: '15px', fontWeight: 600, color: '#F1F5F9', margin: 0 }}>
-              {user?.full_name}
-            </p>
-            <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.4)', margin: '2px 0 0' }}>
-              {user?.email} · <span style={{ textTransform: 'capitalize' }}>{user?.role}</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Change password */}
-      <div style={cardCls}>
-        <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#F1F5F9', margin: '0 0 1rem' }}>
-          Change Password
-        </h2>
-        <form onSubmit={handlePasswordChange}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div>
-              <label style={labelCls}>Current Password</label>
-              <input
-                type="password"
-                value={passwords.current}
-                onChange={e => setPasswords(p => ({ ...p, current: e.target.value }))}
-                style={inputCls}
-                required
-              />
-            </div>
-            <div>
-              <label style={labelCls}>New Password</label>
-              <input
-                type="password"
-                value={passwords.newPass}
-                onChange={e => setPasswords(p => ({ ...p, newPass: e.target.value }))}
-                style={inputCls}
-                required
-              />
-            </div>
-            <div>
-              <label style={labelCls}>Confirm New Password</label>
-              <input
-                type="password"
-                value={passwords.confirm}
-                onChange={e => setPasswords(p => ({ ...p, confirm: e.target.value }))}
-                style={inputCls}
-                required
-              />
-            </div>
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              marginTop:    '1rem',
-              padding:      '10px 22px',
-              background:   'linear-gradient(135deg, #0EA5E9, #38BDF8)',
-              border:       'none',
-              borderRadius: '10px',
-              color:        '#fff',
-              fontSize:     '13px',
-              fontWeight:    600,
-              cursor:       'pointer',
-              opacity:      loading ? 0.6 : 1,
-            }}
-          >
-            {loading ? 'Updating…' : 'Update Password'}
-          </button>
-        </form>
-      </div>
-
-      {/* Danger zone */}
-      <div style={{
-        ...cardCls,
-        border: '1px solid rgba(248,113,113,0.2)',
-        background: 'rgba(248,113,113,0.04)',
-      }}>
-        <h2 style={{ fontSize: '14px', fontWeight: 600, color: '#F87171', margin: '0 0 0.75rem' }}>
-          Danger Zone
-        </h2>
-        <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', margin: '0 0 1rem' }}>
-          Sign out of your account across all sessions.
-        </p>
-        <button
-          onClick={logout}
+    <section
+      style={{
+        border: `1px solid ${C.border}`,
+        background:
+          'linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.86))',
+        borderRadius: 22,
+        padding: '1.25rem',
+        boxShadow: '0 18px 50px rgba(0,0,0,0.28)',
+      }}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <h2
           style={{
-            padding:      '9px 20px',
-            background:   'rgba(248,113,113,0.1)',
-            border:       '1px solid rgba(248,113,113,0.3)',
-            borderRadius: '8px',
-            color:        '#F87171',
-            fontSize:     '13px',
-            cursor:       'pointer',
-            fontWeight:    500,
+            margin: 0,
+            color: C.text,
+            fontSize: 19,
+            letterSpacing: '-0.03em',
           }}
         >
-          Sign Out
-        </button>
+          {title}
+        </h2>
+        <p
+          style={{
+            margin: '0.45rem 0 0',
+            color: C.muted,
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          {description}
+        </p>
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value?: string | null;
+}) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '160px 1fr',
+        gap: 14,
+        padding: '11px 0',
+        borderTop: `1px solid ${C.border}`,
+      }}
+    >
+      <div
+        style={{
+          color: C.faint,
+          fontSize: 12,
+          fontWeight: 900,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        }}
+      >
+        {label}
+      </div>
+
+      <div
+        style={{
+          color: value ? C.text : C.faint,
+          fontSize: 14,
+          wordBreak: 'break-word',
+        }}
+      >
+        {value || 'Not available'}
       </div>
     </div>
   );
 }
+
+export default function SettingsPage() {
+  const { user, logout, loading } = useAuth();
+  const router = useRouter();
+
+  const [logoutOpen, setLogoutOpen] = useState(false);
+
+  const initials = useMemo(() => {
+    const source = user?.full_name || user?.email || 'U';
+    return source.charAt(0).toUpperCase();
+  }, [user?.email, user?.full_name]);
+
+  const role = normalizeRole(user?.role);
+
+  const handleLogout = async () => {
+    setLogoutOpen(false);
+    await logout();
+  };
+
+  if (loading) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          background: C.bg,
+          color: C.text,
+          padding: '2rem',
+        }}
+      >
+        Loading settings...
+      </main>
+    );
+  }
+
+  return (
+    <main
+      style={{
+        minHeight: '100vh',
+        padding: '2rem',
+        color: C.text,
+        background:
+          'radial-gradient(circle at top left, rgba(56,189,248,0.10), transparent 32%), radial-gradient(circle at top right, rgba(244,114,182,0.12), transparent 28%), #070B14',
+      }}
+    >
+      <div style={{ maxWidth: 1120, margin: '0 auto' }}>
+        <header
+          style={{
+            border: `1px solid ${C.borderStrong}`,
+            background:
+              'linear-gradient(145deg, rgba(15,23,42,0.92), rgba(2,6,23,0.92))',
+            borderRadius: 26,
+            padding: '1.5rem',
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr auto',
+            gap: 18,
+            alignItems: 'center',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+            marginBottom: 18,
+          }}
+        >
+          <div
+            style={{
+              width: 70,
+              height: 70,
+              borderRadius: 22,
+              background: 'linear-gradient(135deg,#6366F1,#8B5CF6)',
+              display: 'grid',
+              placeItems: 'center',
+              color: '#fff',
+              fontSize: 28,
+              fontWeight: 900,
+              border: `1px solid ${C.borderStrong}`,
+            }}
+          >
+            {initials}
+          </div>
+
+          <div>
+            <p
+              style={{
+                margin: 0,
+                color: C.sky,
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Account Settings
+            </p>
+
+            <h1
+              style={{
+                margin: '0.45rem 0 0',
+                fontSize: 32,
+                lineHeight: 1.08,
+                letterSpacing: '-0.055em',
+              }}
+            >
+              Manage your JobCrawler account
+            </h1>
+
+            <p
+              style={{
+                margin: '0.7rem 0 0',
+                color: C.muted,
+                lineHeight: 1.7,
+                fontSize: 14,
+              }}
+            >
+              Settings is now a dedicated sidebar section. Profile editing and
+              product workflows stay in their own pages.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setLogoutOpen(true)}
+            style={{
+              border: '1px solid rgba(248,113,113,0.35)',
+              borderRadius: 14,
+              padding: '12px 16px',
+              color: C.red,
+              fontWeight: 900,
+              cursor: 'pointer',
+              background: 'rgba(248,113,113,0.08)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Sign out
+          </button>
+        </header>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 18,
+            alignItems: 'start',
+          }}
+        >
+          <SettingCard
+            title="Account"
+            description="Your basic signed-in account information."
+          >
+            <InfoRow label="Name" value={user?.full_name} />
+            <InfoRow label="Email" value={user?.email} />
+            <InfoRow label="Role" value={role} />
+            <InfoRow label="User ID" value={user?.id} />
+          </SettingCard>
+
+          <SettingCard
+            title="Navigation"
+            description="Quickly move to the right workspace."
+          >
+            <div style={{ display: 'grid', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard')}
+                style={primaryButtonStyle}
+              >
+                Open Overview
+              </button>
+
+              {role === 'recruiter' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/recruiter/dashboard')}
+                    style={secondaryButtonStyle}
+                  >
+                    Open Recruitment Center
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/recruiter/interviews')}
+                    style={secondaryButtonStyle}
+                  >
+                    Open Interviews
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/jobs')}
+                    style={secondaryButtonStyle}
+                  >
+                    Open Jobs
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/interviews')}
+                    style={secondaryButtonStyle}
+                  >
+                    Open Interviews
+                  </button>
+                </>
+              )}
+            </div>
+          </SettingCard>
+
+          <SettingCard
+            title="Security"
+            description="Session and sign-out controls."
+          >
+            <div
+              style={{
+                border: `1px solid rgba(248,113,113,0.24)`,
+                background: 'rgba(248,113,113,0.08)',
+                borderRadius: 16,
+                padding: '1rem',
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  color: C.text,
+                  fontSize: 15,
+                  fontWeight: 900,
+                }}
+              >
+                Sign out from this device
+              </h3>
+
+              <p
+                style={{
+                  margin: '0.5rem 0 1rem',
+                  color: C.muted,
+                  fontSize: 13,
+                  lineHeight: 1.65,
+                }}
+              >
+                You will need to log in again to access dashboards, recruitment,
+                interviews, and alerts.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setLogoutOpen(true)}
+                style={{
+                  border: '1px solid rgba(248,113,113,0.35)',
+                  borderRadius: 14,
+                  padding: '11px 14px',
+                  color: '#fff',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #EF4444, #F97316)',
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          </SettingCard>
+
+          <SettingCard
+            title="Preferences"
+            description="More settings can be connected here later."
+          >
+            <div
+              style={{
+                display: 'grid',
+                gap: 10,
+                color: C.muted,
+                fontSize: 13,
+                lineHeight: 1.7,
+              }}
+            >
+              <div style={preferenceRowStyle}>
+                <span>Theme</span>
+                <strong style={{ color: C.text }}>Dark</strong>
+              </div>
+
+              <div style={preferenceRowStyle}>
+                <span>Notifications</span>
+                <strong style={{ color: C.text }}>Enabled</strong>
+              </div>
+
+              <div style={preferenceRowStyle}>
+                <span>Account mode</span>
+                <strong style={{ color: C.text }}>Production</strong>
+              </div>
+            </div>
+          </SettingCard>
+        </div>
+      </div>
+
+      {logoutOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-logout-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'grid',
+            placeItems: 'center',
+            background: 'rgba(2,6,23,.76)',
+            backdropFilter: 'blur(12px)',
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: 'min(390px, 100%)',
+              borderRadius: 24,
+              border: '1px solid rgba(248,113,113,.28)',
+              background:
+                'radial-gradient(circle at top, rgba(248,113,113,.12), transparent 36%), linear-gradient(145deg, rgba(15,23,42,.98), rgba(2,6,23,.98))',
+              boxShadow: '0 28px 90px rgba(0,0,0,.55)',
+              padding: 22,
+              textAlign: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: 54,
+                height: 54,
+                borderRadius: 18,
+                margin: '0 auto 14px',
+                display: 'grid',
+                placeItems: 'center',
+                color: C.red,
+                background: 'rgba(248,113,113,.10)',
+                border: '1px solid rgba(248,113,113,.24)',
+                fontSize: 24,
+              }}
+            >
+              ⏻
+            </div>
+
+            <h2
+              id="settings-logout-title"
+              style={{
+                margin: 0,
+                color: C.text,
+                fontSize: 22,
+                letterSpacing: '-0.04em',
+              }}
+            >
+              Sign out?
+            </h2>
+
+            <p
+              style={{
+                margin: '10px auto 0',
+                color: C.muted,
+                fontSize: 13,
+                lineHeight: 1.65,
+                maxWidth: 300,
+              }}
+            >
+              You will be signed out from this device. Continue?
+            </p>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+                marginTop: 20,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setLogoutOpen(false)}
+                style={secondaryButtonStyle}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                style={{
+                  border: '1px solid rgba(248,113,113,.35)',
+                  color: '#fff',
+                  background: 'linear-gradient(135deg, #EF4444, #F97316)',
+                  borderRadius: 14,
+                  padding: '11px 13px',
+                  fontSize: 13,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+              >
+                Yes, sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+const primaryButtonStyle: React.CSSProperties = {
+  border: 'none',
+  borderRadius: 14,
+  padding: '12px 16px',
+  color: '#020617',
+  fontWeight: 900,
+  cursor: 'pointer',
+  background: `linear-gradient(135deg, ${C.sky}, ${C.purple}, ${C.pink})`,
+  boxShadow: '0 16px 38px rgba(56,189,248,0.18)',
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: '11px 16px',
+  color: C.text,
+  fontWeight: 800,
+  cursor: 'pointer',
+  background: 'rgba(15,23,42,0.72)',
+};
+
+const preferenceRowStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+  borderTop: `1px solid ${C.border}`,
+  padding: '12px 0',
+};

@@ -4,34 +4,56 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import CandidateProfilePage from '@/app/_components/profiles/CandidateProfilePage';
 import RecruiterProfilePage from '@/app/_components/profiles/RecruiterProfilePage';
 
-export default function ProfilePage() {
-  const { user } = useAuth();
+function normalizeRole(role?: string | null) {
+  const value = String(role ?? '').toLowerCase();
 
-  if (user?.role === 'recruiter') {
+  if (value === 'jobseeker' || value === 'job_seeker') return 'candidate';
+  if (value === 'recruiter') return 'recruiter';
+  if (value === 'admin') return 'admin';
+  if (value === 'super_admin') return 'super_admin';
+
+  return value;
+}
+
+export default function ProfilePage() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          background: '#050816',
+          color: '#E5E7EB',
+          padding: '2rem',
+        }}
+      >
+        <div
+          style={{
+            height: 28,
+            width: 220,
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.08)',
+            marginBottom: 16,
+          }}
+        />
+        <div
+          style={{
+            height: 14,
+            width: 360,
+            borderRadius: 999,
+            background: 'rgba(255,255,255,0.06)',
+          }}
+        />
+      </main>
+    );
+  }
+
+  const role = normalizeRole(user?.role);
+
+  if (role === 'recruiter') {
     return <RecruiterProfilePage />;
   }
 
   return <CandidateProfilePage />;
 }
-
-/*
----
-
-## Move Profile Components Into `_components`
-
-Since Next.js treats all folders inside `app/` as routes, your profile page components should live in `_components/` (the underscore prefix prevents Next.js from treating them as route segments).
-```
-app/
-└── _components/
-    ├── dashboards/
-    │   ├── CandidateDashboard.tsx    ← moved here from earlier
-    │   └── RecruiterDashboard.tsx
-    ├── profiles/
-    │   ├── CandidateProfilePage.tsx  ← move the candidate profile component here
-    │   └── RecruiterProfilePage.tsx  ← move the recruiter profile component here
-    └── shared/
-        ├── TagInput.tsx              ← extract reusable TagInput
-        └── LoadingSpinner.tsx
-
-
-        */
