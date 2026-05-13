@@ -52,8 +52,11 @@ export interface IssuedAuth {
 }
 
 export interface AuthResponse {
+  accessToken: string;
+  refreshToken: string;
   user: SafeUser;
   accessExpiresAt: Date;
+  refreshExpiresAt: Date;
 }
 
 const ACCESS_COOKIE = 'jc_access_token';
@@ -150,12 +153,15 @@ export class AuthService {
 
   toAuthResponse(issued: IssuedAuth): AuthResponse {
     return {
+      accessToken: issued.accessToken,
+      refreshToken: issued.refreshToken,
       user: issued.user,
       accessExpiresAt: issued.accessExpiresAt,
+      refreshExpiresAt: issued.refreshExpiresAt,
     };
   }
 
-  // ── Role Helpers ─────────────────────────────────────────────────────────
+  // ── Role Helpers ──────────────────────────────────────────────────────────
 
   private toDbRole(role: PublicSignupRole): UserRole {
     return role === 'recruiter' ? UserRole.RECRUITER : UserRole.JOBSEEKER;
@@ -438,7 +444,7 @@ export class AuthService {
     return `${this.frontendUrl}/auth/oauth-onboarding?${q.toString()}`;
   }
 
-  // ── User Lookup ──────────────────────────────────────────────────────────
+  // ── User Lookup ─────────────────────────────────────────────────────────
 
   async findUserByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findUnique({
@@ -691,7 +697,7 @@ export class AuthService {
     return { message: 'Logged out successfully' };
   }
 
-  // ── Current User ─────────────────────────────────────────────────────────
+  // ── Current User ────────────────────────────────────────────────────────
 
   async getMe(userId: string): Promise<SafeUser> {
     const user = await this.findUserById(userId);
