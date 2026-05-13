@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!cancelled) {
             setUser(null);
             localStorage.removeItem('user');
+            setLoading(false); // ✅ SET LOADING FALSE IMMEDIATELY WHEN NO TOKEN
           }
           return;
         }
@@ -62,13 +63,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // keep cookie in sync for middleware
         setToken(token);
 
-        const me = await getMe(); // SOURCE OF TRUTH
-        if (!cancelled) {
-          setUser(me);
-          localStorage.setItem('user', JSON.stringify(me));
+        try {
+          const me = await getMe(); // SOURCE OF TRUTH
+          if (!cancelled) {
+            setUser(me);
+            localStorage.setItem('user', JSON.stringify(me));
+          }
+        } catch (err) {
+          // getMe() failed — token is invalid, clear it
+          if (!cancelled) {
+            console.error('[Auth] getMe() failed:', err);
+            removeToken();
+            localStorage.removeItem('user');
+            setUser(null);
+          }
         }
-      } catch {
+      } catch (err) {
         if (!cancelled) {
+          console.error('[Auth] boot() error:', err);
           removeToken();
           localStorage.removeItem('user');
           setUser(null);
@@ -83,11 +95,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
-    localStorage.removeItem('user'); // prevent stale role
-    const res = await apiLogin(email, password);
-    setUser(res.user);
-    localStorage.setItem('user', JSON.stringify(res.user));
-    return res;
+    try {
+      localStorage.removeItem('user'); // prevent stale role
+      const res = await apiLogin(email, password);
+      setUser(res.user);
+      localStorage.setItem('user', JSON.stringify(res.user));
+      return res;
+    } catch (err) {
+      // Clear state on login failure
+      removeToken();
+      localStorage.removeItem('user');
+      setUser(null);
+      throw err;
+    }
   }, []);
 
   const register = useCallback(async (
@@ -96,18 +116,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
     role: Exclude<UserRole, 'admin'>,
   ): Promise<AuthResponse> => {
-    localStorage.removeItem('user'); // prevent stale role
-    const res = await apiRegister(fullName, email, password, role);
-    setUser(res.user);
-    localStorage.setItem('user', JSON.stringify(res.user));
-    return res;
+    try {
+      localStorage.removeItem('user'); // prevent stale role
+      const res = await apiRegister(fullName, email, password, role);
+      setUser(res.user);
+      localStorage.setItem('user', JSON.stringify(res.user));
+      return res;
+    } catch (err) {
+      // Clear state on register failure
+      removeToken();
+      localStorage.removeItem('user');
+      setUser(null);
+      throw err;
+    }
   }, []);
 
   const logout = useCallback(() => {
     removeToken();
     localStorage.removeItem('user');
     setUser(null);
-    router.replace('/'); // always landing page
+    router.replace('/');
   }, [router]);
 
   const value = useMemo<AuthContextValue>(
