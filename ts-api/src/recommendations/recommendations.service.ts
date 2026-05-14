@@ -1,4 +1,3 @@
-
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -11,12 +10,11 @@ import { DatabaseService } from '../database/database.service';
 import { AtsService, AtsScoreResponse } from '../ats/ats.service';
 
 export interface CandidateProfileRow {
-  top_skills: string[];
+  top_skills: string[] | null;
   experience_level: string | null;
   experience_years: number | null;
   current_title: string | null;
-  target_roles: string[] | null;
-  industry_tags: string[] | null;
+  target_industries: string[] | null;
 }
 
 export interface ResumeAnalysisRow {
@@ -54,11 +52,7 @@ export interface JobRecommendationRow {
   created_at: Date;
   published_at: Date | null;
   apply_url: string | null;
-  recruiter_name: string | null;
-  applicant_count: string;
   status: string;
-  skill_score: number;
-  role_score: number;
 }
 
 export interface SkillDemandRow {
@@ -114,204 +108,189 @@ export class RecommendationsService {
 
   async getJobRecommendations(
     candidateId: string,
-    limit = 10,
+    limit = 12,
   ): Promise<{
     recommendations: JobRecommendation[];
     reason?: string;
     profile?: object;
   }> {
-    const safeLimit = Math.min(Math.max(limit || 10, 1), 25);
-
-    const profile = await this.fetchCandidateProfile(candidateId);
-
-    if (!profile) {
-      return {
-        recommendations: [],
-        reason: 'Upload and analyse your resume to unlock recommendations.',
-      };
-    }
+    const safeLimit = Math.min(Math.max(limit || 12, 1), 30);
 
     const latestAnalysis = await this.fetchLatestResumeAnalysis(candidateId);
 
     if (!latestAnalysis) {
       return {
         recommendations: [],
-        reason: 'Resume analysis is not ready yet.',
-        profile: {
-          skills: profile.top_skills ?? [],
-          experienceLevel: profile.experience_level ?? 'fresher',
-        },
+        reason: 'Upload and analyse your resume to unlock recommendations.',
       };
     }
 
-    const skills = this.cleanStringArray(profile.top_skills);
-    const targetRoles = this.cleanStringArray(profile.target_roles);
+    const profile = await this.fetchCandidateProfile(candidateId);
 
-    if (!skills.length) {
+    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(latestAnalysis);
+
+    const resumeSkills = this.cleanStringArray(
+      resumeAnalysisPayload.topSkills ?? resumeAnalysisPayload.skills,
+    );
+
+    if (!resumeSkills.length) {
       return {
         recommendations: [],
         reason: 'No skills found in analysed resume. Re-run resume analysis.',
       };
     }
 
-    const { rows: jobs } = await this.db.query<JobRecommendationRow>(
-      `SELECT
-         j.id,
-         j.source,
-         j.title,
-         j.company_name AS company,
-         j.location,
-         j.work_mode,
-         j.employment_type,
-         j.salary_min,
-         j.salary_max,
-         COALESCE(j.salary_currency, 'INR') AS salary_currency,
-         COALESCE(j.required_skills, ARRAY[]::text[]) AS required_skills,
-         COALESCE(j.description, '') AS description,
-         j.created_at,
-         j.published_at,
-         j.apply_url,
-         u.full_name AS recruiter_name,
-         COUNT(a.id)::text AS applicant_count,
+    const jobs = await this.fetchPublishedJobs(safeLimit * 3);
 
-         j.status,
-
-         CASE
-           WHEN array_length(j.required_skills, 1) IS NULL THEN 0
-           ELSE ROUND(
-             (
-               SELECT COUNT(*)::FLOAT
-               FROM unnest(j.required_skills) rs
-               WHERE lower(rs) = ANY($2::text[])
-             ) / GREATEST(array_length(j.required_skills, 1), 1) * 100
-           )::INTEGER
-         END AS skill_score,
-
-         CASE
-           WHEN $3::text[] IS NULL OR array_length($3::text[], 1) IS NULL THEN 0
-           WHEN EXISTS (
-             SELECT 1
-             FROM unnest($3::text[]) tr
-             WHERE lower(j.title) ILIKE '%' || lower(tr) || '%'
-           ) THEN 15
-           ELSE 0
-         END AS role_score
-
-       FROM jobs j
-       LEFT JOIN users u ON u.id = j.recruiter_user_id
-       LEFT JOIN job_applications a ON a.job_id = j.id
-
-       WHERE j.status = 'PUBLISHED'
-         AND j.id NOT IN (
-           SELECT ja.job_id
-           FROM job_applications ja
-           WHERE ja.candidate_user_id = $1
-         )
-
-       GROUP BY
-         j.id,
-         u.full_name
-
-       ORDER BY
-         (skill_score + role_score) DESC,
-         j.published_at DESC NULLS LAST,
-         j.created_at DESC
-
-       LIMIT $4`,
-      [
-        candidateId,
-        skills.map((skill) => skill.toLowerCase()),
-        targetRoles.length ? targetRoles : null,
-        safeLimit,
-      ],
-    );
-
-    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(latestAnalysis);
+    if (!jobs.length) {
+      return {
+        recommendations: [],
+        reason: 'No jobs are available in PostgreSQL yet. Sync or add jobs first.',
+        profile: {
+          skills: resumeSkills,
+          experienceLevel:
+            profile?.experience_level ??
+            latestAnalysis.experience_level ??
+            'fresher',
+          experienceYears:
+            profile?.experience_years ??
+            latestAnalysis.experience_years ??
+            0,
+        },
+      };
+    }
 
     const recommendations = await Promise.all(
       jobs.map(async (job) => {
         const atsResult = await this.safeAtsScore(job, resumeAnalysisPayload);
 
-        const baseMatch = Math.min(
-          100,
-          Number(job.skill_score ?? 0) + Number(job.role_score ?? 0),
+        const skillMatchScore = this.calculateSkillMatchScore(
+          resumeSkills,
+          job.required_skills ?? [],
+          job.title,
+          job.description,
         );
 
         const finalMatch = Math.round(
-          Math.max(baseMatch, atsResult.atsScore * 0.85),
+          Math.max(skillMatchScore, atsResult.atsScore * 0.88),
         );
 
-        return this.mapRecommendation(job, finalMatch, atsResult, profile);
+        return this.mapRecommendation(job, finalMatch, atsResult);
       }),
     );
 
-    recommendations.sort((a, b) => b.atsScore - a.atsScore || b.matchScore - a.matchScore);
+    const sorted = recommendations
+      .sort((a, b) => {
+        if (b.atsScore !== a.atsScore) return b.atsScore - a.atsScore;
+        return b.matchScore - a.matchScore;
+      })
+      .slice(0, safeLimit);
 
     return {
-      recommendations,
+      recommendations: sorted,
       profile: {
-        skills,
-        experienceLevel: profile.experience_level ?? 'fresher',
-        experienceYears: profile.experience_years ?? 0,
-        currentTitle: profile.current_title ?? null,
-        targetRoles,
-        industryTags: this.cleanStringArray(profile.industry_tags),
+        skills: resumeSkills,
+        experienceLevel:
+          profile?.experience_level ??
+          latestAnalysis.experience_level ??
+          'fresher',
+        experienceYears:
+          profile?.experience_years ??
+          latestAnalysis.experience_years ??
+          0,
+        currentTitle: profile?.current_title ?? null,
+        industryTags:
+          this.cleanStringArray(profile?.target_industries).length > 0
+            ? this.cleanStringArray(profile?.target_industries)
+            : this.cleanStringArray(latestAnalysis.industry_tags),
       },
     };
   }
 
   async getSkillGapAnalysis(candidateId: string): Promise<SkillGapAnalysis | null> {
-    const profile = await this.fetchCandidateProfile(candidateId);
+    const latestAnalysis = await this.fetchLatestResumeAnalysis(candidateId);
 
-    if (!profile) return null;
+    if (!latestAnalysis) return null;
 
-    const userSkills = this.cleanStringArray(profile.top_skills);
-
-    const { rows: demandRows } = await this.db.query<SkillDemandRow>(
-      `SELECT
-         skill,
-         COUNT(*) AS demand_count,
-         COUNT(*) FILTER (WHERE lower(skill) = ANY($1::text[])) > 0 AS candidate_has
-       FROM jobs, unnest(required_skills) AS skill
-       WHERE status = 'PUBLISHED'
-       GROUP BY skill
-       ORDER BY demand_count DESC
-       LIMIT 20`,
-      [userSkills.map((skill) => skill.toLowerCase())],
+    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(latestAnalysis);
+    const userSkills = this.cleanStringArray(
+      resumeAnalysisPayload.topSkills ?? resumeAnalysisPayload.skills,
     );
 
-    const gaps = demandRows.filter((row) => !row.candidate_has);
-    const matches = demandRows.filter((row) => row.candidate_has);
+    if (!userSkills.length) {
+      return {
+        userSkills: [],
+        topDemandedSkills: [],
+        skillGaps: [],
+        matchedSkills: [],
+        coveragePercent: 0,
+      };
+    }
 
-    return {
-      userSkills,
-      topDemandedSkills: demandRows,
-      skillGaps: gaps.slice(0, 8),
-      matchedSkills: matches,
-      coveragePercent:
-        demandRows.length > 0
-          ? Math.round((matches.length / demandRows.length) * 100)
-          : 0,
-    };
+    try {
+      const { rows } = await this.db.query<SkillDemandRow>(
+        `SELECT
+           skill,
+           COUNT(*)::text AS demand_count,
+           lower(skill) = ANY($1::text[]) AS candidate_has
+         FROM jobs
+         CROSS JOIN LATERAL unnest(COALESCE(required_skills, ARRAY[]::text[])) AS skill
+         WHERE status::text IN ('PUBLISHED', 'published', 'active', 'ACTIVE')
+         GROUP BY skill, candidate_has
+         ORDER BY COUNT(*) DESC
+         LIMIT 20`,
+        [userSkills.map((skill) => skill.toLowerCase())],
+      );
+
+      const gaps = rows.filter((row) => !row.candidate_has);
+      const matches = rows.filter((row) => row.candidate_has);
+
+      return {
+        userSkills,
+        topDemandedSkills: rows,
+        skillGaps: gaps.slice(0, 8),
+        matchedSkills: matches,
+        coveragePercent:
+          rows.length > 0 ? Math.round((matches.length / rows.length) * 100) : 0,
+      };
+    } catch (error: any) {
+      this.logger.warn(`[recommendations] skill gap query failed: ${error.message}`);
+
+      return {
+        userSkills,
+        topDemandedSkills: [],
+        skillGaps: [],
+        matchedSkills: [],
+        coveragePercent: 0,
+      };
+    }
   }
 
   private async fetchCandidateProfile(
     userId: string,
   ): Promise<CandidateProfileRow | null> {
-    const { rows } = await this.db.query<CandidateProfileRow>(
-      `SELECT
-         top_skills,
-         experience_level,
-         experience_years,
-         current_title,
-         target_roles,
-         target_industries AS industry_tags
-       FROM jobseeker_profiles
-       WHERE user_id = $1`,
-      [userId],
-    );
+    try {
+      const { rows } = await this.db.query<CandidateProfileRow>(
+        `SELECT
+           top_skills,
+           experience_level,
+           experience_years,
+           current_title,
+           target_industries
+         FROM jobseeker_profiles
+         WHERE user_id = $1
+         LIMIT 1`,
+        [userId],
+      );
 
-    return rows[0] ?? null;
+      return rows[0] ?? null;
+    } catch (error: any) {
+      this.logger.warn(
+        `[recommendations] jobseeker profile query failed, using resume analysis only: ${error.message}`,
+      );
+
+      return null;
+    }
   }
 
   private async fetchLatestResumeAnalysis(
@@ -333,13 +312,13 @@ export class RecommendationsService {
          ra.top_skills,
          ra.industry_tags,
          ra.trajectory,
-         ra.status,
+         ra.status::text AS status,
          r.analysis_json
        FROM resume_analyses ra
        JOIN resumes r ON r.id = ra.resume_id
        WHERE r.user_id = $1
-         AND ra.status = 'COMPLETED'
-       ORDER BY ra.processed_at DESC NULLS LAST
+         AND ra.status::text IN ('COMPLETED', 'completed', 'analyzed', 'ANALYZED')
+       ORDER BY ra.processed_at DESC NULLS LAST, r.analyzed_at DESC NULLS LAST
        LIMIT 1`,
       [userId],
     );
@@ -347,8 +326,44 @@ export class RecommendationsService {
     return rows[0] ?? null;
   }
 
+  private async fetchPublishedJobs(limit: number): Promise<JobRecommendationRow[]> {
+    const { rows } = await this.db.query<JobRecommendationRow>(
+      `SELECT
+         id,
+         COALESCE(source, 'serpapi')::text AS source,
+         title,
+         COALESCE(company_name, company, 'Unknown company') AS company,
+         location,
+         work_mode,
+         employment_type,
+         salary_min,
+         salary_max,
+         COALESCE(salary_currency, 'INR') AS salary_currency,
+         COALESCE(required_skills, ARRAY[]::text[]) AS required_skills,
+         COALESCE(description, '') AS description,
+         created_at,
+         published_at,
+         apply_url,
+         status::text AS status
+       FROM jobs
+       WHERE status::text IN ('PUBLISHED', 'published', 'active', 'ACTIVE')
+       ORDER BY
+         published_at DESC NULLS LAST,
+         created_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+
+    return rows;
+  }
+
   private buildResumeAnalysisPayload(row: ResumeAnalysisRow): Record<string, unknown> {
     const analysisJson = row.analysis_json ?? {};
+
+    const skills = this.extractSkillsFromJson(row.skills, row.top_skills);
+    const topSkills = this.cleanStringArray(row.top_skills).length
+      ? this.cleanStringArray(row.top_skills)
+      : skills;
 
     return {
       ...analysisJson,
@@ -356,8 +371,8 @@ export class RecommendationsService {
       personalInfo: row.personal_info ?? analysisJson.personalInfo,
       workExperience: row.work_experience ?? analysisJson.workExperience,
       education: row.education ?? analysisJson.education,
-      skills: this.extractSkillsFromJson(row.skills, row.top_skills),
-      topSkills: this.cleanStringArray(row.top_skills),
+      skills,
+      topSkills,
       projects: row.projects ?? analysisJson.projects,
       certifications: row.certifications ?? analysisJson.certifications,
       experienceYears: row.experience_years ?? analysisJson.experienceYears,
@@ -382,7 +397,7 @@ export class RecommendationsService {
       });
     } catch (error: any) {
       this.logger.warn(
-        `[recommendations] ATS scoring fallback for job=${job.id}: ${error.message}`,
+        `[recommendations] Python ATS scoring failed for job=${job.id}: ${error.message}`,
       );
 
       const resumeSkills = this.cleanStringArray(
@@ -398,14 +413,21 @@ export class RecommendationsService {
 
       const score = required.length
         ? Math.round((matched.length / required.length) * 100)
-        : 50;
+        : this.calculateSkillMatchScore(
+            resumeSkills,
+            [],
+            job.title,
+            job.description,
+          );
 
       return {
         atsScore: score,
-        recommendation: score >= 75 ? 'SHORTLIST' : score >= 55 ? 'REVIEW' : 'REJECT',
+        recommendation:
+          score >= 75 ? 'SHORTLIST' : score >= 55 ? 'REVIEW' : 'REJECT',
         matchedSkills: matched,
         missingSkills: missing,
-        reason: 'Fallback score generated by NestJS because Python ATS service was unavailable.',
+        reason:
+          'Generated by JobCrawler fallback matcher because Python ATS scoring was temporarily unavailable.',
         breakdown: {
           skillScore: score,
           baseAts: Number(resumeAnalysis.atsScore ?? 50),
@@ -416,11 +438,41 @@ export class RecommendationsService {
     }
   }
 
+  private calculateSkillMatchScore(
+    resumeSkillsInput: string[],
+    requiredSkillsInput: string[],
+    title?: string | null,
+    description?: string | null,
+  ): number {
+    const resumeSkills = resumeSkillsInput
+      .map((skill) => skill.toLowerCase().trim())
+      .filter(Boolean);
+
+    const requiredSkills = requiredSkillsInput
+      .map((skill) => skill.toLowerCase().trim())
+      .filter(Boolean);
+
+    const text = `${title ?? ''} ${description ?? ''}`.toLowerCase();
+
+    if (requiredSkills.length) {
+      const matched = requiredSkills.filter((skill) => resumeSkills.includes(skill));
+      const directScore = Math.round((matched.length / requiredSkills.length) * 100);
+
+      const textHits = resumeSkills.filter((skill) => text.includes(skill)).length;
+      const textScore = Math.min(100, textHits * 12);
+
+      return Math.max(directScore, textScore);
+    }
+
+    const hits = resumeSkills.filter((skill) => text.includes(skill)).length;
+
+    return Math.min(100, Math.max(35, hits * 12));
+  }
+
   private mapRecommendation(
     job: JobRecommendationRow,
     matchScore: number,
     atsResult: AtsScoreResponse,
-    profile: CandidateProfileRow,
   ): JobRecommendation {
     return {
       id: job.id,
@@ -437,8 +489,8 @@ export class RecommendationsService {
       description: job.description,
       postedAt: job.published_at ?? job.created_at,
       applyUrl: job.apply_url,
-      recruiterName: job.recruiter_name,
-      applicantCount: job.applicant_count,
+      recruiterName: null,
+      applicantCount: '0',
       status: job.status,
 
       matchScore,
@@ -446,14 +498,13 @@ export class RecommendationsService {
       atsRecommendation: atsResult.recommendation,
       matchedSkills: atsResult.matchedSkills ?? [],
       missingSkills: atsResult.missingSkills ?? [],
-      matchReason: this.buildMatchReason(job, profile, atsResult),
+      matchReason: this.buildMatchReason(job, atsResult),
       atsReason: atsResult.reason,
     };
   }
 
   private buildMatchReason(
     job: JobRecommendationRow,
-    profile: CandidateProfileRow,
     atsResult: AtsScoreResponse,
   ): string {
     const reasons: string[] = [];
@@ -462,23 +513,17 @@ export class RecommendationsService {
       reasons.push(`matches ${atsResult.matchedSkills.slice(0, 4).join(', ')}`);
     }
 
-    const targetRoles = this.cleanStringArray(profile.target_roles);
-
-    if (
-      targetRoles.some((role) =>
-        job.title.toLowerCase().includes(role.toLowerCase()),
-      )
-    ) {
-      reasons.push('matches your target role');
+    if (atsResult.recommendation === 'SHORTLIST') {
+      reasons.push('has strong ATS fit');
     }
 
-    if (atsResult.recommendation === 'SHORTLIST') {
-      reasons.push('strong ATS fit');
+    if (atsResult.recommendation === 'REVIEW') {
+      reasons.push('has moderate ATS fit and should be reviewed');
     }
 
     return reasons.length
       ? `Recommended because it ${reasons.join(', ')}.`
-      : 'Recommended from your analysed resume profile.';
+      : 'Recommended from your analysed resume profile and available job data.';
   }
 
   private cleanStringArray(value?: unknown): string[] {
@@ -498,9 +543,11 @@ export class RecommendationsService {
       const flat = skillsJson
         .map((item) => {
           if (typeof item === 'string') return item;
+
           if (item && typeof item === 'object' && 'name' in item) {
             return String((item as { name?: unknown }).name ?? '');
           }
+
           return '';
         })
         .map((item) => item.trim())
