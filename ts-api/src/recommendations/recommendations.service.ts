@@ -9,6 +9,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { AtsService, AtsScoreResponse } from '../ats/ats.service';
 
+type JobSource = 'internal' | 'serpapi' | 'linkedin' | 'indeed';
+
 export interface CandidateProfileRow {
   top_skills: string[] | null;
   experience_level: string | null;
@@ -38,19 +40,15 @@ export interface ResumeAnalysisRow {
 
 export interface JobRecommendationRow {
   id: string;
-  source: 'internal' | 'serpapi' | 'linkedin' | 'indeed';
+  source: JobSource;
   title: string;
   company: string;
   location: string | null;
   work_mode: string | null;
   employment_type: string | null;
-  salary_min: number | null;
-  salary_max: number | null;
-  salary_currency: string;
   required_skills: string[];
   description: string;
   created_at: Date;
-  published_at: Date | null;
   apply_url: string | null;
   status: string;
 }
@@ -63,7 +61,7 @@ export interface SkillDemandRow {
 
 export interface JobRecommendation {
   id: string;
-  source: 'internal' | 'serpapi' | 'linkedin' | 'indeed';
+  source: JobSource;
   title: string;
   company: string;
   location: string | null;
@@ -126,7 +124,6 @@ export class RecommendationsService {
     }
 
     const profile = await this.fetchCandidateProfile(candidateId);
-
     const resumeAnalysisPayload = this.buildResumeAnalysisPayload(latestAnalysis);
 
     const resumeSkills = this.cleanStringArray(
@@ -145,7 +142,7 @@ export class RecommendationsService {
     if (!jobs.length) {
       return {
         recommendations: [],
-        reason: 'No jobs are available in PostgreSQL yet. Sync or add jobs first.',
+        reason: 'No published jobs are available in PostgreSQL yet.',
         profile: {
           skills: resumeSkills,
           experienceLevel:
@@ -332,24 +329,18 @@ export class RecommendationsService {
          id,
          COALESCE(source, 'serpapi')::text AS source,
          title,
-         COALESCE(company_name, company, 'Unknown company') AS company,
+         COALESCE(company_name, 'Unknown company') AS company,
          location,
          work_mode,
          employment_type,
-         salary_min,
-         salary_max,
-         COALESCE(salary_currency, 'INR') AS salary_currency,
          COALESCE(required_skills, ARRAY[]::text[]) AS required_skills,
          COALESCE(description, '') AS description,
          created_at,
-         published_at,
          apply_url,
          status::text AS status
        FROM jobs
        WHERE status::text IN ('PUBLISHED', 'published', 'active', 'ACTIVE')
-       ORDER BY
-         published_at DESC NULLS LAST,
-         created_at DESC
+       ORDER BY created_at DESC
        LIMIT $1`,
       [limit],
     );
@@ -482,12 +473,12 @@ export class RecommendationsService {
       location: job.location,
       workMode: job.work_mode,
       employmentType: job.employment_type,
-      salaryMin: job.salary_min,
-      salaryMax: job.salary_max,
-      salaryCurrency: job.salary_currency,
+      salaryMin: null,
+      salaryMax: null,
+      salaryCurrency: 'INR',
       requiredSkills: job.required_skills ?? [],
       description: job.description,
-      postedAt: job.published_at ?? job.created_at,
+      postedAt: job.created_at,
       applyUrl: job.apply_url,
       recruiterName: null,
       applicantCount: '0',
