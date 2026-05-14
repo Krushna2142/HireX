@@ -20,7 +20,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { getSupabaseServiceClient } from '../lib/supabase';
 import { ResumeAnalysisService } from './resumes-analysis.service';
 
-const RESUME_BUCKET = 'resume-files';
+const RESUME_BUCKET = 'resumes';
 
 type ResumeListRow = {
   id: string;
