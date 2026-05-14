@@ -135,7 +135,7 @@ function RecruiterStats() {
   );
 }
 
-export default function Sidebar() {
+export  function Sidebar() {
   const pathname = usePathname();
   const auth = useAuth() as unknown as AuthShape;
   const { unreadCount } = useAlerts();
