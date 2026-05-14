@@ -7,6 +7,8 @@ import axios, {
   InternalAxiosRequestConfig,
 } from 'axios';
 
+import { getToken, refreshAccessToken, removeToken } from '@/lib/auth';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 const api: AxiosInstance = axios.create({
@@ -15,36 +17,48 @@ const api: AxiosInstance = axios.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Token helpers
+// Token refresh guard
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getStoredToken(): string | null {
-  if (typeof window === 'undefined') return null;
+let refreshPromise: Promise<string | null> | null = null;
+
+function isAuthEndpoint(url?: string): boolean {
+  const value = String(url ?? '');
 
   return (
-    localStorage.getItem('jc_token') ||
-    localStorage.getItem('jc_access_token') ||
-    null
+    value.includes('/auth/login') ||
+    value.includes('/auth/register') ||
+    value.includes('/auth/refresh') ||
+    value.includes('/auth/google') ||
+    value.includes('/auth/github') ||
+    value.includes('/auth/forgot-password') ||
+    value.includes('/auth/reset-password')
   );
 }
 
-function clearAuthStorage() {
-  if (typeof window === 'undefined') return;
+async function getFreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken()
+      .then((res) => res.accessToken)
+      .catch(() => {
+        removeToken();
+        return null;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
 
-  localStorage.removeItem('jc_token');
-  localStorage.removeItem('jc_access_token');
-  localStorage.removeItem('jc_refresh_token');
-  localStorage.removeItem('user');
-  localStorage.removeItem('jc_user');
+  return refreshPromise;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Request interceptor
+// Request interceptor: attach JWT
 // ─────────────────────────────────────────────────────────────────────────────
 
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = getStoredToken();
+    const token = getToken();
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -56,19 +70,36 @@ api.interceptors.request.use(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Response interceptor
+// Response interceptor: refresh once on 401
 // ─────────────────────────────────────────────────────────────────────────────
 
 api.interceptors.response.use(
   (res) => res,
-  (error: AxiosError) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      /*
-       * Do not redirect here.
-       * Some hooks handle auth state themselves.
-       * We only clear invalid tokens so next login is clean.
-       */
-      clearAuthStorage();
+  async (error: AxiosError) => {
+    const originalRequest = error.config as
+      | (InternalAxiosRequestConfig & { _retry?: boolean })
+      | undefined;
+
+    const status = error.response?.status;
+
+    if (
+      status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !isAuthEndpoint(originalRequest.url)
+    ) {
+      originalRequest._retry = true;
+
+      const freshToken = await getFreshAccessToken();
+
+      if (freshToken) {
+        originalRequest.headers.Authorization = `Bearer ${freshToken}`;
+        return api(originalRequest);
+      }
+    }
+
+    if (status === 401 && isAuthEndpoint(originalRequest?.url)) {
+      removeToken();
     }
 
     return Promise.reject(error);
@@ -220,7 +251,11 @@ export const interviewApi = {
       notes?: string;
       recommendation?: string;
     },
-  ) => api.post(`/interviews/room/${encodeURIComponent(roomId)}/scorecard`, payload),
+  ) =>
+    api.post(
+      `/interviews/room/${encodeURIComponent(roomId)}/scorecard`,
+      payload,
+    ),
 
   getAiFollowUp: (
     roomId: string,
