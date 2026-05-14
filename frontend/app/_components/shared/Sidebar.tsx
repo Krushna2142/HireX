@@ -1,28 +1,10 @@
 'use client';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _components/shared/Sidebar.tsx
-//
-// Final behavior:
-//   - Bottom user card opens account menu.
-//   - Account menu contains Settings and Sign out.
-//   - Settings opens /settings.
-//   - Sign out opens confirmation modal, then logs out.
-//   - ProfilePanel drawer is no longer opened from the sidebar.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { useResumeAnalysis } from '@/hooks/useAnalyseResume';
-import type { AnalysisState } from '@/hooks/useAnalyseResume';
-import ResumeAnalysisTab from '@/components/resumes/ResumeAnalysisTab';
 import { useAlerts } from '@/hooks/useRealTimeAlerts';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Nav definitions
-// ─────────────────────────────────────────────────────────────────────────────
 
 const CANDIDATE_NAV = [
   {
@@ -30,8 +12,9 @@ const CANDIDATE_NAV = [
     items: [
       { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
       { href: '/jobs', icon: '💼', label: 'Jobs' },
+      { href: '/saved-jobs', icon: '🔖', label: 'Saved Jobs' },
       { href: '/resumes', icon: '📄', label: 'Resume' },
-      { href: '/resume-analysis', icon: '🧠', label: 'AI Analysis' },
+      { href: '/resume-analysis', icon: '🧠', label: 'Resume Analysis' },
       { href: '/interviews', icon: '🎥', label: 'Interviews' },
       { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
@@ -56,184 +39,6 @@ const RECRUITER_NAV = [
     ],
   },
 ] as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AI Analyse button states
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface AnalyseBtnCfg {
-  label: string;
-  sublabel: string;
-  disabled: boolean;
-  color: string;
-  bg: string;
-  border: string;
-  icon: string;
-}
-
-const ANALYSE_CFG: Record<AnalysisState, AnalyseBtnCfg> = {
-  idle: {
-    label: 'No resume yet',
-    sublabel: 'Upload a resume first',
-    disabled: true,
-    icon: '📄',
-    color: 'rgba(255,255,255,0.15)',
-    bg: 'rgba(255,255,255,0.03)',
-    border: 'rgba(255,255,255,0.07)',
-  },
-  uploaded: {
-    label: 'Analyse Resume',
-    sublabel: 'Run AI analysis on your CV',
-    disabled: false,
-    icon: '⚡',
-    color: '#A78BFA',
-    bg: 'rgba(124,58,237,0.08)',
-    border: 'rgba(124,58,237,0.25)',
-  },
-  triggering: {
-    label: 'Starting…',
-    sublabel: 'Queuing analysis job',
-    disabled: true,
-    icon: '⚡',
-    color: '#A78BFA',
-    bg: 'rgba(124,58,237,0.08)',
-    border: 'rgba(124,58,237,0.25)',
-  },
-  processing: {
-    label: 'Analysing…',
-    sublabel: 'Gemini is reading your resume',
-    disabled: true,
-    icon: '⚡',
-    color: '#38BDF8',
-    bg: 'rgba(56,189,248,0.06)',
-    border: 'rgba(56,189,248,0.2)',
-  },
-  analyzed: {
-    label: 'Analysis complete',
-    sublabel: 'Resume fully analysed ✓',
-    disabled: true,
-    icon: '✓',
-    color: '#10B981',
-    bg: 'rgba(16,185,129,0.06)',
-    border: 'rgba(16,185,129,0.2)',
-  },
-  failed: {
-    label: 'Retry Analysis',
-    sublabel: 'Previous attempt failed',
-    disabled: false,
-    icon: '↺',
-    color: '#F87171',
-    bg: 'rgba(239,68,68,0.06)',
-    border: 'rgba(239,68,68,0.2)',
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-components
-// ─────────────────────────────────────────────────────────────────────────────
-
-function Spinner({ color }: { color: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        width: 12,
-        height: 12,
-        borderRadius: '50%',
-        border: `2px solid ${color}33`,
-        borderTopColor: color,
-        animation: 'sbSpin 0.7s linear infinite',
-        flexShrink: 0,
-      }}
-    />
-  );
-}
-
-function ResumeAnalysisSection() {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div
-      style={{
-        borderTop: '1px solid rgba(255,255,255,0.05)',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
-        margin: '4px 0',
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((p) => !p)}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 12px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          fontFamily: 'Sora, sans-serif',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14 }}>🧠</span>
-
-          <div style={{ textAlign: 'left' }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'rgba(255,255,255,0.75)',
-              }}
-            >
-              Resume Analysis
-            </div>
-
-            <div
-              style={{
-                fontSize: 10,
-                color: 'rgba(255,255,255,0.3)',
-                marginTop: 1,
-              }}
-            >
-              Upload, analyse, get matched
-            </div>
-          </div>
-        </div>
-
-        <span
-          style={{
-            fontSize: 10,
-            color: 'rgba(255,255,255,0.25)',
-            display: 'inline-block',
-            transform: open ? 'rotate(180deg)' : 'none',
-            transition: 'transform 0.2s',
-          }}
-        >
-          ▾
-        </span>
-      </button>
-
-      <div
-        style={{
-          maxHeight: open ? 600 : 0,
-          overflow: 'hidden',
-          transition: 'max-height 0.3s ease',
-        }}
-      >
-        <div style={{ padding: '0 8px 12px' }}>
-          <style>
-            {`.sb-ap .text-gray-800,.sb-ap .text-gray-900{color:rgba(255,255,255,.85)!important}.sb-ap .text-gray-500,.sb-ap .text-gray-600{color:rgba(255,255,255,.4)!important}.sb-ap .border-gray-200{border-color:rgba(255,255,255,.08)!important}.sb-ap .bg-white,.sb-ap .bg-gray-50{background:rgba(255,255,255,.03)!important}.sb-ap .rounded-xl{border-radius:10px!important}`}
-          </style>
-
-          <div className="sb-ap">
-            <ResumeAnalysisTab />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function RecruiterStats() {
   if (typeof window === 'undefined') return null;
@@ -272,7 +77,6 @@ function RecruiterStats() {
           >
             {stats.activeJobs}
           </div>
-
           <div
             style={{
               fontSize: 9,
@@ -295,7 +99,6 @@ function RecruiterStats() {
           >
             {stats.newApplicants}
           </div>
-
           <div
             style={{
               fontSize: 9,
@@ -356,10 +159,6 @@ function LogoutConfirmModal({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sidebar
-// ─────────────────────────────────────────────────────────────────────────────
-
 export function Sidebar() {
   const { user, logout } = useAuth();
   const pathname = usePathname();
@@ -369,22 +168,12 @@ export function Sidebar() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
 
-  const {
-    analysisState = 'idle',
-    canAnalyse = false,
-    trigger,
-    error,
-  } = useResumeAnalysis();
-
   const { unreadCount = 0 } = useAlerts();
 
   const isCandidate = user?.role === 'candidate';
   const isRecruiter = user?.role === 'recruiter';
 
   const navGroups = isCandidate ? CANDIDATE_NAV : RECRUITER_NAV;
-  const cfg = ANALYSE_CFG[analysisState] ?? ANALYSE_CFG.idle;
-  const isSpinning =
-    analysisState === 'triggering' || analysisState === 'processing';
 
   const initial =
     user?.full_name?.charAt(0).toUpperCase() ??
@@ -425,8 +214,6 @@ export function Sidebar() {
   return (
     <>
       <style>{`
-        @keyframes sbSpin  { to { transform: rotate(360deg); } }
-        @keyframes sbPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes sbMenuIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes sbModalIn { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
@@ -544,57 +331,6 @@ export function Sidebar() {
           align-items: center;
           justify-content: center;
           border: 1px solid rgba(167,139,250,.3);
-        }
-
-        .sb-ai {
-          padding: .75rem;
-          border-top: 1px solid rgba(255,255,255,.05);
-          flex-shrink: 0;
-        }
-
-        .sb-ai-btn {
-          width: 100%;
-          padding: 10px 12px;
-          border-radius: 10px;
-          font-family: 'Sora', sans-serif;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all .15s;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          text-align: left;
-          border: 1px solid;
-        }
-
-        .sb-ai-btn:hover:not(:disabled) {
-          filter: brightness(1.15);
-          transform: translateY(-1px);
-        }
-
-        .sb-ai-btn:disabled {
-          cursor: default;
-        }
-
-        .sb-ai-lbl {
-          display: block;
-          line-height: 1.3;
-        }
-
-        .sb-ai-sub {
-          display: block;
-          font-size: 10px;
-          font-weight: 400;
-          opacity: .6;
-          margin-top: 1px;
-        }
-
-        .sb-ai-err {
-          font-size: 11px;
-          color: #FCA5A5;
-          padding: 4px 2px 0;
-          line-height: 1.4;
         }
 
         .sb-rec-cta {
@@ -903,70 +639,9 @@ export function Sidebar() {
               })}
 
               {isRecruiter && groupIndex === 0 && <RecruiterStats />}
-              {isCandidate && groupIndex === 0 && <ResumeAnalysisSection />}
             </div>
           ))}
         </nav>
-
-        {isCandidate && (
-          <div className="sb-ai">
-            <div className="sb-grp" style={{ marginBottom: 8 }}>
-              AI Tools
-            </div>
-
-            <button
-              type="button"
-              className="sb-ai-btn"
-              onClick={canAnalyse ? () => void trigger() : undefined}
-              disabled={cfg.disabled}
-              style={{
-                background: cfg.bg,
-                borderColor: cfg.border,
-                color: cfg.color,
-              }}
-            >
-              <span style={{ fontSize: 14, flexShrink: 0 }}>
-                {isSpinning ? <Spinner color={cfg.color} /> : cfg.icon}
-              </span>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span className="sb-ai-lbl">{cfg.label}</span>
-                <span className="sb-ai-sub">{cfg.sublabel}</span>
-              </div>
-
-              {analysisState === 'processing' && (
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: '#38BDF8',
-                    flexShrink: 0,
-                    animation: 'sbPulse 1.5s ease infinite',
-                  }}
-                />
-              )}
-            </button>
-
-            {error && analysisState === 'failed' && (
-              <p className="sb-ai-err">{error}</p>
-            )}
-
-            <Link
-              href="/resume-analysis"
-              style={{
-                display: 'block',
-                textAlign: 'center',
-                fontSize: 11,
-                color: 'rgba(255,255,255,.22)',
-                textDecoration: 'none',
-                marginTop: 8,
-              }}
-            >
-              View full analysis →
-            </Link>
-          </div>
-        )}
 
         {isRecruiter && (
           <Link href="/recruiter/dashboard" className="sb-rec-cta">
