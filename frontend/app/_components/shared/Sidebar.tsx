@@ -3,32 +3,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // _components/shared/Sidebar.tsx
 //
-// Final routing decision:
-//   Candidate:
-//     /dashboard            → candidate overview
-//     /jobs                 → candidate job discovery
-//     /resumes              → resume manager
-//     /resume-analysis      → AI resume analysis
-//     /interviews           → candidate interviews
-//
-//   Recruiter:
-//     /dashboard            → recruiter/company profile overview
-//     /recruiter/dashboard  → recruitment command center
-//     /recruiter/interviews → interview rooms/live interview workflow
-//
-// Settings lives inside ProfilePanel drawer.
-// Username card opens ProfilePanel instead of navigating.
+// Final behavior:
+//   - Bottom user card opens account menu.
+//   - Account menu contains Settings and Sign out.
+//   - Settings opens /settings.
+//   - Sign out opens confirmation modal, then logs out.
+//   - ProfilePanel drawer is no longer opened from the sidebar.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useResumeAnalysis } from '@/hooks/useAnalyseResume';
 import type { AnalysisState } from '@/hooks/useAnalyseResume';
 import ResumeAnalysisTab from '@/components/resumes/ResumeAnalysisTab';
 import { useAlerts } from '@/hooks/useRealTimeAlerts';
-import { useProfilePanel } from '@/components/context/ProfilePanelContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Nav definitions
@@ -171,6 +161,7 @@ function ResumeAnalysisSection() {
       }}
     >
       <button
+        type="button"
         onClick={() => setOpen((p) => !p)}
         style={{
           width: '100%',
@@ -186,6 +177,7 @@ function ResumeAnalysisSection() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>🧠</span>
+
           <div style={{ textAlign: 'left' }}>
             <div
               style={{
@@ -196,6 +188,7 @@ function ResumeAnalysisSection() {
             >
               Resume Analysis
             </div>
+
             <div
               style={{
                 fontSize: 10,
@@ -207,6 +200,7 @@ function ResumeAnalysisSection() {
             </div>
           </div>
         </div>
+
         <span
           style={{
             fontSize: 10,
@@ -231,6 +225,7 @@ function ResumeAnalysisSection() {
           <style>
             {`.sb-ap .text-gray-800,.sb-ap .text-gray-900{color:rgba(255,255,255,.85)!important}.sb-ap .text-gray-500,.sb-ap .text-gray-600{color:rgba(255,255,255,.4)!important}.sb-ap .border-gray-200{border-color:rgba(255,255,255,.08)!important}.sb-ap .bg-white,.sb-ap .bg-gray-50{background:rgba(255,255,255,.03)!important}.sb-ap .rounded-xl{border-radius:10px!important}`}
           </style>
+
           <div className="sb-ap">
             <ResumeAnalysisTab />
           </div>
@@ -247,12 +242,12 @@ function RecruiterStats() {
     const raw = localStorage.getItem('jc_recruiter_stats');
     if (!raw) return null;
 
-    const s = JSON.parse(raw) as {
+    const stats = JSON.parse(raw) as {
       activeJobs: number;
       newApplicants: number;
     };
 
-    if (!s.activeJobs && !s.newApplicants) return null;
+    if (!stats.activeJobs && !stats.newApplicants) return null;
 
     return (
       <div
@@ -275,8 +270,9 @@ function RecruiterStats() {
               lineHeight: 1,
             }}
           >
-            {s.activeJobs}
+            {stats.activeJobs}
           </div>
+
           <div
             style={{
               fontSize: 9,
@@ -297,8 +293,9 @@ function RecruiterStats() {
               lineHeight: 1,
             }}
           >
-            {s.newApplicants}
+            {stats.newApplicants}
           </div>
+
           <div
             style={{
               fontSize: 9,
@@ -316,6 +313,49 @@ function RecruiterStats() {
   }
 }
 
+function LogoutConfirmModal({
+  open,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="sb-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sb-logout-title"
+    >
+      <div className="sb-modal-card">
+        <div className="sb-modal-icon">⏻</div>
+
+        <h2 id="sb-logout-title" className="sb-modal-title">
+          Sign out?
+        </h2>
+
+        <p className="sb-modal-text">
+          You will be signed out from this device. You can log in again anytime.
+        </p>
+
+        <div className="sb-modal-actions">
+          <button type="button" className="sb-modal-cancel" onClick={onCancel}>
+            Cancel
+          </button>
+
+          <button type="button" className="sb-modal-confirm" onClick={onConfirm}>
+            Yes, sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Sidebar
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,7 +363,11 @@ function RecruiterStats() {
 export function Sidebar() {
   const { user, logout } = useAuth();
   const pathname = usePathname();
-  const { openPanel } = useProfilePanel();
+
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
 
   const {
     analysisState = 'idle',
@@ -347,11 +391,44 @@ export function Sidebar() {
     user?.email?.charAt(0).toUpperCase() ??
     'U';
 
+  useEffect(() => {
+    function onDocumentMouseDown(event: MouseEvent) {
+      if (!menuRef.current) return;
+
+      if (!menuRef.current.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    function onEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setAccountMenuOpen(false);
+        setLogoutOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', onDocumentMouseDown);
+    document.addEventListener('keydown', onEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', onDocumentMouseDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    setLogoutOpen(false);
+    setAccountMenuOpen(false);
+    await logout();
+  };
+
   return (
     <>
       <style>{`
         @keyframes sbSpin  { to { transform: rotate(360deg); } }
         @keyframes sbPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        @keyframes sbMenuIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes sbModalIn { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
         .sb-root {
           width: 240px;
@@ -543,6 +620,7 @@ export function Sidebar() {
         }
 
         .sb-foot {
+          position: relative;
           padding: .75rem;
           border-top: 1px solid rgba(255,255,255,.07);
           flex-shrink: 0;
@@ -563,7 +641,8 @@ export function Sidebar() {
           font-family: 'Sora', sans-serif;
         }
 
-        .sb-ucard:hover {
+        .sb-ucard:hover,
+        .sb-ucard.open {
           background: rgba(255,255,255,.06);
           border-color: rgba(255,255,255,.13);
         }
@@ -609,21 +688,170 @@ export function Sidebar() {
           margin-top: 2px;
         }
 
-        .sb-logout {
-          background: none;
-          border: none;
-          cursor: pointer;
+        .sb-chevron {
+          color: rgba(255,255,255,.24);
+          font-size: 12px;
+          transition: transform .15s;
           flex-shrink: 0;
-          color: rgba(255,255,255,.22);
-          font-size: 14px;
-          padding: 4px;
-          border-radius: 4px;
-          transition: color .15s;
-          line-height: 1;
         }
 
-        .sb-logout:hover {
+        .sb-chevron.open {
+          transform: rotate(180deg);
+        }
+
+        .sb-account-menu {
+          position: absolute;
+          left: .75rem;
+          right: .75rem;
+          bottom: calc(100% - .35rem);
+          z-index: 20;
+          padding: 8px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,.10);
+          background:
+            radial-gradient(circle at top left, rgba(56,189,248,.10), transparent 35%),
+            linear-gradient(145deg, rgba(15,23,42,.98), rgba(2,6,23,.98));
+          box-shadow: 0 18px 60px rgba(0,0,0,.45);
+          animation: sbMenuIn .16s ease;
+        }
+
+        .sb-menu-user {
+          padding: 9px 10px 10px;
+          border-bottom: 1px solid rgba(255,255,255,.07);
+          margin-bottom: 6px;
+        }
+
+        .sb-menu-name {
+          color: rgba(255,255,255,.86);
+          font-size: 12px;
+          font-weight: 700;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .sb-menu-email {
+          color: rgba(255,255,255,.36);
+          font-size: 10px;
+          margin-top: 3px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .sb-menu-link,
+        .sb-menu-btn {
+          width: 100%;
+          border: none;
+          background: transparent;
+          color: rgba(255,255,255,.66);
+          text-decoration: none;
+          padding: 10px;
+          border-radius: 11px;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          font-size: 12px;
+          font-weight: 700;
+          font-family: 'Sora', sans-serif;
+          cursor: pointer;
+          text-align: left;
+          transition: all .15s;
+        }
+
+        .sb-menu-link:hover {
+          color: #38BDF8;
+          background: rgba(56,189,248,.08);
+        }
+
+        .sb-menu-btn:hover {
           color: #F87171;
+          background: rgba(248,113,113,.08);
+        }
+
+        .sb-menu-danger {
+          color: #F87171;
+        }
+
+        .sb-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          display: grid;
+          place-items: center;
+          background: rgba(2,6,23,.76);
+          backdrop-filter: blur(12px);
+          padding: 20px;
+        }
+
+        .sb-modal-card {
+          width: min(380px, 100%);
+          border-radius: 24px;
+          border: 1px solid rgba(248,113,113,.28);
+          background:
+            radial-gradient(circle at top, rgba(248,113,113,.12), transparent 36%),
+            linear-gradient(145deg, rgba(15,23,42,.98), rgba(2,6,23,.98));
+          box-shadow: 0 28px 90px rgba(0,0,0,.55);
+          padding: 22px;
+          text-align: center;
+          animation: sbModalIn .18s ease;
+        }
+
+        .sb-modal-icon {
+          width: 54px;
+          height: 54px;
+          border-radius: 18px;
+          margin: 0 auto 14px;
+          display: grid;
+          place-items: center;
+          color: #F87171;
+          background: rgba(248,113,113,.10);
+          border: 1px solid rgba(248,113,113,.24);
+          font-size: 24px;
+        }
+
+        .sb-modal-title {
+          margin: 0;
+          color: #F8FAFC;
+          font-size: 22px;
+          letter-spacing: -.04em;
+        }
+
+        .sb-modal-text {
+          margin: 10px auto 0;
+          color: rgba(226,232,240,.68);
+          font-size: 13px;
+          line-height: 1.65;
+          max-width: 300px;
+        }
+
+        .sb-modal-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-top: 20px;
+        }
+
+        .sb-modal-cancel,
+        .sb-modal-confirm {
+          border-radius: 14px;
+          padding: 11px 13px;
+          font-family: 'Sora', sans-serif;
+          font-size: 13px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+
+        .sb-modal-cancel {
+          border: 1px solid rgba(255,255,255,.10);
+          color: rgba(255,255,255,.78);
+          background: rgba(255,255,255,.04);
+        }
+
+        .sb-modal-confirm {
+          border: 1px solid rgba(248,113,113,.35);
+          color: #fff;
+          background: linear-gradient(135deg, #EF4444, #F97316);
         }
       `}</style>
 
@@ -687,6 +915,7 @@ export function Sidebar() {
             </div>
 
             <button
+              type="button"
               className="sb-ai-btn"
               onClick={canAnalyse ? () => void trigger() : undefined}
               disabled={cfg.disabled}
@@ -747,20 +976,46 @@ export function Sidebar() {
         )}
 
         {user && (
-          <div className="sb-foot">
-            <div
-              className="sb-ucard"
-              onClick={openPanel}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  openPanel();
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              aria-label="Open profile and settings"
-              title="Profile & Settings"
+          <div className="sb-foot" ref={menuRef}>
+            {accountMenuOpen && (
+              <div className="sb-account-menu">
+                <div className="sb-menu-user">
+                  <div className="sb-menu-name">
+                    {user.full_name ?? 'JobCrawler User'}
+                  </div>
+                  <div className="sb-menu-email">{user.email}</div>
+                </div>
+
+                <Link
+                  href="/settings"
+                  className="sb-menu-link"
+                  onClick={() => setAccountMenuOpen(false)}
+                >
+                  <span>⚙️</span>
+                  Settings
+                </Link>
+
+                <button
+                  type="button"
+                  className="sb-menu-btn sb-menu-danger"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    setLogoutOpen(true);
+                  }}
+                >
+                  <span>⏻</span>
+                  Sign out
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              className={`sb-ucard ${accountMenuOpen ? 'open' : ''}`}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+              title="Account menu"
             >
               <div className="sb-avatar" aria-hidden="true">
                 {initial}
@@ -769,25 +1024,22 @@ export function Sidebar() {
               <div className="sb-uinfo">
                 <div className="sb-uname">{user.full_name ?? user.email}</div>
                 <div className="sb-urole">{user.role}</div>
-                <div className="sb-uhint">Profile &amp; Settings →</div>
+                <div className="sb-uhint">Account menu</div>
               </div>
 
-              <button
-                type="button"
-                className="sb-logout"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  logout();
-                }}
-                aria-label="Log out"
-                title="Log out"
-              >
-                ⏻
-              </button>
-            </div>
+              <span className={`sb-chevron ${accountMenuOpen ? 'open' : ''}`}>
+                ▾
+              </span>
+            </button>
           </div>
         )}
       </aside>
+
+      <LogoutConfirmModal
+        open={logoutOpen}
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={() => void handleLogout()}
+      />
     </>
   );
 }
