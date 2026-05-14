@@ -1,9 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from 'react';
+import { createPortal } from 'react-dom';
 
-// frontend/app/(protected)/recruiter/dashboard/page.tsx
-
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import api from '@/lib/axios';
 
 type TabKey = 'overview' | 'jobs' | 'applications' | 'schedule' | 'results';
@@ -19,11 +22,12 @@ type JobRow = {
   work_mode?: string | null;
   employmentType?: string | null;
   employment_type?: string | null;
-  requiredSkills?: string[];
-  required_skills?: string[];
+  requiredSkills?: string[] | string | null;
+  required_skills?: string[] | string | null;
   status?: string | null;
   createdAt?: string | null;
   created_at?: string | null;
+  total_applications?: string | number | null;
   _count?: { applications?: number };
 };
 
@@ -65,10 +69,10 @@ type ScheduleResult = {
 
 type PostJobForm = {
   title: string;
-  companyName: string;
+  company: string;
   location: string;
-  workMode: string;
-  employmentType: string;
+  workMode: 'onsite' | 'hybrid' | 'remote';
+  employmentType: 'full_time' | 'part_time' | 'contract' | 'freelance';
   description: string;
   requiredSkills: string;
 };
@@ -90,28 +94,229 @@ const C = {
   red: '#F87171',
 };
 
+const IT_SKILL_GROUPS = [
+  {
+    label: 'Frontend / UI',
+    skills: [
+      'javascript',
+      'typescript',
+      'react',
+      'next.js',
+      'html',
+      'css',
+      'tailwind css',
+      'redux',
+      'zustand',
+      'framer motion',
+      'material ui',
+      'shadcn ui',
+      'responsive design',
+      'web accessibility',
+    ],
+  },
+  {
+    label: 'Backend / APIs',
+    skills: [
+      'node.js',
+      'express.js',
+      'nestjs',
+      'java',
+      'spring boot',
+      'python',
+      'fastapi',
+      'django',
+      'rest api',
+      'graphql',
+      'websocket',
+      'microservices',
+      'authentication',
+      'jwt',
+      'oauth',
+    ],
+  },
+  {
+    label: 'Databases / Storage',
+    skills: [
+      'postgresql',
+      'mysql',
+      'mongodb',
+      'redis',
+      'supabase',
+      'firebase',
+      'prisma',
+      'sql',
+      'database design',
+      'query optimization',
+      'database indexing',
+    ],
+  },
+  {
+    label: 'Cloud / DevOps',
+    skills: [
+      'docker',
+      'kubernetes',
+      'aws',
+      'azure',
+      'google cloud',
+      'vercel',
+      'render',
+      'linux',
+      'nginx',
+      'ci/cd',
+      'github actions',
+      'monitoring',
+      'logging',
+      'load balancing',
+    ],
+  },
+  {
+    label: 'Testing / Quality',
+    skills: [
+      'unit testing',
+      'integration testing',
+      'e2e testing',
+      'jest',
+      'playwright',
+      'cypress',
+      'postman',
+      'api testing',
+      'debugging',
+      'performance testing',
+    ],
+  },
+  {
+    label: 'Mobile / Cross Platform',
+    skills: [
+      'react native',
+      'flutter',
+      'dart',
+      'android',
+      'kotlin',
+      'swift',
+      'mobile app development',
+    ],
+  },
+  {
+    label: 'AI / Data',
+    skills: [
+      'machine learning',
+      'deep learning',
+      'nlp',
+      'llm',
+      'generative ai',
+      'python data science',
+      'pandas',
+      'numpy',
+      'scikit-learn',
+      'tensorflow',
+      'pytorch',
+      'spacy',
+      'opencv',
+      'langchain',
+      'langgraph',
+      'vector database',
+      'rag',
+      'prompt engineering',
+    ],
+  },
+  {
+    label: 'Security',
+    skills: [
+      'cybersecurity',
+      'owasp',
+      'secure coding',
+      'penetration testing',
+      'vulnerability assessment',
+      'encryption',
+      'network security',
+      'access control',
+    ],
+  },
+  {
+    label: 'Tools / Workflow',
+    skills: [
+      'git',
+      'github',
+      'gitlab',
+      'jira',
+      'figma',
+      'agile',
+      'scrum',
+      'technical documentation',
+      'system design',
+      'problem solving',
+    ],
+  },
+] as const;
+
 function toArray<T>(raw: unknown, key?: string): T[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw as T[];
 
+  if (typeof raw !== 'object') return [];
+
   const obj = raw as Record<string, unknown>;
 
-  for (const candidate of ['data', 'items', 'results', key].filter(Boolean) as string[]) {
-    if (Array.isArray(obj[candidate])) return obj[candidate] as T[];
+  const keys = ['data', 'items', 'results', 'jobs', 'applicants', key].filter(
+    Boolean,
+  ) as string[];
+
+  for (const candidate of keys) {
+    const value = obj[candidate];
+
+    if (Array.isArray(value)) return value as T[];
+
+    if (value && typeof value === 'object') {
+      const nested = value as Record<string, unknown>;
+
+      if (Array.isArray(nested.data)) return nested.data as T[];
+      if (Array.isArray(nested.items)) return nested.items as T[];
+      if (Array.isArray(nested.results)) return nested.results as T[];
+      if (Array.isArray(nested.jobs)) return nested.jobs as T[];
+      if (Array.isArray(nested.applicants)) return nested.applicants as T[];
+    }
   }
 
   return [];
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
+function safeString(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback;
+
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
   const anyError = error as any;
 
-  return (
+  const raw =
     anyError?.response?.data?.detail ??
     anyError?.response?.data?.message ??
     anyError?.response?.data?.error ??
     anyError?.message ??
-    fallback
+    fallback;
+
+  return safeString(raw, fallback);
+}
+
+function isErrorMessage(message: string | null) {
+  const value = safeString(message).toLowerCase();
+
+  return (
+    value.includes('failed') ||
+    value.includes('unable') ||
+    value.includes('error') ||
+    value.includes('required') ||
+    value.includes('select')
   );
 }
 
@@ -129,34 +334,63 @@ function formatDate(value?: string | null) {
 }
 
 function getCompany(job?: JobRow | null) {
-  return job?.companyName ?? job?.company_name ?? job?.company ?? 'Your company';
+  return safeString(
+    job?.companyName ?? job?.company_name ?? job?.company,
+    'Your company',
+  );
 }
 
 function getWorkMode(job?: JobRow | null) {
-  return job?.workMode ?? job?.work_mode ?? 'onsite';
+  return safeString(job?.workMode ?? job?.work_mode, 'onsite');
 }
 
 function getEmploymentType(job?: JobRow | null) {
-  return job?.employmentType ?? job?.employment_type ?? 'full_time';
+  return safeString(job?.employmentType ?? job?.employment_type, 'full_time');
 }
 
 function getRequiredSkills(job?: JobRow | null) {
-  return job?.requiredSkills ?? job?.required_skills ?? [];
+  const raw = job?.requiredSkills ?? job?.required_skills ?? [];
+
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((skill): skill is string => typeof skill === 'string')
+      .map((skill) => skill.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof raw === 'string') {
+    return raw
+      .split(',')
+      .map((skill) => skill.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getApplicantCount(job?: JobRow | null) {
+  const fromCount = Number(job?._count?.applications ?? 0);
+  const fromTotal = Number(job?.total_applications ?? 0);
+
+  if (Number.isFinite(fromCount) && fromCount > 0) return fromCount;
+  if (Number.isFinite(fromTotal) && fromTotal > 0) return fromTotal;
+
+  return 0;
 }
 
 function getCandidateName(app: ApplicationRow) {
-  return (
+  return safeString(
     app.candidate?.fullName ??
-    app.candidate?.full_name ??
-    app.candidate?.name ??
-    app.candidate?.email ??
-    'Candidate'
+      app.candidate?.full_name ??
+      app.candidate?.name ??
+      app.candidate?.email,
+    'Candidate',
   );
 }
 
 function normalizeStatus(status?: string | null) {
-  return String(status ?? 'applied')
-    .replaceAll('_', ' ')
+  return safeString(status, 'applied')
+    .replace(/_/g, ' ')
     .toLowerCase();
 }
 
@@ -182,9 +416,11 @@ function PostJobModal({
   onClose: () => void;
   onSubmit: (payload: PostJobForm) => void;
 }) {
+  const [mounted, setMounted] = useState(false);
+
   const [form, setForm] = useState<PostJobForm>({
     title: '',
-    companyName: '',
+    company: '',
     location: '',
     workMode: 'onsite',
     employmentType: 'full_time',
@@ -192,30 +428,88 @@ function PostJobModal({
     requiredSkills: '',
   });
 
+  const [customSkill, setCustomSkill] = useState('');
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
 
     setForm({
       title: '',
-      companyName: '',
+      company: '',
       location: '',
       workMode: 'onsite',
       employmentType: 'full_time',
       description: '',
       requiredSkills: '',
     });
+    setCustomSkill('');
   }, [open]);
-
-  if (!open) return null;
 
   const update = (key: keyof PostJobForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  return (
+  const selectedSkills = form.requiredSkills
+    .split(',')
+    .map((skill) => skill.trim().toLowerCase())
+    .filter(Boolean);
+
+  const selectedSkillSet = new Set(selectedSkills);
+
+  const updateSkills = (skills: string[]) => {
+    const unique = Array.from(
+      new Set(
+        skills
+          .map((skill) => skill.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    );
+
+    update('requiredSkills', unique.join(', '));
+  };
+
+  const toggleSkill = (skill: string) => {
+    const normalized = skill.trim().toLowerCase();
+    const next = new Set(selectedSkillSet);
+
+    if (next.has(normalized)) {
+      next.delete(normalized);
+    } else {
+      next.add(normalized);
+    }
+
+    updateSkills(Array.from(next));
+  };
+
+  const addCustomSkill = () => {
+    const clean = customSkill.trim().toLowerCase();
+
+    if (!clean) return;
+
+    updateSkills([...selectedSkills, clean]);
+    setCustomSkill('');
+  };
+
+  const removeSkill = (skill: string) => {
+    updateSkills(selectedSkills.filter((item) => item !== skill));
+  };
+
+  if (!open || !mounted) return null;
+
+  return createPortal(
     <div style={modalBackdropStyle}>
       <div style={modalCardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 16,
+          }}
+        >
           <div>
             <p style={eyebrowStyle}>Post Job Portal</p>
             <h2 style={{ margin: 0, color: C.text, fontSize: 24 }}>
@@ -227,7 +521,7 @@ function PostJobModal({
             </p>
           </div>
 
-          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+          <button type="button" onClick={onClose} style={closeButtonStyle}>
             ✕
           </button>
         </div>
@@ -237,7 +531,7 @@ function PostJobModal({
             <span style={labelStyle}>Job Title *</span>
             <input
               value={form.title}
-              onChange={(e) => update('title', e.target.value)}
+              onChange={(event) => update('title', event.target.value)}
               placeholder="Frontend Developer"
               style={inputStyle}
             />
@@ -245,10 +539,10 @@ function PostJobModal({
 
           <div style={twoColStyle}>
             <label style={fieldWrapStyle}>
-              <span style={labelStyle}>Company</span>
+              <span style={labelStyle}>Company *</span>
               <input
-                value={form.companyName}
-                onChange={(e) => update('companyName', e.target.value)}
+                value={form.company}
+                onChange={(event) => update('company', event.target.value)}
                 placeholder="Aryvion Technologies"
                 style={inputStyle}
               />
@@ -258,7 +552,7 @@ function PostJobModal({
               <span style={labelStyle}>Location</span>
               <input
                 value={form.location}
-                onChange={(e) => update('location', e.target.value)}
+                onChange={(event) => update('location', event.target.value)}
                 placeholder="Pune, India"
                 style={inputStyle}
               />
@@ -270,7 +564,12 @@ function PostJobModal({
               <span style={labelStyle}>Work Mode</span>
               <select
                 value={form.workMode}
-                onChange={(e) => update('workMode', e.target.value)}
+                onChange={(event) =>
+                  update(
+                    'workMode',
+                    event.target.value as PostJobForm['workMode'],
+                  )
+                }
                 style={inputStyle}
               >
                 <option value="onsite">On-site</option>
@@ -283,32 +582,133 @@ function PostJobModal({
               <span style={labelStyle}>Employment Type</span>
               <select
                 value={form.employmentType}
-                onChange={(e) => update('employmentType', e.target.value)}
+                onChange={(event) =>
+                  update(
+                    'employmentType',
+                    event.target.value as PostJobForm['employmentType'],
+                  )
+                }
                 style={inputStyle}
               >
                 <option value="full_time">Full-time</option>
                 <option value="part_time">Part-time</option>
-                <option value="internship">Internship</option>
                 <option value="contract">Contract</option>
+                <option value="freelance">Freelance</option>
               </select>
             </label>
           </div>
 
-          <label style={fieldWrapStyle}>
+          <div style={fieldWrapStyle}>
             <span style={labelStyle}>Required Skills *</span>
+
+            <div style={selectedSkillsBoxStyle}>
+              {selectedSkills.length > 0 ? (
+                selectedSkills.map((skill) => (
+                  <button
+                    key={skill}
+                    type="button"
+                    onClick={() => removeSkill(skill)}
+                    style={selectedSkillPillStyle}
+                    title="Click to remove"
+                  >
+                    {skill}
+                    <span style={{ opacity: 0.75 }}>×</span>
+                  </button>
+                ))
+              ) : (
+                <span style={{ color: C.faint, fontSize: 12 }}>
+                  No skills selected yet. Choose from IT skill groups below.
+                </span>
+              )}
+            </div>
+
+            <div style={skillGroupsWrapStyle}>
+              {IT_SKILL_GROUPS.map((group) => (
+                <section key={group.label} style={skillGroupStyle}>
+                  <p style={skillGroupTitleStyle}>{group.label}</p>
+
+                  <div style={skillsGridStyle}>
+                    {group.skills.map((skill) => {
+                      const active = selectedSkillSet.has(skill);
+
+                      return (
+                        <label
+                          key={skill}
+                          style={{
+                            ...skillCheckboxStyle,
+                            ...(active ? activeSkillCheckboxStyle : {}),
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={() => toggleSkill(skill)}
+                            style={{ display: 'none' }}
+                          />
+                          <span>{active ? '✓' : '+'}</span>
+                          {skill}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto',
+                gap: 10,
+              }}
+            >
+              <input
+                value={customSkill}
+                onChange={(event) => setCustomSkill(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addCustomSkill();
+                  }
+                }}
+                placeholder="Add custom IT skill, e.g. socket.io"
+                style={inputStyle}
+              />
+
+              <button
+                type="button"
+                onClick={addCustomSkill}
+                style={secondaryButtonStyle}
+              >
+                Add
+              </button>
+            </div>
+
             <input
               value={form.requiredSkills}
-              onChange={(e) => update('requiredSkills', e.target.value)}
-              placeholder="react, next.js, typescript, node.js"
+              onChange={(event) => update('requiredSkills', event.target.value)}
+              placeholder="Final skills: react, next.js, typescript, node.js"
               style={inputStyle}
             />
-          </label>
+
+            <p
+              style={{
+                margin: 0,
+                color: C.faint,
+                fontSize: 11,
+                lineHeight: 1.6,
+              }}
+            >
+              These skills are saved as structured job requirements and used for
+              ATS matching, recommendations, and shortlist ranking.
+            </p>
+          </div>
 
           <label style={fieldWrapStyle}>
             <span style={labelStyle}>Description *</span>
             <textarea
               value={form.description}
-              onChange={(e) => update('description', e.target.value)}
+              onChange={(event) => update('description', event.target.value)}
               placeholder="Write responsibilities, requirements, interview expectations..."
               rows={7}
               style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.65 }}
@@ -316,8 +716,20 @@ function PostJobModal({
           </label>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-          <button type="button" onClick={onClose} disabled={loading} style={secondaryButtonStyle}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 10,
+            marginTop: 20,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            style={secondaryButtonStyle}
+          >
             Cancel
           </button>
           <button
@@ -334,7 +746,8 @@ function PostJobModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -358,7 +771,9 @@ export default function RecruiterRecruitmentDashboardPage() {
   const [roundType, setRoundType] = useState<string>('technical');
   const [durationMins, setDurationMins] = useState<number>(45);
   const [scheduling, setScheduling] = useState(false);
-  const [scheduleResult, setScheduleResult] = useState<ScheduleResult | null>(null);
+  const [scheduleResult, setScheduleResult] = useState<ScheduleResult | null>(
+    null,
+  );
 
   const selectedJob = useMemo(
     () => jobs.find((job) => job.id === selectedJobId) ?? null,
@@ -385,7 +800,9 @@ export default function RecruiterRecruitmentDashboardPage() {
     return {
       totalJobs: jobs.length,
       activeJobs: jobs.filter((job) =>
-        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(String(job.status)),
+        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(
+          safeString(job.status),
+        ),
       ).length,
       totalApplications,
       shortlisted,
@@ -395,34 +812,44 @@ export default function RecruiterRecruitmentDashboardPage() {
   }, [applications, jobs]);
 
   const loadJobs = useCallback(async () => {
-    const { data } = await api.get('/jobs/mine');
-    const rows = toArray<JobRow>(data, 'jobs');
-
-    setJobs(rows);
-
-    const activeJobs = rows.filter((job) =>
-      ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(String(job.status)),
-    ).length;
-
     try {
-      localStorage.setItem(
-        'jc_recruiter_stats',
-        JSON.stringify({
-          activeJobs,
-          newApplicants: rows.reduce(
-            (sum, job) => sum + Number(job._count?.applications ?? 0),
-            0,
-          ),
-        }),
+      const { data } = await api.get('/jobs/mine');
+      const rows = toArray<JobRow>(data, 'jobs').filter(
+        (job) => job && typeof job === 'object' && job.id,
       );
-    } catch {
-      // ignore localStorage issues
-    }
 
-    setSelectedJobId((current) => {
-      if (current && rows.some((job) => job.id === current)) return current;
-      return rows[0]?.id ?? null;
-    });
+      setJobs(rows);
+
+      const activeJobs = rows.filter((job) =>
+        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(
+          safeString(job.status),
+        ),
+      ).length;
+
+      try {
+        localStorage.setItem(
+          'jc_recruiter_stats',
+          JSON.stringify({
+            activeJobs,
+            newApplicants: rows.reduce(
+              (sum, job) => sum + getApplicantCount(job),
+              0,
+            ),
+          }),
+        );
+      } catch {
+        // Ignore localStorage issues.
+      }
+
+      setSelectedJobId((current) => {
+        if (current && rows.some((job) => job.id === current)) return current;
+        return rows[0]?.id ?? null;
+      });
+    } catch (error) {
+      setJobs([]);
+      setSelectedJobId(null);
+      throw error;
+    }
   }, []);
 
   const loadApplicants = useCallback(async (jobId: string | null) => {
@@ -435,16 +862,26 @@ export default function RecruiterRecruitmentDashboardPage() {
 
     try {
       const { data } = await api.get(`/jobs/${jobId}/applicants`);
-      const rows = toArray<ApplicationRow>(data, 'applicants');
+      const rows = toArray<ApplicationRow>(data, 'applicants').filter(
+        (app) => app && typeof app === 'object' && app.id,
+      );
 
       setApplications(rows);
 
       setScheduleApplicationId((current) => {
         if (current && rows.some((app) => app.id === current)) return current;
-        return rows.find((app) => normalizeStatus(app.status).includes('shortlist'))?.id
-          ?? rows[0]?.id
-          ?? '';
+
+        return (
+          rows.find((app) =>
+            normalizeStatus(app.status).includes('shortlist'),
+          )?.id ??
+          rows[0]?.id ??
+          ''
+        );
       });
+    } catch (error) {
+      setApplications([]);
+      setMessage(getErrorMessage(error, 'Unable to load applicants.'));
     } finally {
       setAppsLoading(false);
     }
@@ -512,6 +949,11 @@ export default function RecruiterRecruitmentDashboardPage() {
       return;
     }
 
+    if (!form.company.trim()) {
+      setMessage('Company name is required.');
+      return;
+    }
+
     if (!form.description.trim()) {
       setMessage('Job description is required.');
       return;
@@ -532,23 +974,22 @@ export default function RecruiterRecruitmentDashboardPage() {
     try {
       const payload = {
         title: form.title.trim(),
-        companyName: form.companyName.trim(),
-        company_name: form.companyName.trim(),
-        location: form.location.trim(),
+        company: form.company.trim(),
+        location: form.location.trim() || undefined,
         workMode: form.workMode,
-        work_mode: form.workMode,
         employmentType: form.employmentType,
-        employment_type: form.employmentType,
         description: form.description.trim(),
         requiredSkills: skills,
-        required_skills: skills,
-        status: 'active',
-        source: 'internal',
+        salaryCurrency: 'INR',
+        experienceMin: 0,
+        industry: 'IT / Software',
       };
 
       await api.post('/jobs', payload);
 
-      setMessage('Job posted successfully. Applications will now be tracked under this job.');
+      setMessage(
+        'Job posted successfully. Applications will now be tracked under this job.',
+      );
       setPostJobOpen(false);
       setTab('jobs');
 
@@ -649,13 +1090,16 @@ export default function RecruiterRecruitmentDashboardPage() {
     }
   }
 
+  const messageLooksLikeError = isErrorMessage(message);
+
   return (
     <div style={pageStyle}>
       <header style={headerStyle}>
         <div>
           <h1 style={titleStyle}>Recruitment Center</h1>
           <p style={subtitleStyle}>
-            Track every job, application, shortlist, interview schedule and result.
+            Track every job, application, shortlist, interview schedule and
+            result.
           </p>
         </div>
 
@@ -685,18 +1129,13 @@ export default function RecruiterRecruitmentDashboardPage() {
         <div
           style={{
             ...messageStyle,
-            borderColor: message.toLowerCase().includes('failed') ||
-              message.toLowerCase().includes('unable')
+            borderColor: messageLooksLikeError
               ? 'rgba(248,113,113,0.28)'
               : 'rgba(52,211,153,0.28)',
-            background: message.toLowerCase().includes('failed') ||
-              message.toLowerCase().includes('unable')
+            background: messageLooksLikeError
               ? 'rgba(248,113,113,0.07)'
               : 'rgba(52,211,153,0.07)',
-            color: message.toLowerCase().includes('failed') ||
-              message.toLowerCase().includes('unable')
-              ? '#FCA5A5'
-              : '#86EFAC',
+            color: messageLooksLikeError ? '#FCA5A5' : '#86EFAC',
           }}
         >
           {message}
@@ -736,12 +1175,36 @@ export default function RecruiterRecruitmentDashboardPage() {
           {tab === 'overview' && (
             <>
               <section style={gridStyle}>
-                <StatCard label="Total Jobs" value={stats.totalJobs} color={C.purple} />
-                <StatCard label="Active Jobs" value={stats.activeJobs} color={C.green} />
-                <StatCard label="Applications" value={stats.totalApplications} color={C.sky} />
-                <StatCard label="Shortlisted" value={stats.shortlisted} color={C.yellow} />
-                <StatCard label="In Interview" value={stats.interviews} color={C.purple} />
-                <StatCard label="Rejected" value={stats.rejected} color={C.red} />
+                <StatCard
+                  label="Total Jobs"
+                  value={stats.totalJobs}
+                  color={C.purple}
+                />
+                <StatCard
+                  label="Active Jobs"
+                  value={stats.activeJobs}
+                  color={C.green}
+                />
+                <StatCard
+                  label="Applications"
+                  value={stats.totalApplications}
+                  color={C.sky}
+                />
+                <StatCard
+                  label="Shortlisted"
+                  value={stats.shortlisted}
+                  color={C.yellow}
+                />
+                <StatCard
+                  label="In Interview"
+                  value={stats.interviews}
+                  color={C.purple}
+                />
+                <StatCard
+                  label="Rejected"
+                  value={stats.rejected}
+                  color={C.red}
+                />
               </section>
 
               <section style={panelStyle}>
@@ -750,7 +1213,8 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <JobSummary job={selectedJob} />
                 ) : (
                   <p style={emptyTextStyle}>
-                    No jobs yet. Click Post Job to create your first recruiter job.
+                    No jobs yet. Click Post Job to create your first recruiter
+                    job.
                   </p>
                 )}
               </section>
@@ -792,29 +1256,57 @@ export default function RecruiterRecruitmentDashboardPage() {
                         style={{
                           ...jobRowStyle,
                           borderColor: active ? C.borderStrong : C.border,
-                          background: active ? 'rgba(124,58,237,0.10)' : C.panel2,
+                          background: active
+                            ? 'rgba(124,58,237,0.10)'
+                            : C.panel2,
                         }}
                       >
                         <div style={{ flex: 1, textAlign: 'left' }}>
                           <strong style={{ color: C.text, fontSize: 15 }}>
                             {job.title}
                           </strong>
-                          <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
-                            {getCompany(job)} · {job.location ?? 'Location not set'} · {getWorkMode(job)}
+                          <p
+                            style={{
+                              margin: '5px 0 0',
+                              color: C.faint,
+                              fontSize: 12,
+                            }}
+                          >
+                            {getCompany(job)} ·{' '}
+                            {job.location ?? 'Location not set'} ·{' '}
+                            {getWorkMode(job)}
                           </p>
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                            {getRequiredSkills(job).slice(0, 6).map((skill) => (
-                              <span key={skill} style={skillPillStyle}>
-                                {skill}
-                              </span>
-                            ))}
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 6,
+                              flexWrap: 'wrap',
+                              marginTop: 10,
+                            }}
+                          >
+                            {getRequiredSkills(job)
+                              .slice(0, 6)
+                              .map((skill) => (
+                                <span key={skill} style={skillPillStyle}>
+                                  {skill}
+                                </span>
+                              ))}
                           </div>
                         </div>
 
                         <div style={{ textAlign: 'right' }}>
-                          <span style={statusPillStyle}>{job.status ?? 'active'}</span>
-                          <p style={{ margin: '10px 0 0', color: C.faint, fontSize: 12 }}>
-                            {Number(job._count?.applications ?? 0)} applicants
+                          <span style={statusPillStyle}>
+                            {job.status ?? 'active'}
+                          </span>
+                          <p
+                            style={{
+                              margin: '10px 0 0',
+                              color: C.faint,
+                              fontSize: 12,
+                            }}
+                          >
+                            {getApplicantCount(job)} applicants
                           </p>
                         </div>
                       </button>
@@ -841,7 +1333,7 @@ export default function RecruiterRecruitmentDashboardPage() {
 
                 <select
                   value={selectedJobId ?? ''}
-                  onChange={(e) => setSelectedJobId(e.target.value || null)}
+                  onChange={(event) => setSelectedJobId(event.target.value || null)}
                   style={inputStyle}
                 >
                   {jobs.map((job) => (
@@ -870,7 +1362,8 @@ export default function RecruiterRecruitmentDashboardPage() {
                 </div>
               ) : (
                 <p style={emptyTextStyle}>
-                  No applications for this job yet. Candidate applications will appear here by jobId.
+                  No applications for this job yet. Candidate applications will
+                  appear here by jobId.
                 </p>
               )}
             </section>
@@ -880,7 +1373,8 @@ export default function RecruiterRecruitmentDashboardPage() {
             <section style={panelStyle}>
               <p style={sectionTitleStyle}>Schedule Interview</p>
               <p style={sectionSubStyle}>
-                Select one application, create an interview round, notify candidate, and generate room link.
+                Select one application, create an interview round, notify
+                candidate, and generate room link.
               </p>
 
               <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
@@ -888,7 +1382,9 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <span style={labelStyle}>Application</span>
                   <select
                     value={scheduleApplicationId}
-                    onChange={(e) => setScheduleApplicationId(e.target.value)}
+                    onChange={(event) =>
+                      setScheduleApplicationId(event.target.value)
+                    }
                     style={inputStyle}
                   >
                     <option value="">Select candidate application</option>
@@ -903,8 +1399,12 @@ export default function RecruiterRecruitmentDashboardPage() {
                 {selectedApplication && (
                   <div style={miniInfoStyle}>
                     <strong>{getCandidateName(selectedApplication)}</strong>
-                    <span>{selectedApplication.candidate?.email ?? 'No email shown'}</span>
-                    <span>Status: {normalizeStatus(selectedApplication.status)}</span>
+                    <span>
+                      {selectedApplication.candidate?.email ?? 'No email shown'}
+                    </span>
+                    <span>
+                      Status: {normalizeStatus(selectedApplication.status)}
+                    </span>
                   </div>
                 )}
 
@@ -913,7 +1413,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                     <span style={labelStyle}>Round Type</span>
                     <select
                       value={roundType}
-                      onChange={(e) => setRoundType(e.target.value)}
+                      onChange={(event) => setRoundType(event.target.value)}
                       style={inputStyle}
                     >
                       <option value="technical">Technical</option>
@@ -927,7 +1427,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                     <span style={labelStyle}>Duration</span>
                     <select
                       value={durationMins}
-                      onChange={(e) => setDurationMins(Number(e.target.value))}
+                      onChange={(event) => setDurationMins(Number(event.target.value))}
                       style={inputStyle}
                     >
                       <option value={30}>30 minutes</option>
@@ -943,7 +1443,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <input
                     type="datetime-local"
                     value={scheduleAt}
-                    onChange={(e) => setScheduleAt(e.target.value)}
+                    onChange={(event) => setScheduleAt(event.target.value)}
                     style={inputStyle}
                   />
                 </label>
@@ -958,14 +1458,20 @@ export default function RecruiterRecruitmentDashboardPage() {
                     cursor: scheduling ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {scheduling ? 'Scheduling...' : 'Schedule Interview + Notify Candidate'}
+                  {scheduling
+                    ? 'Scheduling...'
+                    : 'Schedule Interview + Notify Candidate'}
                 </button>
 
                 {scheduleResult && (
                   <div style={successBoxStyle}>
-                    <strong style={{ color: C.green }}>Interview scheduled.</strong>
+                    <strong style={{ color: C.green }}>
+                      Interview scheduled.
+                    </strong>
                     <div>Interview ID: {scheduleResult.interviewId}</div>
-                    {scheduleResult.roundId && <div>Round ID: {scheduleResult.roundId}</div>}
+                    {scheduleResult.roundId && (
+                      <div>Round ID: {scheduleResult.roundId}</div>
+                    )}
                     {scheduleResult.joinUrl && (
                       <a
                         href={scheduleResult.joinUrl}
@@ -986,7 +1492,8 @@ export default function RecruiterRecruitmentDashboardPage() {
             <section style={panelStyle}>
               <p style={sectionTitleStyle}>Interview Results & Pipeline</p>
               <p style={sectionSubStyle}>
-                Results submitted from interview rounds will reflect here and in Recruitment tracking.
+                Results submitted from interview rounds will reflect here and in
+                Recruitment tracking.
               </p>
 
               <div style={{ display: 'grid', gap: 12, marginTop: 18 }}>
@@ -994,9 +1501,20 @@ export default function RecruiterRecruitmentDashboardPage() {
                   applications.map((app) => (
                     <div key={app.id} style={resultRowStyle}>
                       <div>
-                        <strong style={{ color: C.text }}>{getCandidateName(app)}</strong>
-                        <p style={{ margin: '4px 0 0', color: C.faint, fontSize: 12 }}>
-                          {selectedJob?.title ?? app.jobs?.title ?? app.job?.title ?? 'Job'}
+                        <strong style={{ color: C.text }}>
+                          {getCandidateName(app)}
+                        </strong>
+                        <p
+                          style={{
+                            margin: '4px 0 0',
+                            color: C.faint,
+                            fontSize: 12,
+                          }}
+                        >
+                          {selectedJob?.title ??
+                            app.jobs?.title ??
+                            app.job?.title ??
+                            'Job'}
                         </p>
                       </div>
 
@@ -1018,9 +1536,7 @@ export default function RecruiterRecruitmentDashboardPage() {
               </div>
 
               {dashboard && (
-                <pre style={debugStyle}>
-                  {JSON.stringify(dashboard, null, 2)}
-                </pre>
+                <pre style={debugStyle}>{JSON.stringify(dashboard, null, 2)}</pre>
               )}
             </section>
           )}
@@ -1060,7 +1576,8 @@ function JobSummary({ job }: { job: JobRow }) {
       <div>
         <strong style={{ color: C.text }}>{job.title}</strong>
         <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
-          {getCompany(job)} · {job.location ?? 'Location not set'} · {getEmploymentType(job)}
+          {getCompany(job)} · {job.location ?? 'Location not set'} ·{' '}
+          {getEmploymentType(job)}
         </p>
       </div>
 
@@ -1088,11 +1605,21 @@ function ApplicationCard({
           {app.candidate?.email ?? 'No email shown'}
         </p>
         <p style={{ margin: '8px 0 0', color: C.faint, fontSize: 11 }}>
-          Applied: {formatDate(app.applied_at ?? app.appliedAt ?? app.created_at ?? app.createdAt)}
+          Applied:{' '}
+          {formatDate(
+            app.applied_at ?? app.appliedAt ?? app.created_at ?? app.createdAt,
+          )}
         </p>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
         <span
           style={{
             ...statusPillStyle,
@@ -1104,19 +1631,11 @@ function ApplicationCard({
           {normalizeStatus(app.status)}
         </span>
 
-        <button
-          type="button"
-          onClick={onShortlist}
-          style={secondaryButtonStyle}
-        >
+        <button type="button" onClick={onShortlist} style={secondaryButtonStyle}>
           {alreadyShortlisted ? 'Shortlisted' : 'Shortlist'}
         </button>
 
-        <button
-          type="button"
-          onClick={onSchedule}
-          style={primaryButtonStyle}
-        >
+        <button type="button" onClick={onSchedule} style={primaryButtonStyle}>
           Schedule
         </button>
       </div>
@@ -1258,6 +1777,20 @@ const secondaryButtonStyle: CSSProperties = {
   textDecoration: 'none',
 };
 
+const closeButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 18,
+  width: 58,
+  height: 58,
+  flexShrink: 0,
+  color: C.text,
+  fontSize: 24,
+  fontWeight: 900,
+  cursor: 'pointer',
+  background: 'rgba(15,23,42,0.72)',
+  fontFamily: "'Sora', sans-serif",
+};
+
 const inputStyle: CSSProperties = {
   width: '100%',
   border: `1px solid ${C.border}`,
@@ -1287,27 +1820,111 @@ const twoColStyle: CSSProperties = {
   gap: 12,
 };
 
+const selectedSkillsBoxStyle: CSSProperties = {
+  minHeight: 52,
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+  alignItems: 'center',
+  padding: 12,
+  border: `1px solid ${C.border}`,
+  background: 'rgba(15,23,42,0.55)',
+  borderRadius: 14,
+};
+
+const selectedSkillPillStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  border: '1px solid rgba(52,211,153,0.28)',
+  background: 'rgba(52,211,153,0.11)',
+  color: '#6EE7B7',
+  borderRadius: 999,
+  padding: '7px 10px',
+  fontSize: 12,
+  fontWeight: 900,
+  cursor: 'pointer',
+  textTransform: 'capitalize',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const skillGroupsWrapStyle: CSSProperties = {
+  display: 'grid',
+  gap: 12,
+  maxHeight: 360,
+  overflowY: 'auto',
+  padding: 12,
+  border: `1px solid ${C.border}`,
+  background: 'rgba(15,23,42,0.42)',
+  borderRadius: 16,
+};
+
+const skillGroupStyle: CSSProperties = {
+  display: 'grid',
+  gap: 8,
+};
+
+const skillGroupTitleStyle: CSSProperties = {
+  margin: 0,
+  color: C.purple,
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const skillsGridStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+};
+
+const skillCheckboxStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  border: `1px solid ${C.border}`,
+  background: 'rgba(255,255,255,0.035)',
+  color: C.muted,
+  borderRadius: 999,
+  padding: '7px 10px',
+  fontSize: 12,
+  fontWeight: 850,
+  cursor: 'pointer',
+  userSelect: 'none',
+  textTransform: 'capitalize',
+};
+
+const activeSkillCheckboxStyle: CSSProperties = {
+  borderColor: 'rgba(52,211,153,0.35)',
+  background: 'rgba(52,211,153,0.10)',
+  color: '#6EE7B7',
+};
+
 const modalBackdropStyle: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(2,6,23,0.82)',
-  backdropFilter: 'blur(10px)',
+  width: '100vw',
+  height: '100vh',
+  background: 'rgba(2,6,23,0.86)',
+  backdropFilter: 'blur(12px)',
   display: 'flex',
-  alignItems: 'center',
+  alignItems: 'flex-start',
   justifyContent: 'center',
-  padding: 20,
-  zIndex: 60,
+  padding: '28px 18px',
+  zIndex: 9999,
+  overflowY: 'auto',
 };
 
 const modalCardStyle: CSSProperties = {
-  width: 'min(780px, 100%)',
-  maxHeight: '90vh',
+  width: 'min(920px, calc(100vw - 36px))',
+  maxHeight: 'calc(100vh - 56px)',
   overflowY: 'auto',
   border: `1px solid ${C.borderStrong}`,
   background: '#0B1020',
   borderRadius: 24,
   padding: '1.35rem',
-  boxShadow: '0 30px 100px rgba(0,0,0,0.55)',
+  boxShadow: '0 30px 100px rgba(0,0,0,0.65)',
 };
 
 const eyebrowStyle: CSSProperties = {
