@@ -1,26 +1,16 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// frontend/app/(protected)/recruiter/dashboard/page.tsx
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useRouter } from 'next/navigation';
-import toast from 'react-hot-toast';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import api from '@/lib/axios';
 
-type RecruitmentTab =
-  | 'overview'
-  | 'applications'
-  | 'shortlist'
-  | 'schedule'
-  | 'pipeline'
-  | 'results'
-  | 'jobs';
-
-type JobStatus = 'DRAFT' | 'PUBLISHED' | 'PAUSED' | 'CLOSED' | 'ARCHIVED' | string;
+type TabKey = 'overview' | 'jobs' | 'applications' | 'schedule' | 'results';
 
 type JobRow = {
   id: string;
-  title?: string | null;
+  title: string;
   company?: string | null;
   companyName?: string | null;
   company_name?: string | null;
@@ -29,991 +19,318 @@ type JobRow = {
   work_mode?: string | null;
   employmentType?: string | null;
   employment_type?: string | null;
-  applicantCount?: number | null;
-  applicant_count?: number | null;
-  status?: JobStatus | null;
+  requiredSkills?: string[];
+  required_skills?: string[];
+  status?: string | null;
   createdAt?: string | null;
   created_at?: string | null;
-  publishedAt?: string | null;
-  published_at?: string | null;
+  _count?: { applications?: number };
 };
 
 type ApplicationRow = {
   id: string;
-  status?: string | null;
-  applicationStatus?: string | null;
-  appliedAt?: string | null;
-  applied_at?: string | null;
-  createdAt?: string | null;
-  created_at?: string | null;
-  updatedAt?: string | null;
-  updated_at?: string | null;
-  matchScore?: number | null;
-  match_score?: number | null;
-  atsScore?: number | null;
-  ats_score?: number | null;
-
+  job_id?: string;
+  jobId?: string;
+  candidate_user_id?: string;
+  candidateUserId?: string;
+  status: string;
+  applied_at?: string;
+  appliedAt?: string;
+  created_at?: string;
+  createdAt?: string;
   candidate?: {
     id?: string;
-    fullName?: string | null;
-    full_name?: string | null;
-    email?: string | null;
-    avatarUrl?: string | null;
-    avatar_url?: string | null;
-  } | null;
-
-  user?: {
-    id?: string;
-    fullName?: string | null;
-    full_name?: string | null;
-    email?: string | null;
-  } | null;
-
-  resume?: {
-    id?: string;
-    fileName?: string | null;
-    file_name?: string | null;
-    originalFileName?: string | null;
-    original_file_name?: string | null;
-    publicUrl?: string | null;
-    public_url?: string | null;
-    storagePath?: string | null;
-    storage_path?: string | null;
-  } | null;
-
-  resumeAnalysis?: {
-    id?: string;
-    score?: number | null;
-    atsScore?: number | null;
-    ats_score?: number | null;
-    skills?: string[] | null;
-    extractedSkills?: string[] | null;
-    extracted_skills?: string[] | null;
-    missingSkills?: string[] | null;
-    missing_skills?: string[] | null;
-    summary?: string | null;
-  } | null;
-
-  analysis?: any;
-
-  job?: JobRow | null;
-  jobs?: JobRow | null;
-
-  candidateName?: string | null;
-  candidate_name?: string | null;
-  candidateEmail?: string | null;
-  candidate_email?: string | null;
-  jobTitle?: string | null;
-  job_title?: string | null;
-};
-
-type InterviewRow = {
-  id: string;
-  current_stage?: string | null;
-  status_code?: number | null;
-  final_status?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  job_id?: string | null;
-  candidate_id?: string | null;
-  job_title?: string | null;
-  company?: string | null;
-  candidate_name?: string | null;
-  candidate_email?: string | null;
-  rounds?: InterviewRound[];
-};
-
-type InterviewRound = {
-  id: string;
-  round_number?: number | null;
-  roundNumber?: number | null;
-  round_type?: string | null;
-  roundType?: string | null;
-  scheduled_at?: string | null;
-  scheduledAt?: string | null;
-  duration_mins?: number | null;
-  durationMins?: number | null;
-  mode?: string | null;
-  meeting_join_url?: string | null;
-  meetingJoinUrl?: string | null;
-  meeting_room_id?: string | null;
-  meetingRoomId?: string | null;
-  result?: string | null;
-  score?: number | null;
-  feedback?: string | null;
-};
-
-type ScheduleForm = {
-  applicationId: string;
-  candidateName: string;
-  jobTitle: string;
-  roundType: 'hr' | 'technical' | 'managerial' | 'assignment';
-  scheduledAt: string;
-  durationMins: number;
-  mode: 'video' | 'phone' | 'offline';
+    name?: string;
+    fullName?: string;
+    full_name?: string;
+    email?: string;
+  };
+  jobs?: {
+    title?: string;
+    company?: string;
+    company_name?: string;
+  };
+  job?: {
+    title?: string;
+    companyName?: string;
+    company_name?: string;
+  };
 };
 
 type ScheduleResult = {
   interviewId: string;
   roundId?: string | null;
-  roomId?: string | null;
   joinUrl?: string | null;
-  scheduledAt?: string | null;
+};
+
+type PostJobForm = {
+  title: string;
+  companyName: string;
+  location: string;
+  workMode: string;
+  employmentType: string;
+  description: string;
+  requiredSkills: string;
 };
 
 const C = {
-  bg: '#070B14',
-  card: 'rgba(15,23,42,0.78)',
-  card2: 'rgba(2,6,23,0.82)',
+  bg: '#080C14',
+  panel: '#0D1220',
+  panel2: '#101827',
   border: 'rgba(255,255,255,0.08)',
-  borderStrong: 'rgba(167,139,250,0.32)',
+  borderStrong: 'rgba(167,139,250,0.28)',
   text: '#F8FAFC',
   muted: 'rgba(226,232,240,0.68)',
   faint: 'rgba(226,232,240,0.42)',
-  purple: '#A78BFA',
   sky: '#38BDF8',
+  purple: '#A78BFA',
   pink: '#F472B6',
   green: '#34D399',
-  amber: '#FBBF24',
+  yellow: '#FBBF24',
   red: '#F87171',
-  blue: '#60A5FA',
 };
 
-const TABS: Array<{ key: RecruitmentTab; label: string; icon: string }> = [
-  { key: 'overview', label: 'Overview', icon: '📊' },
-  { key: 'applications', label: 'Applications', icon: '📥' },
-  { key: 'shortlist', label: 'Shortlist', icon: '⭐' },
-  { key: 'schedule', label: 'Scheduling', icon: '🗓️' },
-  { key: 'pipeline', label: 'Pipeline', icon: '🧭' },
-  { key: 'results', label: 'Results', icon: '🏁' },
-  { key: 'jobs', label: 'Jobs', icon: '💼' },
-];
+function toArray<T>(raw: unknown, key?: string): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as T[];
 
-const ROUND_TYPES = [
-  { value: 'technical', label: 'Technical Round' },
-  { value: 'hr', label: 'HR Round' },
-  { value: 'managerial', label: 'Managerial Round' },
-  { value: 'assignment', label: 'Assignment Review' },
-] as const;
+  const obj = raw as Record<string, unknown>;
 
-const STATUS_META: Record<
-  string,
-  { label: string; color: string; bg: string; border: string; lane: string }
-> = {
-  applied: {
-    label: 'Applied',
-    color: C.sky,
-    bg: 'rgba(56,189,248,0.08)',
-    border: 'rgba(56,189,248,0.25)',
-    lane: 'New',
-  },
-  reviewed: {
-    label: 'Reviewed',
-    color: C.blue,
-    bg: 'rgba(96,165,250,0.08)',
-    border: 'rgba(96,165,250,0.25)',
-    lane: 'Review',
-  },
-  reviewing: {
-    label: 'Reviewing',
-    color: C.blue,
-    bg: 'rgba(96,165,250,0.08)',
-    border: 'rgba(96,165,250,0.25)',
-    lane: 'Review',
-  },
-  shortlisted: {
-    label: 'Shortlisted',
-    color: C.purple,
-    bg: 'rgba(167,139,250,0.10)',
-    border: 'rgba(167,139,250,0.30)',
-    lane: 'Shortlist',
-  },
-  interview: {
-    label: 'Interview',
-    color: C.amber,
-    bg: 'rgba(251,191,36,0.10)',
-    border: 'rgba(251,191,36,0.30)',
-    lane: 'Interview',
-  },
-  offered: {
-    label: 'Offered',
-    color: C.green,
-    bg: 'rgba(52,211,153,0.10)',
-    border: 'rgba(52,211,153,0.30)',
-    lane: 'Offer',
-  },
-  hired: {
-    label: 'Hired',
-    color: C.green,
-    bg: 'rgba(52,211,153,0.12)',
-    border: 'rgba(52,211,153,0.35)',
-    lane: 'Hired',
-  },
-  rejected: {
-    label: 'Rejected',
-    color: C.red,
-    bg: 'rgba(248,113,113,0.08)',
-    border: 'rgba(248,113,113,0.25)',
-    lane: 'Rejected',
-  },
-};
-
-function normalizeStatus(status?: string | null): string {
-  const value = String(status ?? 'applied').toLowerCase();
-
-  if (value === 'under_review') return 'reviewing';
-  if (value === 'shortlist') return 'shortlisted';
-  if (value === 'shortlisted_for_interview') return 'shortlisted';
-  if (value === 'interview_scheduled') return 'interview';
-  if (value === 'interview_in_progress') return 'interview';
-  if (value === 'interview_passed') return 'offered';
-  if (value === 'selected') return 'hired';
-
-  if (
-    [
-      'applied',
-      'reviewed',
-      'reviewing',
-      'shortlisted',
-      'interview',
-      'offered',
-      'rejected',
-      'hired',
-    ].includes(value)
-  ) {
-    return value;
+  for (const candidate of ['data', 'items', 'results', key].filter(Boolean) as string[]) {
+    if (Array.isArray(obj[candidate])) return obj[candidate] as T[];
   }
 
-  return 'applied';
+  return [];
 }
 
-function backendStatus(status: string): string {
-  switch (status) {
-    case 'reviewing':
-      return 'UNDER_REVIEW';
-    case 'shortlisted':
-      return 'SHORTLISTED';
-    case 'interview':
-      return 'INTERVIEW_SCHEDULED';
-    case 'offered':
-      return 'OFFERED';
-    case 'hired':
-      return 'HIRED';
-    case 'rejected':
-      return 'REJECTED';
-    case 'reviewed':
-      return 'UNDER_REVIEW';
-    case 'applied':
-    default:
-      return 'APPLIED';
-  }
-}
+function getErrorMessage(error: unknown, fallback: string) {
+  const anyError = error as any;
 
-function statusMeta(status?: string | null) {
-  return STATUS_META[normalizeStatus(status)] ?? STATUS_META.applied;
-}
-
-function getJobId(job?: JobRow | null): string {
-  return job?.id ?? '';
-}
-
-function getJobTitle(job?: JobRow | null): string {
-  return job?.title ?? 'Untitled Job';
-}
-
-function getCompany(job?: JobRow | null): string {
-  return job?.companyName ?? job?.company_name ?? job?.company ?? 'Company';
-}
-
-function getApplicantCount(job?: JobRow | null): number {
-  return Number(job?.applicantCount ?? job?.applicant_count ?? 0);
-}
-
-function getCandidateName(app: ApplicationRow): string {
   return (
-    app.candidate?.fullName ||
-    app.candidate?.full_name ||
-    app.user?.fullName ||
-    app.user?.full_name ||
-    app.candidateName ||
-    app.candidate_name ||
+    anyError?.response?.data?.detail ??
+    anyError?.response?.data?.message ??
+    anyError?.response?.data?.error ??
+    anyError?.message ??
+    fallback
+  );
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function getCompany(job?: JobRow | null) {
+  return job?.companyName ?? job?.company_name ?? job?.company ?? 'Your company';
+}
+
+function getWorkMode(job?: JobRow | null) {
+  return job?.workMode ?? job?.work_mode ?? 'onsite';
+}
+
+function getEmploymentType(job?: JobRow | null) {
+  return job?.employmentType ?? job?.employment_type ?? 'full_time';
+}
+
+function getRequiredSkills(job?: JobRow | null) {
+  return job?.requiredSkills ?? job?.required_skills ?? [];
+}
+
+function getCandidateName(app: ApplicationRow) {
+  return (
+    app.candidate?.fullName ??
+    app.candidate?.full_name ??
+    app.candidate?.name ??
+    app.candidate?.email ??
     'Candidate'
   );
 }
 
-function getCandidateEmail(app: ApplicationRow): string {
-  return (
-    app.candidate?.email ||
-    app.user?.email ||
-    app.candidateEmail ||
-    app.candidate_email ||
-    'No email'
-  );
+function normalizeStatus(status?: string | null) {
+  return String(status ?? 'applied')
+    .replaceAll('_', ' ')
+    .toLowerCase();
 }
 
-function getJobFromApp(app: ApplicationRow, fallback?: JobRow | null): JobRow | null {
-  return app.job ?? app.jobs ?? fallback ?? null;
+function statusColor(status?: string | null) {
+  const s = normalizeStatus(status);
+
+  if (s.includes('shortlist')) return C.yellow;
+  if (s.includes('interview')) return C.purple;
+  if (s.includes('offer') || s.includes('hire')) return C.green;
+  if (s.includes('reject') || s.includes('fail')) return C.red;
+
+  return C.sky;
 }
 
-function getJobTitleFromApp(app: ApplicationRow, fallback?: JobRow | null): string {
-  const job = getJobFromApp(app, fallback);
-
-  return app.jobTitle || app.job_title || getJobTitle(job);
-}
-
-function getCompanyFromApp(app: ApplicationRow, fallback?: JobRow | null): string {
-  const job = getJobFromApp(app, fallback);
-
-  return getCompany(job);
-}
-
-function getResumeLabel(app: ApplicationRow): string {
-  return (
-    app.resume?.originalFileName ||
-    app.resume?.original_file_name ||
-    app.resume?.fileName ||
-    app.resume?.file_name ||
-    'Resume attached'
-  );
-}
-
-function getResumeUrl(app: ApplicationRow): string | null {
-  return (
-    app.resume?.publicUrl ||
-    app.resume?.public_url ||
-    app.resume?.storagePath ||
-    app.resume?.storage_path ||
-    null
-  );
-}
-
-function getAtsScore(app: ApplicationRow): number | null {
-  const possible =
-    app.atsScore ??
-    app.ats_score ??
-    app.matchScore ??
-    app.match_score ??
-    app.resumeAnalysis?.atsScore ??
-    app.resumeAnalysis?.ats_score ??
-    app.resumeAnalysis?.score ??
-    app.analysis?.score;
-
-  const parsed = Number(possible);
-
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getSkills(app: ApplicationRow): string[] {
-  const skills =
-    app.resumeAnalysis?.skills ??
-    app.resumeAnalysis?.extractedSkills ??
-    app.resumeAnalysis?.extracted_skills ??
-    app.analysis?.skills ??
-    [];
-
-  return Array.isArray(skills) ? skills.slice(0, 8) : [];
-}
-
-function getMissingSkills(app: ApplicationRow): string[] {
-  const skills =
-    app.resumeAnalysis?.missingSkills ??
-    app.resumeAnalysis?.missing_skills ??
-    app.analysis?.missingSkills ??
-    [];
-
-  return Array.isArray(skills) ? skills.slice(0, 8) : [];
-}
-
-function getAppliedAt(app: ApplicationRow): string {
-  return (
-    app.appliedAt ||
-    app.applied_at ||
-    app.createdAt ||
-    app.created_at ||
-    new Date().toISOString()
-  );
-}
-
-function fmtDate(iso?: string | null) {
-  if (!iso) return 'Not set';
-
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) return 'Not set';
-
-  return date.toLocaleString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function percent(num: number, den: number) {
-  if (!den) return 0;
-  return Math.round((num / den) * 100);
-}
-
-function extractArray<T = any>(payload: any): T[] {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data)) return payload.data;
-  if (Array.isArray(payload?.jobs)) return payload.jobs;
-  if (Array.isArray(payload?.applications)) return payload.applications;
-  if (Array.isArray(payload?.items)) return payload.items;
-  return [];
-}
-
-function extractInterviewId(payload: any): string | null {
-  return (
-    payload?.id ||
-    payload?.interview?.id ||
-    payload?.data?.id ||
-    payload?.data?.interview?.id ||
-    payload?.interviewId ||
-    payload?.data?.interviewId ||
-    null
-  );
-}
-
-function extractScheduleResult(interviewId: string, payload: any): ScheduleResult {
-  const round = payload?.data ?? payload;
-
-  return {
-    interviewId,
-    roundId: round?.id ?? round?.roundId ?? null,
-    roomId: round?.meetingRoomId ?? round?.meeting_room_id ?? round?.roomId ?? null,
-    joinUrl: round?.meetingJoinUrl ?? round?.meeting_join_url ?? round?.joinUrl ?? null,
-    scheduledAt: round?.scheduledAt ?? round?.scheduled_at ?? null,
-  };
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof (error as any).response === 'object' &&
-    (error as any).response !== null
-  ) {
-    const data = (error as any).response.data;
-    if (typeof data?.message === 'string') return data.message;
-    if (Array.isArray(data?.message)) return data.message.join(', ');
-  }
-
-  if (error instanceof Error && error.message) return error.message;
-
-  return fallback;
-}
-
-function StatCard({
-  label,
-  value,
-  helper,
-  accent = C.sky,
-}: {
-  label: string;
-  value: number | string;
-  helper?: string;
-  accent?: string;
-}) {
-  return (
-    <div style={statCardStyle}>
-      <div style={{ color: C.faint, fontSize: 11, fontWeight: 800 }}>
-        {label}
-      </div>
-      <div
-        style={{
-          color: accent,
-          fontSize: 30,
-          fontWeight: 900,
-          lineHeight: 1,
-          marginTop: 10,
-          letterSpacing: '-0.05em',
-        }}
-      >
-        {value}
-      </div>
-      {helper ? (
-        <div style={{ color: C.faint, fontSize: 11, marginTop: 8 }}>
-          {helper}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function StatusPill({ status }: { status?: string | null }) {
-  const meta = statusMeta(status);
-
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '5px 9px',
-        borderRadius: 999,
-        background: meta.bg,
-        border: `1px solid ${meta.border}`,
-        color: meta.color,
-        fontSize: 11,
-        fontWeight: 800,
-        textTransform: 'capitalize',
-      }}
-    >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 999,
-          background: meta.color,
-          boxShadow: `0 0 12px ${meta.color}`,
-        }}
-      />
-      {meta.label}
-    </span>
-  );
-}
-
-function EmptyState({
-  title,
-  message,
-}: {
-  title: string;
-  message: string;
-}) {
-  return (
-    <div
-      style={{
-        border: `1px dashed ${C.borderStrong}`,
-        borderRadius: 18,
-        padding: '2rem',
-        textAlign: 'center',
-        background: 'rgba(15,23,42,0.44)',
-      }}
-    >
-      <div style={{ fontSize: 34, marginBottom: 10 }}>🧩</div>
-      <h3 style={{ margin: 0, color: C.text, fontSize: 18 }}>{title}</h3>
-      <p style={{ margin: '0.6rem auto 0', color: C.muted, maxWidth: 520 }}>
-        {message}
-      </p>
-    </div>
-  );
-}
-
-function ApplicantCard({
-  app,
-  selectedJob,
-  onMove,
-  onSchedule,
-  moving,
-}: {
-  app: ApplicationRow;
-  selectedJob?: JobRow | null;
-  onMove: (app: ApplicationRow, status: string) => void;
-  onSchedule: (app: ApplicationRow) => void;
-  moving: boolean;
-}) {
-  const candidateName = getCandidateName(app);
-  const candidateEmail = getCandidateEmail(app);
-  const status = normalizeStatus(app.status ?? app.applicationStatus);
-  const atsScore = getAtsScore(app);
-  const resumeLabel = getResumeLabel(app);
-  const resumeUrl = getResumeUrl(app);
-  const skills = getSkills(app);
-  const missingSkills = getMissingSkills(app);
-
-  return (
-    <div style={applicantCardStyle}>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 0.8fr) auto',
-          gap: 16,
-          alignItems: 'start',
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 14,
-                background:
-                  'linear-gradient(135deg, rgba(56,189,248,0.25), rgba(167,139,250,0.22))',
-                border: `1px solid ${C.borderStrong}`,
-                display: 'grid',
-                placeItems: 'center',
-                fontWeight: 900,
-                color: C.text,
-              }}
-            >
-              {candidateName.charAt(0).toUpperCase()}
-            </div>
-
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  color: C.text,
-                  fontSize: 15,
-                  fontWeight: 900,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {candidateName}
-              </div>
-              <div
-                style={{
-                  color: C.faint,
-                  fontSize: 12,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {candidateEmail}
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              marginTop: 14,
-            }}
-          >
-            <StatusPill status={status} />
-
-            <span style={tinyBadgeStyle}>
-              {getJobTitleFromApp(app, selectedJob)}
-            </span>
-
-            <span style={tinyBadgeStyle}>
-              Applied {fmtDate(getAppliedAt(app))}
-            </span>
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <div style={{ color: C.faint, fontSize: 11, marginBottom: 6 }}>
-              Resume / ATS intelligence
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                flexWrap: 'wrap',
-              }}
-            >
-              {resumeUrl ? (
-                <a href={resumeUrl} target="_blank" rel="noreferrer" style={resumeLinkStyle}>
-                  📄 {resumeLabel}
-                </a>
-              ) : (
-                <span style={resumeLinkStyle}>📄 {resumeLabel}</span>
-              )}
-
-              {atsScore !== null ? (
-                <span
-                  style={{
-                    ...resumeLinkStyle,
-                    color:
-                      atsScore >= 75
-                        ? C.green
-                        : atsScore >= 55
-                          ? C.amber
-                          : C.red,
-                  }}
-                >
-                  ATS {atsScore}%
-                </span>
-              ) : (
-                <span style={resumeLinkStyle}>ATS pending</span>
-              )}
-            </div>
-          </div>
-
-          {skills.length > 0 || missingSkills.length > 0 ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 12,
-                marginTop: 12,
-              }}
-            >
-              <TagBlock
-                label="Matched skills"
-                items={skills}
-                color={C.green}
-                empty="No extracted skills"
-              />
-              <TagBlock
-                label="Missing / gap skills"
-                items={missingSkills}
-                color={C.amber}
-                empty="No gap analysis"
-              />
-            </div>
-          ) : null}
-        </div>
-
-        <div>
-          <div style={{ color: C.faint, fontSize: 11, marginBottom: 8 }}>
-            Candidate fit
-          </div>
-
-          <div
-            style={{
-              height: 10,
-              borderRadius: 999,
-              background: 'rgba(255,255,255,0.06)',
-              overflow: 'hidden',
-              marginBottom: 8,
-            }}
-          >
-            <div
-              style={{
-                height: '100%',
-                width: `${Math.max(0, Math.min(100, atsScore ?? 0))}%`,
-                background:
-                  atsScore === null
-                    ? C.faint
-                    : atsScore >= 75
-                      ? `linear-gradient(90deg, ${C.green}, ${C.sky})`
-                      : atsScore >= 55
-                        ? `linear-gradient(90deg, ${C.amber}, ${C.sky})`
-                        : `linear-gradient(90deg, ${C.red}, ${C.pink})`,
-              }}
-            />
-          </div>
-
-          <p style={{ margin: 0, color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
-            {app.resumeAnalysis?.summary ||
-              app.analysis?.summary ||
-              'Resume analysis summary will appear here once ATS intelligence is available.'}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {status !== 'shortlisted' ? (
-            <button
-              type="button"
-              disabled={moving}
-              onClick={() => onMove(app, 'shortlisted')}
-              style={primaryButtonStyle}
-            >
-              ⭐ Shortlist
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={moving}
-              onClick={() => onSchedule(app)}
-              style={primaryButtonStyle}
-            >
-              🗓️ Schedule
-            </button>
-          )}
-
-          <button
-            type="button"
-            disabled={moving}
-            onClick={() => onMove(app, 'reviewing')}
-            style={secondaryButtonStyle}
-          >
-            Review
-          </button>
-
-          <button
-            type="button"
-            disabled={moving}
-            onClick={() => onMove(app, 'rejected')}
-            style={dangerButtonStyle}
-          >
-            Reject
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TagBlock({
-  label,
-  items,
-  color,
-  empty,
-}: {
-  label: string;
-  items: string[];
-  color: string;
-  empty: string;
-}) {
-  return (
-    <div>
-      <div style={{ color: C.faint, fontSize: 11, marginBottom: 6 }}>{label}</div>
-
-      {items.length ? (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {items.map((item) => (
-            <span
-              key={item}
-              style={{
-                border: `1px solid ${color}33`,
-                background: `${color}12`,
-                color,
-                borderRadius: 999,
-                padding: '4px 8px',
-                fontSize: 10,
-                fontWeight: 800,
-              }}
-            >
-              {item}
-            </span>
-          ))}
-        </div>
-      ) : (
-        <span style={{ color: C.faint, fontSize: 11 }}>{empty}</span>
-      )}
-    </div>
-  );
-}
-
-function ScheduleModal({
-  form,
-  setForm,
+function PostJobModal({
+  open,
+  loading,
   onClose,
   onSubmit,
-  loading,
 }: {
-  form: ScheduleForm;
-  setForm: (form: ScheduleForm) => void;
-  onClose: () => void;
-  onSubmit: () => void;
+  open: boolean;
   loading: boolean;
+  onClose: () => void;
+  onSubmit: (payload: PostJobForm) => void;
 }) {
+  const [form, setForm] = useState<PostJobForm>({
+    title: '',
+    companyName: '',
+    location: '',
+    workMode: 'onsite',
+    employmentType: 'full_time',
+    description: '',
+    requiredSkills: '',
+  });
+
+  useEffect(() => {
+    if (!open) return;
+
+    setForm({
+      title: '',
+      companyName: '',
+      location: '',
+      workMode: 'onsite',
+      employmentType: 'full_time',
+      description: '',
+      requiredSkills: '',
+    });
+  }, [open]);
+
+  if (!open) return null;
+
+  const update = (key: keyof PostJobForm, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
   return (
-    <div style={modalOverlayStyle}>
-      <div style={modalStyle}>
+    <div style={modalBackdropStyle}>
+      <div style={modalCardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
           <div>
-            <h2 style={{ margin: 0, color: C.text, fontSize: 22 }}>
-              Schedule Interview
+            <p style={eyebrowStyle}>Post Job Portal</p>
+            <h2 style={{ margin: 0, color: C.text, fontSize: 24 }}>
+              Create a new job posting
             </h2>
-            <p style={{ margin: '6px 0 0', color: C.muted, fontSize: 13 }}>
-              {form.candidateName} · {form.jobTitle}
+            <p style={{ margin: '6px 0 0', color: C.faint, fontSize: 13 }}>
+              This job will be tracked by jobId, applications, shortlist,
+              interviews, and final result.
             </p>
           </div>
 
-          <button type="button" onClick={onClose} style={iconButtonStyle}>
-            ×
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            ✕
           </button>
         </div>
 
         <div style={{ display: 'grid', gap: 14, marginTop: 20 }}>
           <label style={fieldWrapStyle}>
-            <span style={labelStyle}>Round type</span>
-            <select
-              value={form.roundType}
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  roundType: event.target.value as ScheduleForm['roundType'],
-                })
-              }
-              style={inputStyle}
-            >
-              {ROUND_TYPES.map((round) => (
-                <option key={round.value} value={round.value}>
-                  {round.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={fieldWrapStyle}>
-            <span style={labelStyle}>Scheduled date & time</span>
+            <span style={labelStyle}>Job Title *</span>
             <input
-              type="datetime-local"
-              value={form.scheduledAt}
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  scheduledAt: event.target.value,
-                })
-              }
+              value={form.title}
+              onChange={(e) => update('title', e.target.value)}
+              placeholder="Frontend Developer"
               style={inputStyle}
             />
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={twoColStyle}>
             <label style={fieldWrapStyle}>
-              <span style={labelStyle}>Duration</span>
+              <span style={labelStyle}>Company</span>
               <input
-                type="number"
-                min={15}
-                max={180}
-                value={form.durationMins}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    durationMins: Number(event.target.value),
-                  })
-                }
+                value={form.companyName}
+                onChange={(e) => update('companyName', e.target.value)}
+                placeholder="Aryvion Technologies"
                 style={inputStyle}
               />
             </label>
 
             <label style={fieldWrapStyle}>
-              <span style={labelStyle}>Mode</span>
+              <span style={labelStyle}>Location</span>
+              <input
+                value={form.location}
+                onChange={(e) => update('location', e.target.value)}
+                placeholder="Pune, India"
+                style={inputStyle}
+              />
+            </label>
+          </div>
+
+          <div style={twoColStyle}>
+            <label style={fieldWrapStyle}>
+              <span style={labelStyle}>Work Mode</span>
               <select
-                value={form.mode}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    mode: event.target.value as ScheduleForm['mode'],
-                  })
-                }
+                value={form.workMode}
+                onChange={(e) => update('workMode', e.target.value)}
                 style={inputStyle}
               >
-                <option value="video">Video</option>
-                <option value="phone">Phone</option>
-                <option value="offline">Offline</option>
+                <option value="onsite">On-site</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="remote">Remote</option>
+              </select>
+            </label>
+
+            <label style={fieldWrapStyle}>
+              <span style={labelStyle}>Employment Type</span>
+              <select
+                value={form.employmentType}
+                onChange={(e) => update('employmentType', e.target.value)}
+                style={inputStyle}
+              >
+                <option value="full_time">Full-time</option>
+                <option value="part_time">Part-time</option>
+                <option value="internship">Internship</option>
+                <option value="contract">Contract</option>
               </select>
             </label>
           </div>
 
-          <div
-            style={{
-              border: `1px solid ${C.borderStrong}`,
-              borderRadius: 14,
-              padding: 12,
-              background: 'rgba(56,189,248,0.06)',
-              color: C.muted,
-              fontSize: 12,
-              lineHeight: 1.6,
-            }}
-          >
-            On schedule, backend will initialize recruiter interview, create a round,
-            create a secure room, and return join URL/room ID when available.
-          </div>
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Required Skills *</span>
+            <input
+              value={form.requiredSkills}
+              onChange={(e) => update('requiredSkills', e.target.value)}
+              placeholder="react, next.js, typescript, node.js"
+              style={inputStyle}
+            />
+          </label>
+
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Description *</span>
+            <textarea
+              value={form.description}
+              onChange={(e) => update('description', e.target.value)}
+              placeholder="Write responsibilities, requirements, interview expectations..."
+              rows={7}
+              style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.65 }}
+            />
+          </label>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
           <button type="button" onClick={onClose} disabled={loading} style={secondaryButtonStyle}>
             Cancel
           </button>
-          <button type="button" onClick={onSubmit} disabled={loading} style={primaryButtonStyle}>
-            {loading ? 'Scheduling...' : 'Confirm Schedule'}
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onSubmit(form)}
+            style={{
+              ...primaryButtonStyle,
+              opacity: loading ? 0.65 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? 'Posting...' : 'Post Job'}
           </button>
         </div>
       </div>
@@ -1022,1068 +339,1093 @@ function ScheduleModal({
 }
 
 export default function RecruiterRecruitmentDashboardPage() {
-  const router = useRouter();
+  const [tab, setTab] = useState<TabKey>('overview');
 
-  const [tab, setTab] = useState<RecruitmentTab>('overview');
   const [jobs, setJobs] = useState<JobRow[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
-  const [interviews, setInterviews] = useState<InterviewRow[]>([]);
-  const [selectedJobId, setSelectedJobId] = useState<string>('all');
+  const [dashboard, setDashboard] = useState<any>(null);
+
   const [loading, setLoading] = useState(true);
-  const [movingId, setMovingId] = useState<string | null>(null);
-  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const [postJobOpen, setPostJobOpen] = useState(false);
+  const [postJobLoading, setPostJobLoading] = useState(false);
+
+  const [scheduleApplicationId, setScheduleApplicationId] = useState<string>('');
+  const [scheduleAt, setScheduleAt] = useState<string>('');
+  const [roundType, setRoundType] = useState<string>('technical');
+  const [durationMins, setDurationMins] = useState<number>(45);
+  const [scheduling, setScheduling] = useState(false);
   const [scheduleResult, setScheduleResult] = useState<ScheduleResult | null>(null);
-  const [scheduleForm, setScheduleForm] = useState<ScheduleForm | null>(null);
 
-  const selectedJob = useMemo(() => {
-    if (selectedJobId === 'all') return null;
-    return jobs.find((job) => getJobId(job) === selectedJobId) ?? null;
-  }, [jobs, selectedJobId]);
+  const selectedJob = useMemo(
+    () => jobs.find((job) => job.id === selectedJobId) ?? null,
+    [jobs, selectedJobId],
+  );
 
-  const filteredApplications = useMemo(() => {
-    if (selectedJobId === 'all') return applications;
-
-    return applications.filter((app) => {
-      const job = getJobFromApp(app);
-      return getJobId(job) === selectedJobId || (app as any).jobId === selectedJobId || (app as any).job_id === selectedJobId;
-    });
-  }, [applications, selectedJobId]);
+  const selectedApplication = useMemo(
+    () => applications.find((app) => app.id === scheduleApplicationId) ?? null,
+    [applications, scheduleApplicationId],
+  );
 
   const stats = useMemo(() => {
-    const total = filteredApplications.length;
-    const shortlisted = filteredApplications.filter(
-      (app) => normalizeStatus(app.status ?? app.applicationStatus) === 'shortlisted',
+    const totalApplications = applications.length;
+    const shortlisted = applications.filter((app) =>
+      normalizeStatus(app.status).includes('shortlist'),
     ).length;
-    const interviewing = filteredApplications.filter(
-      (app) => normalizeStatus(app.status ?? app.applicationStatus) === 'interview',
+    const interviews = applications.filter((app) =>
+      normalizeStatus(app.status).includes('interview'),
     ).length;
-    const offered = filteredApplications.filter(
-      (app) => normalizeStatus(app.status ?? app.applicationStatus) === 'offered',
+    const rejected = applications.filter((app) =>
+      normalizeStatus(app.status).includes('reject'),
     ).length;
-    const hired = filteredApplications.filter(
-      (app) => normalizeStatus(app.status ?? app.applicationStatus) === 'hired',
-    ).length;
-    const rejected = filteredApplications.filter(
-      (app) => normalizeStatus(app.status ?? app.applicationStatus) === 'rejected',
-    ).length;
-
-    const publishedJobs = jobs.filter((job) => String(job.status ?? '').toUpperCase() === 'PUBLISHED').length;
-    const totalApplicants = applications.length;
 
     return {
-      total,
+      totalJobs: jobs.length,
+      activeJobs: jobs.filter((job) =>
+        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(String(job.status)),
+      ).length,
+      totalApplications,
       shortlisted,
-      interviewing,
-      offered,
-      hired,
+      interviews,
       rejected,
-      publishedJobs,
-      totalApplicants,
-      shortlistRate: percent(shortlisted, total),
-      hireRate: percent(hired, total),
-      scheduledInterviews: interviews.filter((interview) =>
-        ['INTERVIEW_SCHEDULED', 'INTERVIEW_IN_PROGRESS'].includes(
-          String(interview.current_stage ?? ''),
-        ),
-      ).length,
-      completedInterviews: interviews.filter((interview) =>
-        ['INTERVIEW_PASSED', 'INTERVIEW_FAILED', 'HIRED', 'REJECTED'].includes(
-          String(interview.current_stage ?? ''),
-        ),
-      ).length,
     };
-  }, [applications, filteredApplications, interviews, jobs]);
+  }, [applications, jobs]);
 
-  const shortlistedApps = useMemo(
-    () =>
-      filteredApplications.filter(
-        (app) => normalizeStatus(app.status ?? app.applicationStatus) === 'shortlisted',
-      ),
-    [filteredApplications],
-  );
+  const loadJobs = useCallback(async () => {
+    const { data } = await api.get('/jobs/mine');
+    const rows = toArray<JobRow>(data, 'jobs');
 
-  const resultApps = useMemo(
-    () =>
-      filteredApplications.filter((app) =>
-        ['offered', 'hired', 'rejected'].includes(
-          normalizeStatus(app.status ?? app.applicationStatus),
-        ),
-      ),
-    [filteredApplications],
-  );
+    setJobs(rows);
 
-  const pipelineGroups = useMemo(() => {
-    const groups: Record<string, ApplicationRow[]> = {
-      applied: [],
-      reviewing: [],
-      shortlisted: [],
-      interview: [],
-      offered: [],
-      hired: [],
-      rejected: [],
-    };
-
-    for (const app of filteredApplications) {
-      const status = normalizeStatus(app.status ?? app.applicationStatus);
-      if (!groups[status]) groups[status] = [];
-      groups[status].push(app);
-    }
-
-    return groups;
-  }, [filteredApplications]);
-
-  async function loadData() {
-    setLoading(true);
+    const activeJobs = rows.filter((job) =>
+      ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(String(job.status)),
+    ).length;
 
     try {
-      const jobsResponse = await api.get('/jobs/mine');
-      const loadedJobs = extractArray<JobRow>(jobsResponse.data);
-      setJobs(loadedJobs);
-
-      const applicantResults = await Promise.allSettled(
-        loadedJobs.map(async (job) => {
-          const jobId = getJobId(job);
-          if (!jobId) return [];
-
-          const res = await api.get(`/jobs/${encodeURIComponent(jobId)}/applicants`);
-          const rows = extractArray<ApplicationRow>(res.data);
-
-          return rows.map((row) => ({
-            ...row,
-            job: row.job ?? row.jobs ?? job,
-          }));
+      localStorage.setItem(
+        'jc_recruiter_stats',
+        JSON.stringify({
+          activeJobs,
+          newApplicants: rows.reduce(
+            (sum, job) => sum + Number(job._count?.applications ?? 0),
+            0,
+          ),
         }),
       );
-
-      const allApps = applicantResults.flatMap((result) =>
-        result.status === 'fulfilled' ? result.value : [],
-      );
-
-      setApplications(allApps);
-
-      try {
-        const interviewsResponse = await api.get('/recruiter/interviews', {
-          params: {
-            limit: 100,
-          },
-        });
-        setInterviews(extractArray<InterviewRow>(interviewsResponse.data));
-      } catch {
-        setInterviews([]);
-      }
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to load recruitment data'));
-    } finally {
-      setLoading(false);
+    } catch {
+      // ignore localStorage issues
     }
-  }
 
-  useEffect(() => {
-    void loadData();
+    setSelectedJobId((current) => {
+      if (current && rows.some((job) => job.id === current)) return current;
+      return rows[0]?.id ?? null;
+    });
   }, []);
 
-  async function moveApplication(app: ApplicationRow, status: string) {
-    setMovingId(app.id);
-
-    try {
-      await api.patch(`/jobs/applications/${encodeURIComponent(app.id)}/status`, {
-        status: backendStatus(status),
-      });
-
-      setApplications((current) =>
-        current.map((item) =>
-          item.id === app.id
-            ? {
-                ...item,
-                status,
-                applicationStatus: status,
-                updatedAt: new Date().toISOString(),
-              }
-            : item,
-        ),
-      );
-
-      toast.success(`Candidate moved to ${statusMeta(status).label}`);
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to update application status'));
-    } finally {
-      setMovingId(null);
-    }
-  }
-
-  function openSchedule(app: ApplicationRow) {
-    const candidateName = getCandidateName(app);
-    const jobTitle = getJobTitleFromApp(app, selectedJob);
-
-    const defaultDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    defaultDate.setMinutes(0, 0, 0);
-
-    setScheduleResult(null);
-    setScheduleForm({
-      applicationId: app.id,
-      candidateName,
-      jobTitle,
-      roundType: 'technical',
-      scheduledAt: defaultDate.toISOString().slice(0, 16),
-      durationMins: 45,
-      mode: 'video',
-    });
-  }
-
-  async function scheduleInterview() {
-    if (!scheduleForm) return;
-
-    if (!scheduleForm.scheduledAt) {
-      toast.error('Select interview date and time');
+  const loadApplicants = useCallback(async (jobId: string | null) => {
+    if (!jobId) {
+      setApplications([]);
       return;
     }
 
-    setScheduleLoading(true);
+    setAppsLoading(true);
+
+    try {
+      const { data } = await api.get(`/jobs/${jobId}/applicants`);
+      const rows = toArray<ApplicationRow>(data, 'applicants');
+
+      setApplications(rows);
+
+      setScheduleApplicationId((current) => {
+        if (current && rows.some((app) => app.id === current)) return current;
+        return rows.find((app) => normalizeStatus(app.status).includes('shortlist'))?.id
+          ?? rows[0]?.id
+          ?? '';
+      });
+    } finally {
+      setAppsLoading(false);
+    }
+  }, []);
+
+  const loadDashboard = useCallback(async (jobId: string | null) => {
+    try {
+      const { data } = await api.get('/recruiter/interviews/dashboard', {
+        params: jobId ? { jobId } : undefined,
+      });
+      setDashboard(data);
+    } catch {
+      setDashboard(null);
+    }
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      await loadJobs();
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Unable to load recruitment data.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [loadJobs]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    void loadApplicants(selectedJobId);
+    void loadDashboard(selectedJobId);
+  }, [loadApplicants, loadDashboard, selectedJobId]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    const postParam = params.get('post');
+
+    if (
+      tabParam === 'overview' ||
+      tabParam === 'jobs' ||
+      tabParam === 'applications' ||
+      tabParam === 'schedule' ||
+      tabParam === 'results'
+    ) {
+      setTab(tabParam);
+    }
+
+    if (postParam === '1' || postParam === 'true') {
+      setTab('jobs');
+      setPostJobOpen(true);
+    }
+  }, []);
+
+  async function createRecruiterJob(form: PostJobForm) {
+    setMessage(null);
+
+    if (!form.title.trim()) {
+      setMessage('Job title is required.');
+      return;
+    }
+
+    if (!form.description.trim()) {
+      setMessage('Job description is required.');
+      return;
+    }
+
+    const skills = form.requiredSkills
+      .split(',')
+      .map((skill) => skill.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (!skills.length) {
+      setMessage('Add at least one required skill.');
+      return;
+    }
+
+    setPostJobLoading(true);
+
+    try {
+      const payload = {
+        title: form.title.trim(),
+        companyName: form.companyName.trim(),
+        company_name: form.companyName.trim(),
+        location: form.location.trim(),
+        workMode: form.workMode,
+        work_mode: form.workMode,
+        employmentType: form.employmentType,
+        employment_type: form.employmentType,
+        description: form.description.trim(),
+        requiredSkills: skills,
+        required_skills: skills,
+        status: 'active',
+        source: 'internal',
+      };
+
+      await api.post('/jobs', payload);
+
+      setMessage('Job posted successfully. Applications will now be tracked under this job.');
+      setPostJobOpen(false);
+      setTab('jobs');
+
+      await loadData();
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Failed to post job.'));
+    } finally {
+      setPostJobLoading(false);
+    }
+  }
+
+  async function shortlistApplication(app: ApplicationRow) {
+    setMessage(null);
+
+    try {
+      await api.patch(`/jobs/applications/${app.id}/status`, {
+        status: 'shortlisted',
+      });
+
+      setMessage(`${getCandidateName(app)} shortlisted for interview workflow.`);
+
+      await Promise.all([
+        loadApplicants(selectedJobId),
+        loadDashboard(selectedJobId),
+      ]);
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'Failed to shortlist candidate.'));
+    }
+  }
+
+  async function scheduleInterview() {
+    setMessage(null);
+    setScheduleResult(null);
+
+    if (!selectedApplication) {
+      setMessage('Select an application first.');
+      return;
+    }
+
+    if (!scheduleAt) {
+      setMessage('Select interview date and time.');
+      return;
+    }
+
+    setScheduling(true);
 
     try {
       const initResponse = await api.post(
-        `/recruiter/interviews/${encodeURIComponent(scheduleForm.applicationId)}/init`,
+        `/recruiter/interviews/${selectedApplication.id}/init`,
       );
 
-      const interviewId = extractInterviewId(initResponse.data);
+      const interviewId =
+        initResponse.data?.id ??
+        initResponse.data?.interviewId ??
+        initResponse.data?.interview?.id;
 
       if (!interviewId) {
-        throw new Error('Interview initialization did not return interview id');
+        throw new Error('Interview was created but interviewId was not returned.');
       }
 
+      const scheduledAtIso = new Date(scheduleAt).toISOString();
+
       const roundResponse = await api.post(
-        `/recruiter/interviews/${encodeURIComponent(interviewId)}/rounds`,
+        `/recruiter/interviews/${interviewId}/rounds`,
         {
-          roundType: scheduleForm.roundType,
-          scheduledAt: new Date(scheduleForm.scheduledAt).toISOString(),
-          durationMins: scheduleForm.durationMins,
-          mode: scheduleForm.mode,
+          roundType,
+          scheduledAt: scheduledAtIso,
+          durationMins,
+          mode: 'video',
         },
       );
 
-      const result = extractScheduleResult(interviewId, roundResponse.data);
+      const round = roundResponse.data;
+
+      const result: ScheduleResult = {
+        interviewId,
+        roundId: round?.id ?? round?.roundId ?? null,
+        joinUrl:
+          round?.meetingJoinUrl ??
+          round?.meeting_join_url ??
+          round?.joinUrl ??
+          null,
+      };
+
       setScheduleResult(result);
-
-      await moveApplication(
-        applications.find((app) => app.id === scheduleForm.applicationId) ?? {
-          id: scheduleForm.applicationId,
-        },
-        'interview',
+      setMessage(
+        'Interview scheduled. Candidate will see this in Alerts and Interviews section.',
       );
 
-      toast.success('Interview scheduled successfully');
-      void loadData();
+      await Promise.all([
+        loadApplicants(selectedJobId),
+        loadDashboard(selectedJobId),
+      ]);
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to schedule interview'));
+      setMessage(getErrorMessage(error, 'Failed to schedule interview.'));
     } finally {
-      setScheduleLoading(false);
+      setScheduling(false);
     }
   }
 
   return (
     <div style={pageStyle}>
-      <style>
-        {`
-          @keyframes rcPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
-          @keyframes rcFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        `}
-      </style>
-
-      <header style={heroStyle}>
+      <header style={headerStyle}>
         <div>
-          <p style={eyebrowStyle}>Recruitment Command Center</p>
-          <h1 style={heroTitleStyle}>
-            Track resumes, shortlist candidates, schedule interviews, and close hiring.
-          </h1>
-          <p style={heroTextStyle}>
-            This section owns the full recruitment workflow. The main overview page can stay high-level; this page tracks every candidate movement from application to result.
+          <h1 style={titleStyle}>Recruitment Center</h1>
+          <p style={subtitleStyle}>
+            Track every job, application, shortlist, interview schedule and result.
           </p>
         </div>
 
-        <div style={heroRightStyle}>
-          <div style={{ color: C.faint, fontSize: 12, fontWeight: 800 }}>
-            Selected job
-          </div>
-          <select
-            value={selectedJobId}
-            onChange={(event) => setSelectedJobId(event.target.value)}
-            style={selectStyle}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => void loadData()}
+            style={secondaryButtonStyle}
           >
-            <option value="all">All jobs</option>
-            {jobs.map((job) => (
-              <option key={getJobId(job)} value={getJobId(job)}>
-                {getJobTitle(job)}
-              </option>
-            ))}
-          </select>
-
-          <button type="button" onClick={() => void loadData()} style={secondaryButtonStyle}>
             Refresh
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTab('jobs');
+              setPostJobOpen(true);
+            }}
+            style={primaryButtonStyle}
+          >
+            + Post Job
           </button>
         </div>
       </header>
 
-      <section style={statsGridStyle}>
-        <StatCard
-          label="Applications"
-          value={stats.total}
-          helper={`${stats.totalApplicants} all jobs`}
-          accent={C.sky}
-        />
-        <StatCard
-          label="Shortlisted"
-          value={stats.shortlisted}
-          helper={`${stats.shortlistRate}% shortlist rate`}
-          accent={C.purple}
-        />
-        <StatCard
-          label="Interviews"
-          value={stats.interviewing + stats.scheduledInterviews}
-          helper={`${stats.completedInterviews} completed`}
-          accent={C.amber}
-        />
-        <StatCard
-          label="Hired"
-          value={stats.hired}
-          helper={`${stats.hireRate}% hire rate`}
-          accent={C.green}
-        />
-      </section>
+      {message && (
+        <div
+          style={{
+            ...messageStyle,
+            borderColor: message.toLowerCase().includes('failed') ||
+              message.toLowerCase().includes('unable')
+              ? 'rgba(248,113,113,0.28)'
+              : 'rgba(52,211,153,0.28)',
+            background: message.toLowerCase().includes('failed') ||
+              message.toLowerCase().includes('unable')
+              ? 'rgba(248,113,113,0.07)'
+              : 'rgba(52,211,153,0.07)',
+            color: message.toLowerCase().includes('failed') ||
+              message.toLowerCase().includes('unable')
+              ? '#FCA5A5'
+              : '#86EFAC',
+          }}
+        >
+          {message}
+        </div>
+      )}
 
-      <nav style={tabsStyle}>
-        {TABS.map((item) => {
-          const active = tab === item.key;
+      <section style={tabBarStyle}>
+        {[
+          ['overview', 'Overview'],
+          ['jobs', 'Jobs'],
+          ['applications', 'Applications'],
+          ['schedule', 'Schedule Interview'],
+          ['results', 'Results'],
+        ].map(([key, label]) => {
+          const active = tab === key;
 
           return (
             <button
-              key={item.key}
+              key={key}
               type="button"
-              onClick={() => setTab(item.key)}
+              onClick={() => setTab(key as TabKey)}
               style={{
                 ...tabButtonStyle,
-                borderColor: active ? C.borderStrong : C.border,
-                background: active
-                  ? 'linear-gradient(135deg, rgba(56,189,248,0.12), rgba(167,139,250,0.12))'
-                  : 'rgba(15,23,42,0.50)',
-                color: active ? C.text : C.muted,
+                ...(active ? activeTabButtonStyle : {}),
               }}
             >
-              <span>{item.icon}</span>
-              {item.label}
+              {label}
             </button>
           );
         })}
-      </nav>
+      </section>
 
       {loading ? (
-        <div style={loadingGridStyle}>
-          {[1, 2, 3].map((item) => (
-            <div key={item} style={loadingCardStyle} />
-          ))}
-        </div>
+        <div style={panelStyle}>Loading recruitment center...</div>
       ) : (
-        <>
+        <main style={{ display: 'grid', gap: 18 }}>
           {tab === 'overview' && (
-            <section style={sectionGridStyle}>
-              <div style={cardStyle}>
-                <SectionTitle
-                  title="Recruitment Funnel"
-                  subtitle="Live funnel from applications to hire."
-                />
+            <>
+              <section style={gridStyle}>
+                <StatCard label="Total Jobs" value={stats.totalJobs} color={C.purple} />
+                <StatCard label="Active Jobs" value={stats.activeJobs} color={C.green} />
+                <StatCard label="Applications" value={stats.totalApplications} color={C.sky} />
+                <StatCard label="Shortlisted" value={stats.shortlisted} color={C.yellow} />
+                <StatCard label="In Interview" value={stats.interviews} color={C.purple} />
+                <StatCard label="Rejected" value={stats.rejected} color={C.red} />
+              </section>
 
-                <FunnelRow label="Applications" value={stats.total} total={stats.total} color={C.sky} />
-                <FunnelRow label="Shortlisted" value={stats.shortlisted} total={stats.total} color={C.purple} />
-                <FunnelRow label="Interview" value={stats.interviewing} total={stats.total} color={C.amber} />
-                <FunnelRow label="Offered" value={stats.offered} total={stats.total} color={C.green} />
-                <FunnelRow label="Hired" value={stats.hired} total={stats.total} color={C.green} />
-                <FunnelRow label="Rejected" value={stats.rejected} total={stats.total} color={C.red} />
-              </div>
-
-              <div style={cardStyle}>
-                <SectionTitle
-                  title="Priority Shortlist"
-                  subtitle="Candidates ready for scheduling."
-                />
-
-                {shortlistedApps.length ? (
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    {shortlistedApps.slice(0, 5).map((app) => (
-                      <MiniCandidate
-                        key={app.id}
-                        app={app}
-                        onSchedule={() => openSchedule(app)}
-                      />
-                    ))}
-                  </div>
+              <section style={panelStyle}>
+                <p style={sectionTitleStyle}>Selected job tracking</p>
+                {selectedJob ? (
+                  <JobSummary job={selectedJob} />
                 ) : (
-                  <EmptyState
-                    title="No shortlisted candidates"
-                    message="Move strong applicants to shortlist, then schedule interviews from here."
-                  />
+                  <p style={emptyTextStyle}>
+                    No jobs yet. Click Post Job to create your first recruiter job.
+                  </p>
                 )}
-              </div>
-            </section>
+              </section>
+            </>
           )}
 
-          {tab === 'applications' && (
-            <section style={cardStyle}>
-              <SectionTitle
-                title="Applications Received"
-                subtitle="Review resumes, ATS score, skills, and decide shortlist/reject."
-              />
+          {tab === 'jobs' && (
+            <section style={panelStyle}>
+              <div style={sectionHeadStyle}>
+                <div>
+                  <p style={sectionTitleStyle}>My Jobs</p>
+                  <p style={sectionSubStyle}>
+                    Select a job to track its applications and interviews.
+                  </p>
+                </div>
 
-              {filteredApplications.length ? (
+                <button
+                  type="button"
+                  onClick={() => setPostJobOpen(true)}
+                  style={primaryButtonStyle}
+                >
+                  + Post Job
+                </button>
+              </div>
+
+              {jobs.length ? (
                 <div style={{ display: 'grid', gap: 12 }}>
-                  {filteredApplications.map((app) => (
-                    <ApplicantCard
-                      key={app.id}
-                      app={app}
-                      selectedJob={selectedJob}
-                      moving={movingId === app.id}
-                      onMove={moveApplication}
-                      onSchedule={openSchedule}
-                    />
-                  ))}
+                  {jobs.map((job) => {
+                    const active = job.id === selectedJobId;
+
+                    return (
+                      <button
+                        type="button"
+                        key={job.id}
+                        onClick={() => {
+                          setSelectedJobId(job.id);
+                          setTab('applications');
+                        }}
+                        style={{
+                          ...jobRowStyle,
+                          borderColor: active ? C.borderStrong : C.border,
+                          background: active ? 'rgba(124,58,237,0.10)' : C.panel2,
+                        }}
+                      >
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <strong style={{ color: C.text, fontSize: 15 }}>
+                            {job.title}
+                          </strong>
+                          <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
+                            {getCompany(job)} · {job.location ?? 'Location not set'} · {getWorkMode(job)}
+                          </p>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                            {getRequiredSkills(job).slice(0, 6).map((skill) => (
+                              <span key={skill} style={skillPillStyle}>
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={statusPillStyle}>{job.status ?? 'active'}</span>
+                          <p style={{ margin: '10px 0 0', color: C.faint, fontSize: 12 }}>
+                            {Number(job._count?.applications ?? 0)} applicants
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
-                <EmptyState
-                  title="No applications found"
-                  message="Once candidates apply to your jobs, resumes and ATS data will appear here."
-                />
+                <p style={emptyTextStyle}>No recruiter jobs yet.</p>
               )}
             </section>
           )}
 
-          {tab === 'shortlist' && (
-            <section style={cardStyle}>
-              <SectionTitle
-                title="Shortlisted Candidates"
-                subtitle="Candidates ready for interview scheduling."
-              />
+          {tab === 'applications' && (
+            <section style={panelStyle}>
+              <div style={sectionHeadStyle}>
+                <div>
+                  <p style={sectionTitleStyle}>Applications by Job</p>
+                  <p style={sectionSubStyle}>
+                    {selectedJob
+                      ? `${selectedJob.title} · ${getCompany(selectedJob)}`
+                      : 'Select a job first'}
+                  </p>
+                </div>
 
-              {shortlistedApps.length ? (
+                <select
+                  value={selectedJobId ?? ''}
+                  onChange={(e) => setSelectedJobId(e.target.value || null)}
+                  style={inputStyle}
+                >
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {job.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {appsLoading ? (
+                <p style={emptyTextStyle}>Loading applications...</p>
+              ) : applications.length ? (
                 <div style={{ display: 'grid', gap: 12 }}>
-                  {shortlistedApps.map((app) => (
-                    <ApplicantCard
+                  {applications.map((app) => (
+                    <ApplicationCard
                       key={app.id}
                       app={app}
-                      selectedJob={selectedJob}
-                      moving={movingId === app.id}
-                      onMove={moveApplication}
-                      onSchedule={openSchedule}
+                      onShortlist={() => void shortlistApplication(app)}
+                      onSchedule={() => {
+                        setScheduleApplicationId(app.id);
+                        setTab('schedule');
+                      }}
                     />
                   ))}
                 </div>
               ) : (
-                <EmptyState
-                  title="Shortlist is empty"
-                  message="Shortlist candidates from Applications after reviewing their resume, skills, and ATS score."
-                />
+                <p style={emptyTextStyle}>
+                  No applications for this job yet. Candidate applications will appear here by jobId.
+                </p>
               )}
             </section>
           )}
 
           {tab === 'schedule' && (
-            <section style={cardStyle}>
-              <SectionTitle
-                title="Interview Scheduling"
-                subtitle="Schedule shortlisted candidates into recruiter-led interview rounds."
-              />
+            <section style={panelStyle}>
+              <p style={sectionTitleStyle}>Schedule Interview</p>
+              <p style={sectionSubStyle}>
+                Select one application, create an interview round, notify candidate, and generate room link.
+              </p>
 
-              {shortlistedApps.length ? (
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {shortlistedApps.map((app) => (
-                    <MiniCandidate
-                      key={app.id}
-                      app={app}
-                      onSchedule={() => openSchedule(app)}
-                      detailed
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  title="No candidates ready for scheduling"
-                  message="Shortlisted candidates will appear here. Scheduling creates interview, round, room, and join URL."
-                />
-              )}
-            </section>
-          )}
+              <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
+                <label style={fieldWrapStyle}>
+                  <span style={labelStyle}>Application</span>
+                  <select
+                    value={scheduleApplicationId}
+                    onChange={(e) => setScheduleApplicationId(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="">Select candidate application</option>
+                    {applications.map((app) => (
+                      <option key={app.id} value={app.id}>
+                        {getCandidateName(app)} · {normalizeStatus(app.status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-          {tab === 'pipeline' && (
-            <section style={pipelineGridStyle}>
-              {Object.entries(pipelineGroups).map(([status, rows]) => (
-                <div key={status} style={pipelineColumnStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <h3 style={{ margin: 0, color: statusMeta(status).color, fontSize: 14 }}>
-                      {statusMeta(status).label}
-                    </h3>
-                    <span style={tinyBadgeStyle}>{rows.length}</span>
+                {selectedApplication && (
+                  <div style={miniInfoStyle}>
+                    <strong>{getCandidateName(selectedApplication)}</strong>
+                    <span>{selectedApplication.candidate?.email ?? 'No email shown'}</span>
+                    <span>Status: {normalizeStatus(selectedApplication.status)}</span>
                   </div>
+                )}
 
-                  <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-                    {rows.length ? (
-                      rows.slice(0, 12).map((app) => (
-                        <div key={app.id} style={pipelineCardStyle}>
-                          <div style={{ color: C.text, fontWeight: 900, fontSize: 13 }}>
-                            {getCandidateName(app)}
-                          </div>
-                          <div style={{ color: C.faint, fontSize: 11, marginTop: 2 }}>
-                            {getJobTitleFromApp(app, selectedJob)}
-                          </div>
-                          <div style={{ marginTop: 8 }}>
-                            <StatusPill status={status} />
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ color: C.faint, fontSize: 12, padding: '1rem 0' }}>
-                        Empty lane
-                      </div>
+                <div style={twoColStyle}>
+                  <label style={fieldWrapStyle}>
+                    <span style={labelStyle}>Round Type</span>
+                    <select
+                      value={roundType}
+                      onChange={(e) => setRoundType(e.target.value)}
+                      style={inputStyle}
+                    >
+                      <option value="technical">Technical</option>
+                      <option value="hr">HR</option>
+                      <option value="managerial">Managerial</option>
+                      <option value="assignment">Assignment</option>
+                    </select>
+                  </label>
+
+                  <label style={fieldWrapStyle}>
+                    <span style={labelStyle}>Duration</span>
+                    <select
+                      value={durationMins}
+                      onChange={(e) => setDurationMins(Number(e.target.value))}
+                      style={inputStyle}
+                    >
+                      <option value={30}>30 minutes</option>
+                      <option value={45}>45 minutes</option>
+                      <option value={60}>60 minutes</option>
+                      <option value={90}>90 minutes</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label style={fieldWrapStyle}>
+                  <span style={labelStyle}>Date & Time</span>
+                  <input
+                    type="datetime-local"
+                    value={scheduleAt}
+                    onChange={(e) => setScheduleAt(e.target.value)}
+                    style={inputStyle}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => void scheduleInterview()}
+                  disabled={scheduling}
+                  style={{
+                    ...primaryButtonStyle,
+                    opacity: scheduling ? 0.65 : 1,
+                    cursor: scheduling ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {scheduling ? 'Scheduling...' : 'Schedule Interview + Notify Candidate'}
+                </button>
+
+                {scheduleResult && (
+                  <div style={successBoxStyle}>
+                    <strong style={{ color: C.green }}>Interview scheduled.</strong>
+                    <div>Interview ID: {scheduleResult.interviewId}</div>
+                    {scheduleResult.roundId && <div>Round ID: {scheduleResult.roundId}</div>}
+                    {scheduleResult.joinUrl && (
+                      <a
+                        href={scheduleResult.joinUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: C.sky, fontWeight: 900 }}
+                      >
+                        Open interview room →
+                      </a>
                     )}
                   </div>
-                </div>
-              ))}
+                )}
+              </div>
             </section>
           )}
 
           {tab === 'results' && (
-            <section style={cardStyle}>
-              <SectionTitle
-                title="Interview Results & Final Decisions"
-                subtitle="Final recruitment decisions stay here even though live interview happens in Interviews section."
-              />
+            <section style={panelStyle}>
+              <p style={sectionTitleStyle}>Interview Results & Pipeline</p>
+              <p style={sectionSubStyle}>
+                Results submitted from interview rounds will reflect here and in Recruitment tracking.
+              </p>
 
-              {resultApps.length ? (
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {resultApps.map((app) => (
-                    <ApplicantCard
-                      key={app.id}
-                      app={app}
-                      selectedJob={selectedJob}
-                      moving={movingId === app.id}
-                      onMove={moveApplication}
-                      onSchedule={openSchedule}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  title="No final results yet"
-                  message="After interviews and feedback, offered, hired, and rejected candidates will be tracked here."
-                />
-              )}
-            </section>
-          )}
-
-          {tab === 'jobs' && (
-            <section style={cardStyle}>
-              <SectionTitle
-                title="Recruiter Jobs"
-                subtitle="Every job and its recruitment volume."
-              />
-
-              {jobs.length ? (
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {jobs.map((job) => (
-                    <button
-                      key={getJobId(job)}
-                      type="button"
-                      onClick={() => {
-                        setSelectedJobId(getJobId(job));
-                        setTab('applications');
-                      }}
-                      style={jobCardStyle}
-                    >
+              <div style={{ display: 'grid', gap: 12, marginTop: 18 }}>
+                {applications.length ? (
+                  applications.map((app) => (
+                    <div key={app.id} style={resultRowStyle}>
                       <div>
-                        <div style={{ color: C.text, fontSize: 16, fontWeight: 900 }}>
-                          {getJobTitle(job)}
-                        </div>
-                        <div style={{ color: C.muted, fontSize: 12, marginTop: 4 }}>
-                          {getCompany(job)} · {job.location ?? 'Location not set'} ·{' '}
-                          {job.workMode ?? job.work_mode ?? 'Mode not set'}
-                        </div>
+                        <strong style={{ color: C.text }}>{getCandidateName(app)}</strong>
+                        <p style={{ margin: '4px 0 0', color: C.faint, fontSize: 12 }}>
+                          {selectedJob?.title ?? app.jobs?.title ?? app.job?.title ?? 'Job'}
+                        </p>
                       </div>
 
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span style={tinyBadgeStyle}>
-                          {getApplicantCount(job)} applicants
-                        </span>
-                        <span style={tinyBadgeStyle}>
-                          {String(job.status ?? 'DRAFT')}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  title="No jobs posted"
-                  message="Post jobs first. Applications and recruitment tracking will connect to those jobs."
-                />
+                      <span
+                        style={{
+                          ...statusPillStyle,
+                          color: statusColor(app.status),
+                          borderColor: `${statusColor(app.status)}55`,
+                          background: `${statusColor(app.status)}14`,
+                        }}
+                      >
+                        {normalizeStatus(app.status)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p style={emptyTextStyle}>No results yet.</p>
+                )}
+              </div>
+
+              {dashboard && (
+                <pre style={debugStyle}>
+                  {JSON.stringify(dashboard, null, 2)}
+                </pre>
               )}
             </section>
           )}
-        </>
+        </main>
       )}
 
-      {scheduleForm && (
-        <ScheduleModal
-          form={scheduleForm}
-          setForm={setScheduleForm}
-          loading={scheduleLoading}
-          onClose={() => setScheduleForm(null)}
-          onSubmit={() => void scheduleInterview()}
-        />
-      )}
-
-      {scheduleResult && (
-        <div style={resultToastStyle}>
-          <div>
-            <strong style={{ color: C.text }}>Interview scheduled</strong>
-            <p style={{ color: C.muted, margin: '4px 0 0', fontSize: 12 }}>
-              Room: {scheduleResult.roomId ?? 'created'} ·{' '}
-              {fmtDate(scheduleResult.scheduledAt)}
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            {scheduleResult.joinUrl ? (
-              <button
-                type="button"
-                onClick={() => router.push(scheduleResult.joinUrl || '')}
-                style={primaryButtonStyle}
-              >
-                Open Room
-              </button>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={() => setScheduleResult(null)}
-              style={secondaryButtonStyle}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      <PostJobModal
+        open={postJobOpen}
+        loading={postJobLoading}
+        onClose={() => setPostJobOpen(false)}
+        onSubmit={(form) => void createRecruiterJob(form)}
+      />
     </div>
   );
 }
 
-function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div style={{ marginBottom: 18 }}>
-      <h2 style={{ margin: 0, color: C.text, fontSize: 20, letterSpacing: '-0.03em' }}>
-        {title}
-      </h2>
-      <p style={{ margin: '6px 0 0', color: C.muted, fontSize: 13 }}>
-        {subtitle}
-      </p>
-    </div>
-  );
-}
-
-function FunnelRow({
+function StatCard({
   label,
   value,
-  total,
   color,
 }: {
   label: string;
   value: number;
-  total: number;
   color: string;
 }) {
-  const pct = percent(value, total);
-
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ color, fontSize: 13, fontWeight: 800 }}>{label}</span>
-        <span style={{ color: C.muted, fontSize: 12 }}>
-          {value} · {pct}%
-        </span>
-      </div>
-
-      <div
-        style={{
-          height: 8,
-          background: 'rgba(255,255,255,0.06)',
-          borderRadius: 999,
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            width: `${pct}%`,
-            height: '100%',
-            background: color,
-            borderRadius: 999,
-          }}
-        />
-      </div>
+    <div style={statCardStyle}>
+      <strong style={{ color }}>{value}</strong>
+      <span>{label}</span>
     </div>
   );
 }
 
-function MiniCandidate({
-  app,
-  onSchedule,
-  detailed = false,
-}: {
-  app: ApplicationRow;
-  onSchedule: () => void;
-  detailed?: boolean;
-}) {
-  const atsScore = getAtsScore(app);
-
+function JobSummary({ job }: { job: JobRow }) {
   return (
-    <div style={miniCandidateStyle}>
+    <div style={summaryStyle}>
       <div>
-        <div style={{ color: C.text, fontWeight: 900 }}>
-          {getCandidateName(app)}
-        </div>
-        <div style={{ color: C.faint, fontSize: 12, marginTop: 3 }}>
-          {getJobTitleFromApp(app)} · {getCandidateEmail(app)}
-        </div>
-
-        {detailed ? (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-            <StatusPill status={app.status} />
-            <span style={tinyBadgeStyle}>
-              ATS {atsScore ?? 'pending'}
-              {atsScore !== null ? '%' : ''}
-            </span>
-            <span style={tinyBadgeStyle}>{getResumeLabel(app)}</span>
-          </div>
-        ) : null}
+        <strong style={{ color: C.text }}>{job.title}</strong>
+        <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
+          {getCompany(job)} · {job.location ?? 'Location not set'} · {getEmploymentType(job)}
+        </p>
       </div>
 
-      <button type="button" onClick={onSchedule} style={primaryButtonStyle}>
-        Schedule
-      </button>
+      <span style={statusPillStyle}>{job.status ?? 'active'}</span>
     </div>
+  );
+}
+
+function ApplicationCard({
+  app,
+  onShortlist,
+  onSchedule,
+}: {
+  app: ApplicationRow;
+  onShortlist: () => void;
+  onSchedule: () => void;
+}) {
+  const alreadyShortlisted = normalizeStatus(app.status).includes('shortlist');
+
+  return (
+    <article style={applicationCardStyle}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <strong style={{ color: C.text }}>{getCandidateName(app)}</strong>
+        <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
+          {app.candidate?.email ?? 'No email shown'}
+        </p>
+        <p style={{ margin: '8px 0 0', color: C.faint, fontSize: 11 }}>
+          Applied: {formatDate(app.applied_at ?? app.appliedAt ?? app.created_at ?? app.createdAt)}
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            ...statusPillStyle,
+            color: statusColor(app.status),
+            borderColor: `${statusColor(app.status)}55`,
+            background: `${statusColor(app.status)}14`,
+          }}
+        >
+          {normalizeStatus(app.status)}
+        </span>
+
+        <button
+          type="button"
+          onClick={onShortlist}
+          style={secondaryButtonStyle}
+        >
+          {alreadyShortlisted ? 'Shortlisted' : 'Shortlist'}
+        </button>
+
+        <button
+          type="button"
+          onClick={onSchedule}
+          style={primaryButtonStyle}
+        >
+          Schedule
+        </button>
+      </div>
+    </article>
   );
 }
 
 const pageStyle: CSSProperties = {
   minHeight: '100vh',
-  padding: '2rem',
+  background: C.bg,
   color: C.text,
-  background:
-    'radial-gradient(circle at top left, rgba(56,189,248,0.10), transparent 32%), radial-gradient(circle at top right, rgba(244,114,182,0.12), transparent 28%), #070B14',
-  animation: 'rcFade .25s ease',
+  padding: '2rem',
+  fontFamily: "'Sora', sans-serif",
 };
 
-const heroStyle: CSSProperties = {
-  border: `1px solid ${C.borderStrong}`,
-  background:
-    'linear-gradient(145deg, rgba(15,23,42,0.92), rgba(2,6,23,0.92))',
-  borderRadius: 26,
-  padding: '1.5rem',
-  display: 'grid',
-  gridTemplateColumns: '1fr 300px',
-  gap: 20,
-  boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+const headerStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 16,
+  marginBottom: 18,
 };
 
-const eyebrowStyle: CSSProperties = {
+const titleStyle: CSSProperties = {
   margin: 0,
-  color: C.sky,
-  fontSize: 12,
-  fontWeight: 900,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
+  fontSize: 28,
+  fontWeight: 950,
+  letterSpacing: '-0.04em',
 };
 
-const heroTitleStyle: CSSProperties = {
-  margin: '0.5rem 0 0',
-  fontSize: 32,
-  lineHeight: 1.08,
-  letterSpacing: '-0.055em',
-  maxWidth: 860,
+const subtitleStyle: CSSProperties = {
+  margin: '6px 0 0',
+  color: C.faint,
+  fontSize: 13,
 };
 
-const heroTextStyle: CSSProperties = {
-  margin: '0.9rem 0 0',
-  color: C.muted,
-  lineHeight: 1.7,
-  fontSize: 14,
-  maxWidth: 820,
-};
-
-const heroRightStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
+const tabBarStyle: CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
+  marginBottom: 18,
+  padding: 8,
   borderRadius: 18,
-  padding: 14,
-  background: 'rgba(2,6,23,0.55)',
-  display: 'grid',
-  gap: 10,
-  alignSelf: 'start',
+  border: `1px solid ${C.border}`,
+  background: C.panel,
 };
 
-const statsGridStyle: CSSProperties = {
+const tabButtonStyle: CSSProperties = {
+  border: `1px solid transparent`,
+  background: 'transparent',
+  color: C.faint,
+  borderRadius: 12,
+  padding: '10px 14px',
+  cursor: 'pointer',
+  fontWeight: 900,
+  fontFamily: "'Sora', sans-serif",
+};
+
+const activeTabButtonStyle: CSSProperties = {
+  background: 'rgba(124,58,237,0.18)',
+  borderColor: C.borderStrong,
+  color: C.purple,
+};
+
+const panelStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 20,
+  padding: '1.25rem',
+};
+
+const gridStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
   gap: 14,
-  marginTop: 16,
 };
 
 const statCardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
-  background:
-    'linear-gradient(145deg, rgba(15,23,42,0.84), rgba(2,6,23,0.78))',
+  background: C.panel,
   borderRadius: 18,
-  padding: '1rem',
-  minHeight: 96,
+  padding: '1.1rem',
+  display: 'grid',
+  gap: 6,
 };
 
-const tabsStyle: CSSProperties = {
+const sectionHeadStyle: CSSProperties = {
   display: 'flex',
-  gap: 8,
-  flexWrap: 'wrap',
-  marginTop: 18,
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 14,
   marginBottom: 18,
 };
 
-const tabButtonStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: 14,
-  padding: '10px 13px',
+const sectionTitleStyle: CSSProperties = {
+  margin: 0,
   fontSize: 13,
-  fontWeight: 900,
-  cursor: 'pointer',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 8,
-};
-
-const cardStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  background:
-    'linear-gradient(145deg, rgba(15,23,42,0.82), rgba(2,6,23,0.86))',
-  borderRadius: 22,
-  padding: '1.25rem',
-  boxShadow: '0 18px 50px rgba(0,0,0,0.28)',
-};
-
-const sectionGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: 16,
-};
-
-const applicantCardStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  background:
-    'linear-gradient(145deg, rgba(15,23,42,0.68), rgba(2,6,23,0.68))',
-  borderRadius: 18,
-  padding: '1rem',
-};
-
-const tinyBadgeStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '5px 8px',
-  borderRadius: 999,
-  border: `1px solid ${C.border}`,
-  background: 'rgba(255,255,255,0.035)',
-  color: C.muted,
-  fontSize: 11,
-  fontWeight: 800,
-};
-
-const resumeLinkStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '6px 9px',
-  borderRadius: 999,
-  border: `1px solid ${C.border}`,
-  background: 'rgba(255,255,255,0.035)',
-  color: C.sky,
-  fontSize: 11,
-  fontWeight: 800,
-  textDecoration: 'none',
-};
-
-const primaryButtonStyle: CSSProperties = {
-  border: 'none',
-  borderRadius: 12,
-  padding: '10px 12px',
-  color: '#020617',
-  fontWeight: 900,
-  cursor: 'pointer',
-  background: `linear-gradient(135deg, ${C.sky}, ${C.purple}, ${C.pink})`,
-  boxShadow: '0 16px 38px rgba(56,189,248,0.14)',
-  whiteSpace: 'nowrap',
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: 12,
-  padding: '9px 12px',
+  fontWeight: 950,
   color: C.text,
-  fontWeight: 800,
-  cursor: 'pointer',
-  background: 'rgba(15,23,42,0.72)',
-  whiteSpace: 'nowrap',
-};
-
-const dangerButtonStyle: CSSProperties = {
-  border: `1px solid rgba(248,113,113,0.28)`,
-  borderRadius: 12,
-  padding: '9px 12px',
-  color: C.red,
-  fontWeight: 800,
-  cursor: 'pointer',
-  background: 'rgba(248,113,113,0.08)',
-  whiteSpace: 'nowrap',
-};
-
-const selectStyle: CSSProperties = {
-  width: '100%',
-  border: `1px solid ${C.border}`,
-  background: 'rgba(2,6,23,0.72)',
-  color: C.text,
-  borderRadius: 12,
-  padding: '10px 12px',
-  outline: 'none',
-};
-
-const pipelineGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(7, minmax(180px, 1fr))',
-  gap: 12,
-  overflowX: 'auto',
-};
-
-const pipelineColumnStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  background: 'rgba(15,23,42,0.62)',
-  borderRadius: 18,
-  padding: 12,
-  minHeight: 320,
-};
-
-const pipelineCardStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  background: 'rgba(2,6,23,0.66)',
-  borderRadius: 14,
-  padding: 10,
-};
-
-const jobCardStyle: CSSProperties = {
-  width: '100%',
-  border: `1px solid ${C.border}`,
-  background: 'rgba(15,23,42,0.58)',
-  borderRadius: 16,
-  padding: '1rem',
-  display: 'flex',
-  justifyContent: 'space-between',
-  gap: 14,
-  textAlign: 'left',
-  cursor: 'pointer',
-};
-
-const miniCandidateStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: 16,
-  padding: '1rem',
-  background: 'rgba(15,23,42,0.58)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 14,
-};
-
-const modalOverlayStyle: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 1000,
-  display: 'grid',
-  placeItems: 'center',
-  padding: 20,
-  background: 'rgba(2,6,23,0.82)',
-  backdropFilter: 'blur(12px)',
-};
-
-const modalStyle: CSSProperties = {
-  width: 'min(560px, 100%)',
-  border: `1px solid ${C.borderStrong}`,
-  borderRadius: 22,
-  padding: '1.25rem',
-  background:
-    'linear-gradient(145deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98))',
-  boxShadow: '0 30px 100px rgba(0,0,0,0.50)',
-};
-
-const iconButtonStyle: CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: 999,
-  border: `1px solid ${C.border}`,
-  background: 'rgba(255,255,255,0.035)',
-  color: C.text,
-  fontSize: 20,
-  cursor: 'pointer',
-};
-
-const fieldWrapStyle: CSSProperties = {
-  display: 'block',
-};
-
-const labelStyle: CSSProperties = {
-  display: 'block',
-  color: C.faint,
-  fontSize: 11,
-  fontWeight: 900,
-  marginBottom: 6,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
 };
 
+const sectionSubStyle: CSSProperties = {
+  margin: '6px 0 0',
+  color: C.faint,
+  fontSize: 12,
+};
+
+const emptyTextStyle: CSSProperties = {
+  margin: 0,
+  color: C.faint,
+  fontSize: 13,
+  lineHeight: 1.7,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  border: 'none',
+  borderRadius: 14,
+  padding: '11px 16px',
+  color: '#020617',
+  fontWeight: 950,
+  cursor: 'pointer',
+  background: `linear-gradient(135deg, ${C.sky}, ${C.purple}, ${C.pink})`,
+  boxShadow: '0 16px 38px rgba(56,189,248,0.18)',
+  fontFamily: "'Sora', sans-serif",
+  textDecoration: 'none',
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: '10px 14px',
+  color: C.text,
+  fontWeight: 850,
+  cursor: 'pointer',
+  background: 'rgba(15,23,42,0.72)',
+  fontFamily: "'Sora', sans-serif",
+  textDecoration: 'none',
+};
+
 const inputStyle: CSSProperties = {
   width: '100%',
-  boxSizing: 'border-box',
   border: `1px solid ${C.border}`,
-  background: 'rgba(2,6,23,0.72)',
+  background: 'rgba(15,23,42,0.86)',
   color: C.text,
   borderRadius: 12,
-  padding: '11px 12px',
+  padding: '12px 13px',
   outline: 'none',
+  fontSize: 14,
+  fontFamily: "'Sora', sans-serif",
 };
 
-const resultToastStyle: CSSProperties = {
+const labelStyle: CSSProperties = {
+  color: C.faint,
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const fieldWrapStyle: CSSProperties = {
+  display: 'grid',
+  gap: 7,
+};
+
+const twoColStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+  gap: 12,
+};
+
+const modalBackdropStyle: CSSProperties = {
   position: 'fixed',
-  right: 20,
-  bottom: 20,
-  zIndex: 900,
-  width: 'min(520px, calc(100vw - 40px))',
-  border: `1px solid ${C.borderStrong}`,
-  borderRadius: 18,
-  padding: 14,
-  background:
-    'linear-gradient(145deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98))',
+  inset: 0,
+  background: 'rgba(2,6,23,0.82)',
+  backdropFilter: 'blur(10px)',
   display: 'flex',
   alignItems: 'center',
+  justifyContent: 'center',
+  padding: 20,
+  zIndex: 60,
+};
+
+const modalCardStyle: CSSProperties = {
+  width: 'min(780px, 100%)',
+  maxHeight: '90vh',
+  overflowY: 'auto',
+  border: `1px solid ${C.borderStrong}`,
+  background: '#0B1020',
+  borderRadius: 24,
+  padding: '1.35rem',
+  boxShadow: '0 30px 100px rgba(0,0,0,0.55)',
+};
+
+const eyebrowStyle: CSSProperties = {
+  margin: '0 0 6px',
+  color: C.purple,
+  fontSize: 12,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const messageStyle: CSSProperties = {
+  border: '1px solid',
+  borderRadius: 16,
+  padding: '12px 14px',
+  marginBottom: 16,
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const jobRowStyle: CSSProperties = {
+  width: '100%',
+  border: `1px solid ${C.border}`,
+  borderRadius: 16,
+  padding: '1rem',
+  display: 'flex',
+  gap: 16,
+  justifyContent: 'space-between',
+  cursor: 'pointer',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const skillPillStyle: CSSProperties = {
+  border: '1px solid rgba(52,211,153,0.20)',
+  background: 'rgba(52,211,153,0.08)',
+  color: '#6EE7B7',
+  borderRadius: 999,
+  padding: '4px 8px',
+  fontSize: 11,
+  fontWeight: 850,
+};
+
+const statusPillStyle: CSSProperties = {
+  border: `1px solid ${C.borderStrong}`,
+  background: 'rgba(124,58,237,0.12)',
+  color: C.purple,
+  borderRadius: 999,
+  padding: '5px 10px',
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: 'capitalize',
+};
+
+const applicationCardStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 16,
+  padding: '1rem',
+  display: 'flex',
   justifyContent: 'space-between',
   gap: 14,
-  boxShadow: '0 20px 70px rgba(0,0,0,0.45)',
+  alignItems: 'center',
 };
 
-const loadingGridStyle: CSSProperties = {
-  display: 'grid',
+const resultRowStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 16,
+  padding: '1rem',
+  display: 'flex',
+  justifyContent: 'space-between',
   gap: 14,
-  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  alignItems: 'center',
 };
 
-const loadingCardStyle: CSSProperties = {
-  height: 220,
-  borderRadius: 22,
-  background: 'rgba(255,255,255,0.05)',
-  animation: 'rcPulse 1.4s ease infinite',
+const summaryStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 16,
+  padding: '1rem',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 14,
+  alignItems: 'center',
+};
+
+const miniInfoStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 14,
+  padding: '12px 14px',
+  display: 'grid',
+  gap: 4,
+  color: C.faint,
+  fontSize: 13,
+};
+
+const successBoxStyle: CSSProperties = {
+  marginTop: 4,
+  padding: 14,
+  borderRadius: 16,
+  border: `1px solid rgba(52,211,153,0.28)`,
+  background: 'rgba(52,211,153,0.08)',
+  color: C.muted,
+  fontSize: 13,
+  lineHeight: 1.8,
+  display: 'grid',
+  gap: 3,
+};
+
+const debugStyle: CSSProperties = {
+  marginTop: 18,
+  maxHeight: 260,
+  overflowY: 'auto',
+  border: `1px solid ${C.border}`,
+  background: 'rgba(0,0,0,0.22)',
+  color: C.faint,
+  borderRadius: 14,
+  padding: 12,
+  fontSize: 11,
 };

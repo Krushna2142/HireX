@@ -1,12 +1,39 @@
 'use client';
 
+// frontend/app/_components/shared/Sidebar.tsx
+
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
+
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useAlerts } from '@/hooks/useRealTimeAlerts';
 
-const CANDIDATE_NAV = [
+type NavItem = {
+  href: string;
+  icon: string;
+  label: string;
+};
+
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+type AuthShape = {
+  user?: {
+    id?: string;
+    fullName?: string | null;
+    full_name?: string | null;
+    name?: string | null;
+    email?: string | null;
+    role?: string | null;
+  } | null;
+  logout?: () => Promise<void> | void;
+  signOut?: () => Promise<void> | void;
+};
+
+const CANDIDATE_NAV: NavGroup[] = [
   {
     label: 'Workspace',
     items: [
@@ -26,9 +53,9 @@ const CANDIDATE_NAV = [
       { href: '/mock-interview', icon: '🎤', label: 'Mock Interview' },
     ],
   },
-] as const;
+];
 
-const RECRUITER_NAV = [
+const RECRUITER_NAV: NavGroup[] = [
   {
     label: 'Workspace',
     items: [
@@ -38,685 +65,384 @@ const RECRUITER_NAV = [
       { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
   },
-] as const;
+];
 
-function RecruiterStats() {
-  if (typeof window === 'undefined') return null;
+function normalizeRole(role?: string | null) {
+  const value = String(role ?? '').toLowerCase();
 
-  try {
-    const raw = localStorage.getItem('jc_recruiter_stats');
-    if (!raw) return null;
-
-    const stats = JSON.parse(raw) as {
-      activeJobs: number;
-      newApplicants: number;
-    };
-
-    if (!stats.activeJobs && !stats.newApplicants) return null;
-
-    return (
-      <div
-        style={{
-          margin: '2px 10px 6px',
-          padding: '8px 10px',
-          borderRadius: 8,
-          background: 'rgba(244,114,182,0.07)',
-          border: '1px solid rgba(244,114,182,0.18)',
-          display: 'flex',
-          gap: 16,
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: '#F472B6',
-              lineHeight: 1,
-            }}
-          >
-            {stats.activeJobs}
-          </div>
-          <div
-            style={{
-              fontSize: 9,
-              color: 'rgba(255,255,255,0.3)',
-              marginTop: 2,
-            }}
-          >
-            active
-          </div>
-        </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: '#38BDF8',
-              lineHeight: 1,
-            }}
-          >
-            {stats.newApplicants}
-          </div>
-          <div
-            style={{
-              fontSize: 9,
-              color: 'rgba(255,255,255,0.3)',
-              marginTop: 2,
-            }}
-          >
-            applicants
-          </div>
-        </div>
-      </div>
-    );
-  } catch {
-    return null;
+  if (value === 'jobseeker' || value === 'job_seeker' || value === 'candidate') {
+    return 'candidate';
   }
+
+  if (value === 'recruiter') return 'recruiter';
+
+  return value;
 }
 
-function LogoutConfirmModal({
-  open,
-  onCancel,
-  onConfirm,
-}: {
-  open: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  if (!open) return null;
+function getUserName(user: AuthShape['user']) {
+  return (
+    user?.fullName ??
+    user?.full_name ??
+    user?.name ??
+    user?.email?.split('@')[0] ??
+    'User'
+  );
+}
+
+function isActivePath(pathname: string, href: string) {
+  if (href === '/dashboard') return pathname === href;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function RecruiterStats() {
+  const [stats, setStats] = useState<{
+    activeJobs: number;
+    newApplicants: number;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('jc_recruiter_stats');
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as {
+        activeJobs?: number;
+        newApplicants?: number;
+      };
+
+      setStats({
+        activeJobs: Number(parsed.activeJobs ?? 0),
+        newApplicants: Number(parsed.newApplicants ?? 0),
+      });
+    } catch {
+      setStats(null);
+    }
+  }, []);
+
+  if (!stats) return null;
 
   return (
-    <div
-      className="sb-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="sb-logout-title"
-    >
-      <div className="sb-modal-card">
-        <div className="sb-modal-icon">⏻</div>
-
-        <h2 id="sb-logout-title" className="sb-modal-title">
-          Sign out?
-        </h2>
-
-        <p className="sb-modal-text">
-          You will be signed out from this device. You can log in again anytime.
-        </p>
-
-        <div className="sb-modal-actions">
-          <button type="button" className="sb-modal-cancel" onClick={onCancel}>
-            Cancel
-          </button>
-
-          <button type="button" className="sb-modal-confirm" onClick={onConfirm}>
-            Yes, sign out
-          </button>
-        </div>
+    <div style={statsBoxStyle}>
+      <div>
+        <strong style={{ color: '#F472B6' }}>{stats.activeJobs}</strong>
+        <span>active</span>
+      </div>
+      <div>
+        <strong style={{ color: '#38BDF8' }}>{stats.newApplicants}</strong>
+        <span>applicants</span>
       </div>
     </div>
   );
 }
 
-export function Sidebar() {
-  const { user, logout } = useAuth();
+export default function Sidebar() {
   const pathname = usePathname();
+  const auth = useAuth() as unknown as AuthShape;
+  const { unreadCount } = useAlerts();
 
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [logoutOpen, setLogoutOpen] = useState(false);
+  const user = auth.user;
+  const role = normalizeRole(user?.role);
+  const isRecruiter = role === 'recruiter';
 
-  const { unreadCount = 0 } = useAlerts();
+  const groups = useMemo(
+    () => (isRecruiter ? RECRUITER_NAV : CANDIDATE_NAV),
+    [isRecruiter],
+  );
 
-  const isCandidate = user?.role === 'candidate';
-  const isRecruiter = user?.role === 'recruiter';
-
-  const navGroups = isCandidate ? CANDIDATE_NAV : RECRUITER_NAV;
-
-  const initial =
-    user?.full_name?.charAt(0).toUpperCase() ??
-    user?.email?.charAt(0).toUpperCase() ??
-    'U';
-
-  useEffect(() => {
-    function onDocumentMouseDown(event: MouseEvent) {
-      if (!menuRef.current) return;
-
-      if (!menuRef.current.contains(event.target as Node)) {
-        setAccountMenuOpen(false);
-      }
-    }
-
-    function onEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setAccountMenuOpen(false);
-        setLogoutOpen(false);
-      }
-    }
-
-    document.addEventListener('mousedown', onDocumentMouseDown);
-    document.addEventListener('keydown', onEscape);
-
-    return () => {
-      document.removeEventListener('mousedown', onDocumentMouseDown);
-      document.removeEventListener('keydown', onEscape);
-    };
-  }, []);
+  const userName = getUserName(user);
+  const initial = userName.trim().charAt(0).toUpperCase() || 'U';
 
   const handleLogout = async () => {
-    setLogoutOpen(false);
-    setAccountMenuOpen(false);
-    await logout();
+    try {
+      if (auth.logout) {
+        await auth.logout();
+      } else if (auth.signOut) {
+        await auth.signOut();
+      } else {
+        localStorage.removeItem('jc_token');
+        localStorage.removeItem('user');
+        window.location.href = '/';
+      }
+    } catch {
+      localStorage.removeItem('jc_token');
+      localStorage.removeItem('user');
+      window.location.href = '/';
+    }
   };
 
   return (
-    <>
-      <style>{`
-        @keyframes sbMenuIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        @keyframes sbModalIn { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    <aside style={sidebarStyle}>
+      <div style={brandStyle}>
+        <span style={logoMarkStyle}>⌬</span>
+        <strong>JobCrawler</strong>
+      </div>
 
-        .sb-root {
-          width: 240px;
-          height: 100vh;
-          position: sticky;
-          top: 0;
-          background: #0D1117;
-          border-right: 1px solid rgba(255,255,255,0.06);
-          display: flex;
-          flex-direction: column;
-          flex-shrink: 0;
-          font-family: 'Sora', sans-serif;
-        }
+      <nav style={navStyle}>
+        {groups.map((group) => (
+          <section key={group.label} style={{ marginBottom: 24 }}>
+            <p style={groupLabelStyle}>{group.label}</p>
 
-        .sb-logo {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 1.25rem 1.25rem 1rem;
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-          flex-shrink: 0;
-        }
-
-        .sb-logo-mark {
-          font-size: 18px;
-          font-weight: 800;
-          color: #38BDF8;
-        }
-
-        .sb-logo-name {
-          font-size: 13px;
-          font-weight: 600;
-          color: rgba(255,255,255,0.7);
-        }
-
-        .sb-nav {
-          flex: 1;
-          padding: .5rem .75rem 0;
-          overflow-y: auto;
-          min-height: 0;
-        }
-
-        .sb-nav::-webkit-scrollbar {
-          width: 3px;
-        }
-
-        .sb-nav::-webkit-scrollbar-thumb {
-          background: rgba(255,255,255,.08);
-          border-radius: 2px;
-        }
-
-        .sb-grp {
-          font-size: 10px;
-          font-weight: 600;
-          letter-spacing: .1em;
-          text-transform: uppercase;
-          color: rgba(255,255,255,.2);
-          padding: 0 .5rem;
-          margin: .6rem 0 .3rem;
-        }
-
-        .sb-link {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 8px 10px;
-          border-radius: 8px;
-          margin-bottom: 2px;
-          font-size: 13px;
-          font-weight: 500;
-          text-decoration: none;
-          color: rgba(255,255,255,.45);
-          border: 1px solid transparent;
-          transition: all .15s;
-          position: relative;
-        }
-
-        .sb-link:hover {
-          background: rgba(255,255,255,.05);
-          color: rgba(255,255,255,.8);
-        }
-
-        .sb-link.ac {
-          background: rgba(56,189,248,.08);
-          color: #38BDF8;
-          border-color: rgba(56,189,248,.15);
-        }
-
-        .sb-link.ar {
-          background: rgba(244,114,182,.08);
-          color: #F472B6;
-          border-color: rgba(244,114,182,.15);
-        }
-
-        .sb-icon {
-          font-size: 15px;
-          width: 20px;
-          text-align: center;
-          flex-shrink: 0;
-        }
-
-        .sb-badge {
-          margin-left: auto;
-          min-width: 18px;
-          height: 18px;
-          padding: 0 5px;
-          border-radius: 9px;
-          background: rgba(167,139,250,.2);
-          color: #A78BFA;
-          font-size: 10px;
-          font-weight: 700;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 1px solid rgba(167,139,250,.3);
-        }
-
-        .sb-rec-cta {
-          margin: .5rem .75rem .25rem;
-          padding: 10px;
-          border-radius: 10px;
-          text-decoration: none;
-          background: rgba(244,114,182,.08);
-          border: 1px solid rgba(244,114,182,.2);
-          color: #F472B6;
-          font-size: 12px;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          transition: all .15s;
-          flex-shrink: 0;
-        }
-
-        .sb-rec-cta:hover {
-          background: rgba(244,114,182,.14);
-        }
-
-        .sb-foot {
-          position: relative;
-          padding: .75rem;
-          border-top: 1px solid rgba(255,255,255,.07);
-          flex-shrink: 0;
-        }
-
-        .sb-ucard {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 10px;
-          border-radius: 10px;
-          cursor: pointer;
-          background: rgba(255,255,255,.03);
-          border: 1px solid rgba(255,255,255,.07);
-          transition: all .15s;
-          width: 100%;
-          text-align: left;
-          font-family: 'Sora', sans-serif;
-        }
-
-        .sb-ucard:hover,
-        .sb-ucard.open {
-          background: rgba(255,255,255,.06);
-          border-color: rgba(255,255,255,.13);
-        }
-
-        .sb-avatar {
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          flex-shrink: 0;
-          background: linear-gradient(135deg,#6366F1,#8B5CF6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 13px;
-          font-weight: 700;
-          color: #fff;
-        }
-
-        .sb-uinfo {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .sb-uname {
-          font-size: 12px;
-          font-weight: 600;
-          color: rgba(255,255,255,.8);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .sb-urole {
-          font-size: 10px;
-          color: rgba(255,255,255,.3);
-          text-transform: capitalize;
-          margin-top: 1px;
-        }
-
-        .sb-uhint {
-          font-size: 9px;
-          color: rgba(255,255,255,.18);
-          margin-top: 2px;
-        }
-
-        .sb-chevron {
-          color: rgba(255,255,255,.24);
-          font-size: 12px;
-          transition: transform .15s;
-          flex-shrink: 0;
-        }
-
-        .sb-chevron.open {
-          transform: rotate(180deg);
-        }
-
-        .sb-account-menu {
-          position: absolute;
-          left: .75rem;
-          right: .75rem;
-          bottom: calc(100% - .35rem);
-          z-index: 20;
-          padding: 8px;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,.10);
-          background:
-            radial-gradient(circle at top left, rgba(56,189,248,.10), transparent 35%),
-            linear-gradient(145deg, rgba(15,23,42,.98), rgba(2,6,23,.98));
-          box-shadow: 0 18px 60px rgba(0,0,0,.45);
-          animation: sbMenuIn .16s ease;
-        }
-
-        .sb-menu-user {
-          padding: 9px 10px 10px;
-          border-bottom: 1px solid rgba(255,255,255,.07);
-          margin-bottom: 6px;
-        }
-
-        .sb-menu-name {
-          color: rgba(255,255,255,.86);
-          font-size: 12px;
-          font-weight: 700;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .sb-menu-email {
-          color: rgba(255,255,255,.36);
-          font-size: 10px;
-          margin-top: 3px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .sb-menu-link,
-        .sb-menu-btn {
-          width: 100%;
-          border: none;
-          background: transparent;
-          color: rgba(255,255,255,.66);
-          text-decoration: none;
-          padding: 10px;
-          border-radius: 11px;
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          font-size: 12px;
-          font-weight: 700;
-          font-family: 'Sora', sans-serif;
-          cursor: pointer;
-          text-align: left;
-          transition: all .15s;
-        }
-
-        .sb-menu-link:hover {
-          color: #38BDF8;
-          background: rgba(56,189,248,.08);
-        }
-
-        .sb-menu-btn:hover {
-          color: #F87171;
-          background: rgba(248,113,113,.08);
-        }
-
-        .sb-menu-danger {
-          color: #F87171;
-        }
-
-        .sb-modal-backdrop {
-          position: fixed;
-          inset: 0;
-          z-index: 9999;
-          display: grid;
-          place-items: center;
-          background: rgba(2,6,23,.76);
-          backdrop-filter: blur(12px);
-          padding: 20px;
-        }
-
-        .sb-modal-card {
-          width: min(380px, 100%);
-          border-radius: 24px;
-          border: 1px solid rgba(248,113,113,.28);
-          background:
-            radial-gradient(circle at top, rgba(248,113,113,.12), transparent 36%),
-            linear-gradient(145deg, rgba(15,23,42,.98), rgba(2,6,23,.98));
-          box-shadow: 0 28px 90px rgba(0,0,0,.55);
-          padding: 22px;
-          text-align: center;
-          animation: sbModalIn .18s ease;
-        }
-
-        .sb-modal-icon {
-          width: 54px;
-          height: 54px;
-          border-radius: 18px;
-          margin: 0 auto 14px;
-          display: grid;
-          place-items: center;
-          color: #F87171;
-          background: rgba(248,113,113,.10);
-          border: 1px solid rgba(248,113,113,.24);
-          font-size: 24px;
-        }
-
-        .sb-modal-title {
-          margin: 0;
-          color: #F8FAFC;
-          font-size: 22px;
-          letter-spacing: -.04em;
-        }
-
-        .sb-modal-text {
-          margin: 10px auto 0;
-          color: rgba(226,232,240,.68);
-          font-size: 13px;
-          line-height: 1.65;
-          max-width: 300px;
-        }
-
-        .sb-modal-actions {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-          margin-top: 20px;
-        }
-
-        .sb-modal-cancel,
-        .sb-modal-confirm {
-          border-radius: 14px;
-          padding: 11px 13px;
-          font-family: 'Sora', sans-serif;
-          font-size: 13px;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .sb-modal-cancel {
-          border: 1px solid rgba(255,255,255,.10);
-          color: rgba(255,255,255,.78);
-          background: rgba(255,255,255,.04);
-        }
-
-        .sb-modal-confirm {
-          border: 1px solid rgba(248,113,113,.35);
-          color: #fff;
-          background: linear-gradient(135deg, #EF4444, #F97316);
-        }
-      `}</style>
-
-      <aside className="sb-root" aria-label="Sidebar navigation">
-        <div className="sb-logo">
-          <span className="sb-logo-mark">⬡</span>
-          <span className="sb-logo-name">JobCrawler</span>
-        </div>
-
-        <nav className="sb-nav">
-          {navGroups.map((group, groupIndex) => (
-            <div key={groupIndex}>
-              <div className="sb-grp">{group.label}</div>
-
+            <div style={{ display: 'grid', gap: 8 }}>
               {group.items.map((item) => {
-                const exactDashboard =
-                  item.href === '/dashboard' && pathname === '/dashboard';
-
-                const exactRecruitment =
-                  item.href === '/recruiter/dashboard' &&
-                  pathname === '/recruiter/dashboard';
-
-                const nestedActive =
-                  item.href !== '/dashboard' &&
-                  item.href !== '/recruiter/dashboard' &&
-                  pathname.startsWith(item.href);
-
-                const active =
-                  exactDashboard || exactRecruitment || nestedActive;
-
-                const cls = active ? (isRecruiter ? 'ar' : 'ac') : '';
+                const active = isActivePath(pathname, item.href);
+                const isAlerts = item.href === '/alerts';
 
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`sb-link ${cls}`}
+                    style={{
+                      ...navItemStyle,
+                      ...(active ? activeNavItemStyle : {}),
+                    }}
                   >
-                    <span className="sb-icon">{item.icon}</span>
-                    {item.label}
+                    <span style={{ width: 24 }}>{item.icon}</span>
+                    <span style={{ flex: 1 }}>{item.label}</span>
 
-                    {item.href === '/alerts' && unreadCount > 0 && (
-                      <span className="sb-badge">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
+                    {isAlerts && unreadCount > 0 && (
+                      <span style={badgeStyle}>{unreadCount}</span>
                     )}
                   </Link>
                 );
               })}
-
-              {isRecruiter && groupIndex === 0 && <RecruiterStats />}
             </div>
-          ))}
-        </nav>
 
-        {isRecruiter && (
-          <Link href="/recruiter/dashboard" className="sb-rec-cta">
-            <span style={{ fontSize: 15, lineHeight: 1 }}>+</span>
-            Recruitment Center
+            {isRecruiter && group.label === 'Workspace' && <RecruiterStats />}
+          </section>
+        ))}
+      </nav>
+
+      <div style={bottomStyle}>
+        {isRecruiter ? (
+          <Link
+            href="/recruiter/dashboard?tab=jobs&post=1"
+            style={ctaStyle}
+          >
+            <span style={{ fontSize: 18 }}>+</span>
+            Post a Job
+          </Link>
+        ) : (
+          <Link href="/resume-analysis" style={ctaStyle}>
+            <span style={{ fontSize: 16 }}>🧠</span>
+            Analyse Resume
           </Link>
         )}
 
-        {user && (
-          <div className="sb-foot" ref={menuRef}>
-            {accountMenuOpen && (
-              <div className="sb-account-menu">
-                <div className="sb-menu-user">
-                  <div className="sb-menu-name">
-                    {user.full_name ?? 'JobCrawler User'}
-                  </div>
-                  <div className="sb-menu-email">{user.email}</div>
-                </div>
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            style={accountButtonStyle}
+          >
+            <span style={avatarStyle}>{initial}</span>
 
-                <Link
-                  href="/settings"
-                  className="sb-menu-link"
-                  onClick={() => setAccountMenuOpen(false)}
-                >
-                  <span>⚙️</span>
-                  Settings
-                </Link>
-
-                <button
-                  type="button"
-                  className="sb-menu-btn sb-menu-danger"
-                  onClick={() => {
-                    setAccountMenuOpen(false);
-                    setLogoutOpen(true);
-                  }}
-                >
-                  <span>⏻</span>
-                  Sign out
-                </button>
-              </div>
-            )}
-
-            <button
-              type="button"
-              className={`sb-ucard ${accountMenuOpen ? 'open' : ''}`}
-              onClick={() => setAccountMenuOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={accountMenuOpen}
-              title="Account menu"
-            >
-              <div className="sb-avatar" aria-hidden="true">
-                {initial}
-              </div>
-
-              <div className="sb-uinfo">
-                <div className="sb-uname">{user.full_name ?? user.email}</div>
-                <div className="sb-urole">{user.role}</div>
-                <div className="sb-uhint">Account menu</div>
-              </div>
-
-              <span className={`sb-chevron ${accountMenuOpen ? 'open' : ''}`}>
-                ▾
+            <span style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+              <strong
+                style={{
+                  display: 'block',
+                  color: '#F8FAFC',
+                  fontSize: 13,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {userName}
+              </strong>
+              <span style={{ color: 'rgba(255,255,255,0.36)', fontSize: 11 }}>
+                {isRecruiter ? 'Recruiter' : 'Candidate'}
               </span>
-            </button>
-          </div>
-        )}
-      </aside>
+            </span>
 
-      <LogoutConfirmModal
-        open={logoutOpen}
-        onCancel={() => setLogoutOpen(false)}
-        onConfirm={() => void handleLogout()}
-      />
-    </>
+            <span style={{ color: 'rgba(255,255,255,0.35)' }}>▾</span>
+          </button>
+
+          {menuOpen && (
+            <div style={menuStyle}>
+              <Link href="/settings" style={menuItemStyle}>
+                ⚙ Settings
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                style={{
+                  ...menuItemStyle,
+                  color: '#FCA5A5',
+                  width: '100%',
+                  textAlign: 'left',
+                }}
+              >
+                ⏻ Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
   );
 }
 
-export default Sidebar;
+const sidebarStyle: React.CSSProperties = {
+  width: 280,
+  height: '100vh',
+  background: '#0B0F16',
+  borderRight: '1px solid rgba(255,255,255,0.07)',
+  display: 'flex',
+  flexDirection: 'column',
+  color: '#E2E8F0',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const brandStyle: React.CSSProperties = {
+  height: 82,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  padding: '0 24px',
+  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  color: '#F8FAFC',
+};
+
+const logoMarkStyle: React.CSSProperties = {
+  color: '#38BDF8',
+  fontSize: 22,
+};
+
+const navStyle: React.CSSProperties = {
+  flex: 1,
+  padding: '24px 14px',
+  overflowY: 'auto',
+};
+
+const groupLabelStyle: React.CSSProperties = {
+  margin: '0 0 10px 10px',
+  color: 'rgba(255,255,255,0.28)',
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+};
+
+const navItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '13px 14px',
+  borderRadius: 12,
+  color: '#CBD5E1',
+  textDecoration: 'none',
+  fontSize: 14,
+  fontWeight: 700,
+  border: '1px solid transparent',
+  transition: 'all 0.16s ease',
+};
+
+const activeNavItemStyle: React.CSSProperties = {
+  color: '#38BDF8',
+  background: 'rgba(56,189,248,0.10)',
+  border: '1px solid rgba(56,189,248,0.18)',
+};
+
+const badgeStyle: React.CSSProperties = {
+  minWidth: 20,
+  height: 20,
+  borderRadius: 999,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(124,58,237,0.35)',
+  border: '1px solid rgba(167,139,250,0.35)',
+  color: '#C4B5FD',
+  fontSize: 11,
+  fontWeight: 900,
+};
+
+const statsBoxStyle: React.CSSProperties = {
+  margin: '12px 10px 0',
+  borderRadius: 12,
+  border: '1px solid rgba(244,114,182,0.22)',
+  background: 'rgba(244,114,182,0.07)',
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  padding: '10px 12px',
+  gap: 10,
+  fontSize: 11,
+};
+
+const bottomStyle: React.CSSProperties = {
+  padding: 14,
+  borderTop: '1px solid rgba(255,255,255,0.06)',
+  display: 'grid',
+  gap: 14,
+};
+
+const ctaStyle: React.CSSProperties = {
+  height: 48,
+  borderRadius: 12,
+  border: '1px solid rgba(244,114,182,0.24)',
+  background: 'rgba(244,114,182,0.08)',
+  color: '#F8FAFC',
+  textDecoration: 'none',
+  fontWeight: 900,
+  fontSize: 13,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+};
+
+const accountButtonStyle: React.CSSProperties = {
+  width: '100%',
+  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(255,255,255,0.035)',
+  borderRadius: 14,
+  padding: 12,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  cursor: 'pointer',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const avatarStyle: React.CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: '50%',
+  background: 'linear-gradient(135deg, #7C3AED, #8B5CF6)',
+  color: 'white',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontWeight: 900,
+};
+
+const menuStyle: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 72,
+  left: 0,
+  right: 0,
+  padding: 8,
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: '#0F172A',
+  boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
+  display: 'grid',
+  gap: 6,
+  zIndex: 20,
+};
+
+const menuItemStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#CBD5E1',
+  textDecoration: 'none',
+  fontSize: 13,
+  fontWeight: 800,
+  padding: '10px 12px',
+  borderRadius: 10,
+  cursor: 'pointer',
+  fontFamily: "'Sora', sans-serif",
+};

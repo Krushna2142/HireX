@@ -1,12 +1,14 @@
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+// ts-api/src/interviews/candidate-interviews.controller.ts
+
 import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
-import { InterviewsService } from './interviews.service';
+
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorators';
+import { InterviewsService } from './interviews.service';
 
 @Controller('candidate/interviews')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('candidate')
+@UseGuards(JwtAuthGuard)
 export class CandidateInterviewsController {
   constructor(private readonly interviewsService: InterviewsService) {}
 
