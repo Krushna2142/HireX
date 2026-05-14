@@ -1,8 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable prettier/prettier */
 // src/recommendations/recommendations.service.ts
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -22,6 +17,7 @@ export interface CandidateProfileRow {
 export interface ResumeAnalysisRow {
   id: string;
   resume_id: string;
+  resume_file_name: string | null;
   raw_text: string | null;
   personal_info: Record<string, unknown> | null;
   work_experience: unknown;
@@ -107,24 +103,29 @@ export class RecommendationsService {
   async getJobRecommendations(
     candidateId: string,
     limit = 12,
+    resumeId?: string,
   ): Promise<{
     recommendations: JobRecommendation[];
     reason?: string;
+    selectedResume?: object | null;
     profile?: object;
   }> {
     const safeLimit = Math.min(Math.max(limit || 12, 1), 30);
 
-    const latestAnalysis = await this.fetchLatestResumeAnalysis(candidateId);
+    const selectedAnalysis = await this.fetchResumeAnalysis(candidateId, resumeId);
 
-    if (!latestAnalysis) {
+    if (!selectedAnalysis) {
       return {
         recommendations: [],
-        reason: 'Upload and analyse your resume to unlock recommendations.',
+        selectedResume: resumeId ? { id: resumeId } : null,
+        reason: resumeId
+          ? 'This resume is not analysed yet. Analyse it first to get resume-specific recommendations.'
+          : 'Upload and analyse your resume to unlock recommendations.',
       };
     }
 
     const profile = await this.fetchCandidateProfile(candidateId);
-    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(latestAnalysis);
+    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(selectedAnalysis);
 
     const resumeSkills = this.cleanStringArray(
       resumeAnalysisPayload.topSkills ?? resumeAnalysisPayload.skills,
@@ -133,27 +134,19 @@ export class RecommendationsService {
     if (!resumeSkills.length) {
       return {
         recommendations: [],
-        reason: 'No skills found in analysed resume. Re-run resume analysis.',
+        selectedResume: this.mapSelectedResume(selectedAnalysis),
+        reason: 'No skills found in this analysed resume. Re-run analysis or upload a better resume.',
       };
     }
 
-    const jobs = await this.fetchPublishedJobs(safeLimit * 3);
+    const jobs = this.dedupeJobs(await this.fetchPublishedJobs(safeLimit * 5));
 
     if (!jobs.length) {
       return {
         recommendations: [],
+        selectedResume: this.mapSelectedResume(selectedAnalysis),
         reason: 'No published jobs are available in PostgreSQL yet.',
-        profile: {
-          skills: resumeSkills,
-          experienceLevel:
-            profile?.experience_level ??
-            latestAnalysis.experience_level ??
-            'fresher',
-          experienceYears:
-            profile?.experience_years ??
-            latestAnalysis.experience_years ??
-            0,
-        },
+        profile: this.buildProfileResponse(profile, selectedAnalysis, resumeSkills),
       };
     }
 
@@ -168,8 +161,16 @@ export class RecommendationsService {
           job.description,
         );
 
-        const finalMatch = Math.round(
-          Math.max(skillMatchScore, atsResult.atsScore * 0.88),
+        const titleMatchBoost = this.calculateTitleBoost(
+          resumeAnalysisPayload,
+          job.title,
+        );
+
+        const finalMatch = Math.min(
+          100,
+          Math.round(
+            Math.max(skillMatchScore, atsResult.atsScore * 0.88) + titleMatchBoost,
+          ),
         );
 
         return this.mapRecommendation(job, finalMatch, atsResult);
@@ -185,31 +186,20 @@ export class RecommendationsService {
 
     return {
       recommendations: sorted,
-      profile: {
-        skills: resumeSkills,
-        experienceLevel:
-          profile?.experience_level ??
-          latestAnalysis.experience_level ??
-          'fresher',
-        experienceYears:
-          profile?.experience_years ??
-          latestAnalysis.experience_years ??
-          0,
-        currentTitle: profile?.current_title ?? null,
-        industryTags:
-          this.cleanStringArray(profile?.target_industries).length > 0
-            ? this.cleanStringArray(profile?.target_industries)
-            : this.cleanStringArray(latestAnalysis.industry_tags),
-      },
+      selectedResume: this.mapSelectedResume(selectedAnalysis),
+      profile: this.buildProfileResponse(profile, selectedAnalysis, resumeSkills),
     };
   }
 
-  async getSkillGapAnalysis(candidateId: string): Promise<SkillGapAnalysis | null> {
-    const latestAnalysis = await this.fetchLatestResumeAnalysis(candidateId);
+  async getSkillGapAnalysis(
+    candidateId: string,
+    resumeId?: string,
+  ): Promise<SkillGapAnalysis | null> {
+    const selectedAnalysis = await this.fetchResumeAnalysis(candidateId, resumeId);
 
-    if (!latestAnalysis) return null;
+    if (!selectedAnalysis) return null;
 
-    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(latestAnalysis);
+    const resumeAnalysisPayload = this.buildResumeAnalysisPayload(selectedAnalysis);
     const userSkills = this.cleanStringArray(
       resumeAnalysisPayload.topSkills ?? resumeAnalysisPayload.skills,
     );
@@ -290,13 +280,48 @@ export class RecommendationsService {
     }
   }
 
-  private async fetchLatestResumeAnalysis(
+  private async fetchResumeAnalysis(
     userId: string,
+    resumeId?: string,
   ): Promise<ResumeAnalysisRow | null> {
+    if (resumeId) {
+      const { rows } = await this.db.query<ResumeAnalysisRow>(
+        `SELECT
+           ra.id,
+           ra.resume_id,
+           r.original_file_name AS resume_file_name,
+           ra.raw_text,
+           ra.personal_info,
+           ra.work_experience,
+           ra.education,
+           ra.skills,
+           ra.certifications,
+           ra.projects,
+           ra.experience_years,
+           ra.experience_level,
+           ra.top_skills,
+           ra.industry_tags,
+           ra.trajectory,
+           ra.status::text AS status,
+           r.analysis_json
+         FROM resume_analyses ra
+         JOIN resumes r ON r.id = ra.resume_id
+         WHERE r.user_id = $1
+           AND r.id = $2
+           AND ra.status::text IN ('COMPLETED', 'completed', 'analyzed', 'ANALYZED')
+         ORDER BY ra.processed_at DESC NULLS LAST, r.analyzed_at DESC NULLS LAST
+         LIMIT 1`,
+        [userId, resumeId],
+      );
+
+      return rows[0] ?? null;
+    }
+
     const { rows } = await this.db.query<ResumeAnalysisRow>(
       `SELECT
          ra.id,
          ra.resume_id,
+         r.original_file_name AS resume_file_name,
          ra.raw_text,
          ra.personal_info,
          ra.work_experience,
@@ -315,7 +340,7 @@ export class RecommendationsService {
        JOIN resumes r ON r.id = ra.resume_id
        WHERE r.user_id = $1
          AND ra.status::text IN ('COMPLETED', 'completed', 'analyzed', 'ANALYZED')
-       ORDER BY ra.processed_at DESC NULLS LAST, r.analyzed_at DESC NULLS LAST
+       ORDER BY r.is_primary DESC NULLS LAST, ra.processed_at DESC NULLS LAST, r.analyzed_at DESC NULLS LAST
        LIMIT 1`,
       [userId],
     );
@@ -358,6 +383,8 @@ export class RecommendationsService {
 
     return {
       ...analysisJson,
+      resumeId: row.resume_id,
+      fileName: row.resume_file_name,
       rawTextPreview: row.raw_text ?? analysisJson.rawTextPreview,
       personalInfo: row.personal_info ?? analysisJson.personalInfo,
       workExperience: row.work_experience ?? analysisJson.workExperience,
@@ -460,6 +487,28 @@ export class RecommendationsService {
     return Math.min(100, Math.max(35, hits * 12));
   }
 
+  private calculateTitleBoost(
+    resumeAnalysis: Record<string, unknown>,
+    jobTitle: string,
+  ): number {
+    const title = jobTitle.toLowerCase();
+    const rawText = String(resumeAnalysis.rawTextPreview ?? '').toLowerCase();
+    const industryTags = this.cleanStringArray(resumeAnalysis.industryTags);
+
+    let boost = 0;
+
+    if (rawText.includes('frontend') && title.includes('frontend')) boost += 6;
+    if (rawText.includes('backend') && title.includes('backend')) boost += 6;
+    if (rawText.includes('full stack') && title.includes('fullstack')) boost += 6;
+    if (rawText.includes('full-stack') && title.includes('fullstack')) boost += 6;
+    if (rawText.includes('java') && title.includes('java')) boost += 4;
+    if (rawText.includes('react') && title.includes('react')) boost += 4;
+    if (rawText.includes('python') && title.includes('python')) boost += 4;
+    if (industryTags.some((tag) => title.includes(tag.toLowerCase()))) boost += 3;
+
+    return Math.min(boost, 12);
+  }
+
   private mapRecommendation(
     job: JobRecommendationRow,
     matchScore: number,
@@ -514,7 +563,65 @@ export class RecommendationsService {
 
     return reasons.length
       ? `Recommended because it ${reasons.join(', ')}.`
-      : 'Recommended from your analysed resume profile and available job data.';
+      : 'Recommended from this selected resume analysis and available job data.';
+  }
+
+  private dedupeJobs(jobs: JobRecommendationRow[]): JobRecommendationRow[] {
+    const seen = new Set<string>();
+    const output: JobRecommendationRow[] = [];
+
+    for (const job of jobs) {
+      const key = [
+        job.title,
+        job.company,
+        job.location ?? '',
+      ]
+        .join('|')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      output.push(job);
+    }
+
+    return output;
+  }
+
+  private mapSelectedResume(row: ResumeAnalysisRow) {
+    return {
+      id: row.resume_id,
+      fileName: row.resume_file_name,
+      experienceLevel: row.experience_level,
+      experienceYears: row.experience_years,
+      topSkills: this.cleanStringArray(row.top_skills),
+      industryTags: this.cleanStringArray(row.industry_tags),
+    };
+  }
+
+  private buildProfileResponse(
+    profile: CandidateProfileRow | null,
+    selectedAnalysis: ResumeAnalysisRow,
+    resumeSkills: string[],
+  ) {
+    return {
+      skills: resumeSkills,
+      experienceLevel:
+        selectedAnalysis.experience_level ??
+        profile?.experience_level ??
+        'fresher',
+      experienceYears:
+        selectedAnalysis.experience_years ??
+        profile?.experience_years ??
+        0,
+      currentTitle: profile?.current_title ?? null,
+      industryTags:
+        this.cleanStringArray(selectedAnalysis.industry_tags).length > 0
+          ? this.cleanStringArray(selectedAnalysis.industry_tags)
+          : this.cleanStringArray(profile?.target_industries),
+    };
   }
 
   private cleanStringArray(value?: unknown): string[] {
