@@ -260,9 +260,8 @@ function UploadZone({ onUploaded }: { onUploaded: (id: string) => void }) {
           padding: '20px 16px',
           borderRadius: 12,
           cursor: uploading ? 'not-allowed' : 'pointer',
-          border: `1.5px dashed ${
-            drag ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.12)'
-          }`,
+          border: `1.5px dashed ${drag ? 'rgba(167,139,250,0.6)' : 'rgba(255,255,255,0.12)'
+            }`,
           background: drag ? 'rgba(124,58,237,0.06)' : 'rgba(255,255,255,0.02)',
           transition: 'all 0.2s',
         }}
@@ -359,9 +358,8 @@ function ResumeListItem({
         textAlign: 'left',
         padding: '12px 14px',
         borderRadius: 10,
-        border: `1px solid ${
-          selected ? 'rgba(167,139,250,0.45)' : 'rgba(255,255,255,0.07)'
-        }`,
+        border: `1px solid ${selected ? 'rgba(167,139,250,0.45)' : 'rgba(255,255,255,0.07)'
+          }`,
         background: selected ? 'rgba(124,58,237,0.1)' : 'rgba(255,255,255,0.02)',
         cursor: 'pointer',
         transition: 'all 0.15s',
@@ -703,35 +701,35 @@ function AnalysisSummaryCard({
         skillScore !== null ||
         readabilityScore !== null ||
         keywordScore !== null) && (
-        <section style={panelStyle}>
-          <p style={sectionTitleStyle}>Score breakdown</p>
+          <section style={panelStyle}>
+            <p style={sectionTitleStyle}>Score breakdown</p>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-              gap: 10,
-            }}
-          >
-            {sectionScore !== null && (
-              <ScoreCard label="Sections" value={`${sectionScore}%`} color="#38BDF8" />
-            )}
-            {skillScore !== null && (
-              <ScoreCard label="Skills" value={`${skillScore}%`} color="#A78BFA" />
-            )}
-            {readabilityScore !== null && (
-              <ScoreCard
-                label="Readability"
-                value={`${readabilityScore}%`}
-                color="#34D399"
-              />
-            )}
-            {keywordScore !== null && (
-              <ScoreCard label="Keywords" value={`${keywordScore}%`} color="#FBBF24" />
-            )}
-          </div>
-        </section>
-      )}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: 10,
+              }}
+            >
+              {sectionScore !== null && (
+                <ScoreCard label="Sections" value={`${sectionScore}%`} color="#38BDF8" />
+              )}
+              {skillScore !== null && (
+                <ScoreCard label="Skills" value={`${skillScore}%`} color="#A78BFA" />
+              )}
+              {readabilityScore !== null && (
+                <ScoreCard
+                  label="Readability"
+                  value={`${readabilityScore}%`}
+                  color="#34D399"
+                />
+              )}
+              {keywordScore !== null && (
+                <ScoreCard label="Keywords" value={`${keywordScore}%`} color="#FBBF24" />
+              )}
+            </div>
+          </section>
+        )}
 
       <PillList title="Detected skills" items={topSkills} color="#34D399" />
       <PillList title="Industry tags" items={industryTags} color="#60A5FA" />
@@ -875,7 +873,15 @@ export default function ResumeAnalysisPage() {
   } = useAnalysis(selectedId);
 
   useEffect(() => {
-    if (!selectedId && resumes.length > 0) setSelectedId(resumes[0].id);
+    if (selectedId || resumes.length === 0) return;
+
+    const preferred =
+      resumes.find((resume) => resume.status === 'analyzed') ??
+      resumes.find((resume) => resume.status === 'uploaded') ??
+      resumes.find((resume) => resume.status === 'processing') ??
+      resumes[0];
+
+    setSelectedId(preferred.id);
   }, [resumes, selectedId]);
 
   const selectedResume = resumes.find((resume) => resume.id === selectedId);

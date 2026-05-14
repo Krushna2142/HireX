@@ -75,23 +75,26 @@ export function useAnalysis(resumeId: string | null) {
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const didInvalidate = useRef(false);
 
-  // Poll/fetch the resume status record (manual/focus-based refresh)
   const { data: resume, mutate: mutateResume } = useSWR<Resume, Error>(
     resumeId ? `/resumes/${resumeId}` : null,
     fetcher as Fetcher<Resume, string>,
     {
-      refreshInterval: 0, // <- was false
+      refreshInterval: 0,
       revalidateOnFocus: true,
       onSuccess: (data: Resume) => {
-        // When analysis finishes, invalidate recommendations once
         if (data.status === 'analyzed' && !didInvalidate.current) {
           didInvalidate.current = true;
-          void globalMutate('/jobs/recommendations');
+
           void globalMutate('/resumes');
           void globalMutate('/resumes/latest');
+          void globalMutate(`/resumes/${data.id}/analysis`);
+
+          // New recommendation endpoint, not old /jobs/recommendations.
+          void globalMutate(
+            `/recommendations/jobs?limit=12&resumeId=${encodeURIComponent(data.id)}`,
+          );
         }
 
-        // Reset flag if resume goes back to a non-analyzed state
         if (data.status !== 'analyzed') {
           didInvalidate.current = false;
         }
@@ -99,7 +102,6 @@ export function useAnalysis(resumeId: string | null) {
     },
   );
 
-  // Fetch analysis only when resume is analyzed
   const { data: analysis, mutate: mutateAnalysis } = useSWR<ResumeAnalysis, Error>(
     resume?.status === 'analyzed' && resumeId ? `/resumes/${resumeId}/analysis` : null,
     fetcher as Fetcher<ResumeAnalysis, string>,
@@ -109,7 +111,6 @@ export function useAnalysis(resumeId: string | null) {
     },
   );
 
-  // Trigger analysis
   const triggerAnalysis = useCallback(
     async (id: string) => {
       setTriggering(true);
@@ -119,14 +120,13 @@ export function useAnalysis(resumeId: string | null) {
       try {
         await api.post(`/resumes/${id}/analyse`);
 
-        // Revalidate immediately so UI reflects processing state quickly
         await Promise.all([
           mutateResume(),
           mutateAnalysis(undefined),
           globalMutate('/resumes'),
+          globalMutate('/resumes/latest'),
         ]);
 
-        // Poll manually every 2s until terminal (max 5 minutes)
         const pollInterval = setInterval(async () => {
           try {
             const latestResume = await api.get(`/resumes/${id}`);
@@ -134,28 +134,54 @@ export function useAnalysis(resumeId: string | null) {
 
             if (latestStatus === 'analyzed') {
               clearInterval(pollInterval);
+
               await Promise.all([
                 mutateResume(),
+                globalMutate('/resumes'),
+                globalMutate('/resumes/latest'),
                 globalMutate(`/resumes/${id}/analysis`),
-                globalMutate('/jobs/recommendations'),
+                globalMutate(
+                  `/recommendations/jobs?limit=12&resumeId=${encodeURIComponent(id)}`,
+                ),
               ]);
-            } else if (latestStatus === 'failed') {
+            }
+
+            if (latestStatus === 'failed') {
               clearInterval(pollInterval);
-              setTriggerError('Analysis failed. Please try again.');
-              await mutateResume();
+              setTriggerError(
+                latestResume.data?.analysisError ??
+                  'Analysis failed. Please upload a cleaner PDF/DOCX or retry.',
+              );
+
+              await Promise.all([
+                mutateResume(),
+                globalMutate('/resumes'),
+                globalMutate('/resumes/latest'),
+              ]);
             }
           } catch {
-            // Ignore transient polling errors; next interval retries
+            // ignore transient polling errors
           }
         }, 2_000);
 
         setTimeout(() => clearInterval(pollInterval), 300_000);
       } catch (err: unknown) {
+        const errorObj = err as {
+          response?: {
+            data?: {
+              message?: string;
+              detail?: string;
+            };
+          };
+          message?: string;
+        };
+
         const message =
-          err instanceof Error
-            ? err.message
-            : (err as { response?: { data?: { message?: string } } })?.response?.data
-                ?.message ?? 'Failed to start analysis';
+          errorObj.response?.data?.detail ??
+          errorObj.response?.data?.message ??
+          errorObj.message ??
+          'Failed to start analysis';
+
         setTriggerError(message);
       } finally {
         setTriggering(false);
@@ -165,6 +191,7 @@ export function useAnalysis(resumeId: string | null) {
   );
 
   return {
+    resume,
     analysis,
     status: resume?.status ?? null,
     loading: triggering,

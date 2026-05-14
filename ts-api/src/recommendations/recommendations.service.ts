@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable prettier/prettier */
 // src/recommendations/recommendations.service.ts
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -119,13 +124,13 @@ export class RecommendationsService {
         recommendations: [],
         selectedResume: resumeId ? { id: resumeId } : null,
         reason: resumeId
-          ? 'This resume is not analysed yet. Analyse it first to get resume-specific recommendations.'
+          ? 'This selected resume is not analysed yet. Analyse it first.'
           : 'Upload and analyse your resume to unlock recommendations.',
       };
     }
 
-    const profile = await this.fetchCandidateProfile(candidateId);
     const resumeAnalysisPayload = this.buildResumeAnalysisPayload(selectedAnalysis);
+    const profile = await this.fetchCandidateProfile(candidateId);
 
     const resumeSkills = this.cleanStringArray(
       resumeAnalysisPayload.topSkills ?? resumeAnalysisPayload.skills,
@@ -135,7 +140,7 @@ export class RecommendationsService {
       return {
         recommendations: [],
         selectedResume: this.mapSelectedResume(selectedAnalysis),
-        reason: 'No skills found in this analysed resume. Re-run analysis or upload a better resume.',
+        reason: 'No skills found in this resume analysis. Re-run analysis with a better resume file.',
       };
     }
 
@@ -145,31 +150,34 @@ export class RecommendationsService {
       return {
         recommendations: [],
         selectedResume: this.mapSelectedResume(selectedAnalysis),
-        reason: 'No published jobs are available in PostgreSQL yet.',
+        reason: 'No published jobs are stored in PostgreSQL yet.',
         profile: this.buildProfileResponse(profile, selectedAnalysis, resumeSkills),
       };
     }
 
-    const recommendations = await Promise.all(
+    const scored = await Promise.all(
       jobs.map(async (job) => {
         const atsResult = await this.safeAtsScore(job, resumeAnalysisPayload);
 
-        const skillMatchScore = this.calculateSkillMatchScore(
+        const skillScore = this.calculateSkillMatchScore(
           resumeSkills,
           job.required_skills ?? [],
           job.title,
           job.description,
         );
 
-        const titleMatchBoost = this.calculateTitleBoost(
-          resumeAnalysisPayload,
-          job.title,
-        );
+        const roleScore = this.calculateRoleScore(resumeAnalysisPayload, job);
+        const industryScore = this.calculateIndustryScore(resumeAnalysisPayload, job);
+        const experienceScore = this.calculateExperienceScore(resumeAnalysisPayload, job);
 
         const finalMatch = Math.min(
           100,
           Math.round(
-            Math.max(skillMatchScore, atsResult.atsScore * 0.88) + titleMatchBoost,
+            atsResult.atsScore * 0.58 +
+              skillScore * 0.24 +
+              roleScore * 0.1 +
+              industryScore * 0.05 +
+              experienceScore * 0.03,
           ),
         );
 
@@ -177,10 +185,10 @@ export class RecommendationsService {
       }),
     );
 
-    const sorted = recommendations
+    const sorted = scored
       .sort((a, b) => {
-        if (b.atsScore !== a.atsScore) return b.atsScore - a.atsScore;
-        return b.matchScore - a.matchScore;
+        if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+        return b.atsScore - a.atsScore;
       })
       .slice(0, safeLimit);
 
@@ -222,7 +230,7 @@ export class RecommendationsService {
            lower(skill) = ANY($1::text[]) AS candidate_has
          FROM jobs
          CROSS JOIN LATERAL unnest(COALESCE(required_skills, ARRAY[]::text[])) AS skill
-         WHERE status::text IN ('PUBLISHED', 'published', 'active', 'ACTIVE')
+         WHERE status::text IN ('PUBLISHED', 'published', 'ACTIVE', 'active')
          GROUP BY skill, candidate_has
          ORDER BY COUNT(*) DESC
          LIMIT 20`,
@@ -273,7 +281,7 @@ export class RecommendationsService {
       return rows[0] ?? null;
     } catch (error: any) {
       this.logger.warn(
-        `[recommendations] jobseeker profile query failed, using resume analysis only: ${error.message}`,
+        `[recommendations] jobseeker profile query failed. Using resume analysis only: ${error.message}`,
       );
 
       return null;
@@ -340,7 +348,7 @@ export class RecommendationsService {
        JOIN resumes r ON r.id = ra.resume_id
        WHERE r.user_id = $1
          AND ra.status::text IN ('COMPLETED', 'completed', 'analyzed', 'ANALYZED')
-       ORDER BY r.is_primary DESC NULLS LAST, ra.processed_at DESC NULLS LAST, r.analyzed_at DESC NULLS LAST
+       ORDER BY ra.processed_at DESC NULLS LAST, r.analyzed_at DESC NULLS LAST
        LIMIT 1`,
       [userId],
     );
@@ -364,7 +372,7 @@ export class RecommendationsService {
          apply_url,
          status::text AS status
        FROM jobs
-       WHERE status::text IN ('PUBLISHED', 'published', 'active', 'ACTIVE')
+       WHERE status::text IN ('PUBLISHED', 'published', 'ACTIVE', 'active')
        ORDER BY created_at DESC
        LIMIT $1`,
       [limit],
@@ -445,12 +453,12 @@ export class RecommendationsService {
         matchedSkills: matched,
         missingSkills: missing,
         reason:
-          'Generated by JobCrawler fallback matcher because Python ATS scoring was temporarily unavailable.',
+          'Generated by JobCrawler local matcher because Python ATS scoring was temporarily unavailable.',
         breakdown: {
           skillScore: score,
           baseAts: Number(resumeAnalysis.atsScore ?? 50),
           sectionScore: Number(resumeAnalysis.sectionScore ?? 50),
-          titleScore: 50,
+          titleScore: this.calculateRoleScore(resumeAnalysis, job),
         },
       };
     }
@@ -473,40 +481,77 @@ export class RecommendationsService {
     const text = `${title ?? ''} ${description ?? ''}`.toLowerCase();
 
     if (requiredSkills.length) {
-      const matched = requiredSkills.filter((skill) => resumeSkills.includes(skill));
-      const directScore = Math.round((matched.length / requiredSkills.length) * 100);
+      const exact = requiredSkills.filter((skill) => resumeSkills.includes(skill));
+      const textHits = resumeSkills.filter((skill) => text.includes(skill));
 
-      const textHits = resumeSkills.filter((skill) => text.includes(skill)).length;
-      const textScore = Math.min(100, textHits * 12);
+      const exactScore = Math.round((exact.length / requiredSkills.length) * 100);
+      const textScore = Math.min(100, textHits.length * 10);
 
-      return Math.max(directScore, textScore);
+      return Math.max(exactScore, textScore);
     }
 
     const hits = resumeSkills.filter((skill) => text.includes(skill)).length;
 
-    return Math.min(100, Math.max(35, hits * 12));
+    return Math.min(100, Math.max(25, hits * 10));
   }
 
-  private calculateTitleBoost(
+  private calculateRoleScore(
     resumeAnalysis: Record<string, unknown>,
-    jobTitle: string,
+    job: JobRecommendationRow,
   ): number {
-    const title = jobTitle.toLowerCase();
-    const rawText = String(resumeAnalysis.rawTextPreview ?? '').toLowerCase();
-    const industryTags = this.cleanStringArray(resumeAnalysis.industryTags);
+    const title = job.title.toLowerCase();
+    const raw = String(resumeAnalysis.rawTextPreview ?? '').toLowerCase();
+    const skills = this.cleanStringArray(
+      resumeAnalysis.topSkills ?? resumeAnalysis.skills,
+    )
+      .join(' ')
+      .toLowerCase();
 
-    let boost = 0;
+    let score = 0;
 
-    if (rawText.includes('frontend') && title.includes('frontend')) boost += 6;
-    if (rawText.includes('backend') && title.includes('backend')) boost += 6;
-    if (rawText.includes('full stack') && title.includes('fullstack')) boost += 6;
-    if (rawText.includes('full-stack') && title.includes('fullstack')) boost += 6;
-    if (rawText.includes('java') && title.includes('java')) boost += 4;
-    if (rawText.includes('react') && title.includes('react')) boost += 4;
-    if (rawText.includes('python') && title.includes('python')) boost += 4;
-    if (industryTags.some((tag) => title.includes(tag.toLowerCase()))) boost += 3;
+    const source = `${raw} ${skills}`;
 
-    return Math.min(boost, 12);
+    if (source.includes('frontend') && title.includes('frontend')) score += 30;
+    if (source.includes('backend') && title.includes('backend')) score += 30;
+    if (source.includes('full stack') && title.includes('fullstack')) score += 30;
+    if (source.includes('full-stack') && title.includes('fullstack')) score += 30;
+    if (source.includes('react') && title.includes('react')) score += 15;
+    if (source.includes('next') && title.includes('next')) score += 15;
+    if (source.includes('java') && title.includes('java')) score += 15;
+    if (source.includes('python') && title.includes('python')) score += 15;
+    if (source.includes('vlsi') && title.includes('vlsi')) score += 35;
+    if (source.includes('electronics') && title.includes('electronics')) score += 35;
+
+    return Math.min(score, 100);
+  }
+
+  private calculateIndustryScore(
+    resumeAnalysis: Record<string, unknown>,
+    job: JobRecommendationRow,
+  ): number {
+    const tags = this.cleanStringArray(resumeAnalysis.industryTags);
+    const text = `${job.title} ${job.description}`.toLowerCase();
+
+    if (!tags.length) return 0;
+
+    const hits = tags.filter((tag) => text.includes(tag.toLowerCase())).length;
+
+    return Math.min(100, hits * 30);
+  }
+
+  private calculateExperienceScore(
+    resumeAnalysis: Record<string, unknown>,
+    job: JobRecommendationRow,
+  ): number {
+    const years = Number(resumeAnalysis.experienceYears ?? 0);
+    const text = `${job.title} ${job.description}`.toLowerCase();
+
+    if (text.includes('senior')) return years >= 4 ? 90 : 30;
+    if (text.includes('junior')) return years <= 3 ? 85 : 55;
+    if (text.includes('intern')) return years <= 1 ? 90 : 45;
+    if (text.includes('fresher')) return years <= 1 ? 90 : 50;
+
+    return 65;
   }
 
   private mapRecommendation(
@@ -558,12 +603,12 @@ export class RecommendationsService {
     }
 
     if (atsResult.recommendation === 'REVIEW') {
-      reasons.push('has moderate ATS fit and should be reviewed');
+      reasons.push('has moderate ATS fit and needs review');
     }
 
     return reasons.length
       ? `Recommended because it ${reasons.join(', ')}.`
-      : 'Recommended from this selected resume analysis and available job data.';
+      : 'Recommended from this selected resume analysis and stored job data.';
   }
 
   private dedupeJobs(jobs: JobRecommendationRow[]): JobRecommendationRow[] {
@@ -571,11 +616,7 @@ export class RecommendationsService {
     const output: JobRecommendationRow[] = [];
 
     for (const job of jobs) {
-      const key = [
-        job.title,
-        job.company,
-        job.location ?? '',
-      ]
+      const key = [job.title, job.company, job.location ?? '']
         .join('|')
         .toLowerCase()
         .replace(/\s+/g, ' ')
