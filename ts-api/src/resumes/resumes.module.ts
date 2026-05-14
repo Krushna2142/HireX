@@ -1,32 +1,32 @@
 /* eslint-disable prettier/prettier */
 // src/resumes/resumes.module.ts
-import { Module }     from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
 
-import { PrismaModule }          from '../../prisma/prisma.module';
-import { OllamaModule }          from '../ollama/ollama.module';  // exports LlmService
-import { ResumesController }     from './resumes.controller';
-import { ResumesService }        from './resumes.service';
-import { ResumeAnalysisService } from './resumes-analysis.service';
-import { ResumesProcessor }      from './resumes.processor';
+import { Module } from '@nestjs/common';
 
-const REDIS_ENABLED =
-  process.env.REDIS_ENABLED === 'true' ||
-  !!process.env.REDIS_URL ||
-  !!process.env.REDIS_HOST;
+import { PrismaModule } from '../../prisma/prisma.module';
+import { ResumesController } from './resumes.controller';
+import { ResumesService } from './resumes.service';
 
+/**
+ * Resume analysis is now handled by the separate Dockerized Python AI service.
+ *
+ * Removed old pipeline:
+ * - ResumeAnalysisService
+ * - ResumesProcessor
+ * - BullMQ queue
+ * - Ollama/Gemini dependency from resume module
+ *
+ * NestJS now:
+ * - uploads resume
+ * - stores file in Supabase
+ * - stores resume row in PostgreSQL
+ * - calls Python AI service for analysis
+ * - saves result in resume_analyses / resumes.analysis_json
+ */
 @Module({
-  imports: [
-    ...(REDIS_ENABLED ? [BullModule.registerQueue({ name: 'resume-analysis' })] : []),
-    PrismaModule,
-    OllamaModule,   // ← provides LlmService (Groq)
-  ],
+  imports: [PrismaModule],
   controllers: [ResumesController],
-  providers:   [
-    ResumesService,
-    ResumeAnalysisService,
-    ...(REDIS_ENABLED ? [ResumesProcessor] : []),
-  ],
-  exports:     [ResumesService],
+  providers: [ResumesService],
+  exports: [ResumesService],
 })
 export class ResumesModule {}
