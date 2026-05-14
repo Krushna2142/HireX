@@ -1,36 +1,36 @@
 /* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-floating-promises */
+// src/main.ts
+
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
+function parseOrigins(value?: string): string[] {
+  return String(value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
-  // ── Global prefix ───────────────────────────────────────────────────────────
-  app.setGlobalPrefix('api', {
-    exclude: ['health'],
-  });
+  app.setGlobalPrefix('api');
 
-  // ── Validation ──────────────────────────────────────────────────────────────
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  // ── CORS ────────────────────────────────────────────────────────────────────
   const allowedOrigins = [
-    process.env.FRONTEND_URL || 'https://job-crawler-wine.vercel.app',
     'http://localhost:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3000',
+    'https://job-crawler-wine.vercel.app',
+   
+    ...parseOrigins(process.env.FRONTEND_URL),
+    ...parseOrigins(process.env.CORS_ORIGINS),
   ];
 
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow server-to-server / health checks / curl requests without origin
+    origin(origin, callback) {
+      // Allow server-to-server / Postman / curl requests with no Origin.
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
@@ -39,23 +39,35 @@ async function bootstrap() {
 
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-api-key',
+      'Accept',
+      'Origin',
+    ],
+    exposedHeaders: ['Content-Length'],
   });
 
-  const port = Number(process.env.PORT) || 3001;
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: false,
+    }),
+  );
 
-  // Render/Docker compatible host binding
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+    }),
+  );
+
+  const port = process.env.PORT || 3001;
+
   await app.listen(port, '0.0.0.0');
-
-  const publicUrl =
-    process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
-
-  logger.log(`🚀 Application running on port ${port}`);
-  logger.log(`🌍 Environment: ${process.env.NODE_ENV ?? 'development'}`);
-  logger.log(`🔗 Public URL: ${publicUrl}`);
-  logger.log(`✅ Allowed CORS origins: ${allowedOrigins.join(', ')}`);
 }
 
-bootstrap();
+void bootstrap();
