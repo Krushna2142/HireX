@@ -1,4 +1,8 @@
 'use client';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// frontend/app/(protected)/recruiter/dashboard/page.tsx
+
 import {
   useCallback,
   useEffect,
@@ -26,23 +30,26 @@ type JobRow = {
   requiredSkills?: string[] | string | null;
   required_skills?: string[] | string | null;
   status?: string | null;
-  createdAt?: string | null;
-  created_at?: string | null;
   total_applications?: string | number | null;
   _count?: { applications?: number };
 };
 
 type ApplicationRow = {
   id: string;
-  job_id?: string;
-  jobId?: string;
-  candidate_user_id?: string;
-  candidateUserId?: string;
   status: string;
   applied_at?: string;
   appliedAt?: string;
   created_at?: string;
   createdAt?: string;
+  match_score?: number | null;
+
+  ats_score?: number | null;
+  ats_recommendation?: string | null;
+  ats_matched_skills?: string[] | null;
+  ats_missing_skills?: string[] | null;
+  ats_reason?: string | null;
+  ats_checked_at?: string | null;
+
   candidate?: {
     id?: string;
     name?: string;
@@ -250,14 +257,22 @@ const IT_SKILL_GROUPS = [
   },
 ] as const;
 
+const FLOW_STAGES = [
+  'Applied',
+  'ATS Checked',
+  'Shortlisted',
+  'Scheduled',
+  'Interview',
+  'Feedback',
+  'Hired',
+];
+
 function toArray<T>(raw: unknown, key?: string): T[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw as T[];
-
   if (typeof raw !== 'object') return [];
 
   const obj = raw as Record<string, unknown>;
-
   const keys = ['data', 'items', 'results', 'jobs', 'applicants', key].filter(
     Boolean,
   ) as string[];
@@ -269,7 +284,6 @@ function toArray<T>(raw: unknown, key?: string): T[] {
 
     if (value && typeof value === 'object') {
       const nested = value as Record<string, unknown>;
-
       if (Array.isArray(nested.data)) return nested.data as T[];
       if (Array.isArray(nested.items)) return nested.items as T[];
       if (Array.isArray(nested.results)) return nested.results as T[];
@@ -283,11 +297,8 @@ function toArray<T>(raw: unknown, key?: string): T[] {
 
 function safeString(value: unknown, fallback = ''): string {
   if (value === null || value === undefined) return fallback;
-
   if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
 
   try {
     return JSON.stringify(value);
@@ -298,7 +309,6 @@ function safeString(value: unknown, fallback = ''): string {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   const anyError = error as any;
-
   const raw =
     anyError?.response?.data?.detail ??
     anyError?.response?.data?.message ??
@@ -311,7 +321,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 function isErrorMessage(message: string | null) {
   const value = safeString(message).toLowerCase();
-
   return (
     value.includes('failed') ||
     value.includes('unable') ||
@@ -321,9 +330,12 @@ function isErrorMessage(message: string | null) {
   );
 }
 
+function normalizeStatus(status?: string | null) {
+  return safeString(status, 'applied').replace(/_/g, ' ').toLowerCase();
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '—';
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
 
@@ -389,21 +401,100 @@ function getCandidateName(app: ApplicationRow) {
   );
 }
 
-function normalizeStatus(status?: string | null) {
-  return safeString(status, 'applied')
-    .replace(/_/g, ' ')
-    .toLowerCase();
+function getAtsScore(app: ApplicationRow) {
+  const score = Number(app.ats_score ?? app.match_score ?? 0);
+  return Number.isFinite(score) ? Math.round(score) : 0;
 }
 
-function statusColor(status?: string | null) {
+function getAtsRecommendation(app: ApplicationRow) {
+  return safeString(app.ats_recommendation, 'NOT_CHECKED').toUpperCase();
+}
+
+function getPipelineIndex(app: ApplicationRow) {
+  const status = normalizeStatus(app.status);
+  const hasAts = app.ats_score !== null && app.ats_score !== undefined;
+
+  if (status.includes('hired')) return 6;
+  if (status.includes('offer')) return 5;
+  if (status.includes('feedback') || status.includes('completed')) return 5;
+  if (status.includes('interview')) return 4;
+  if (status.includes('scheduled')) return 3;
+  if (status.includes('shortlist')) return 2;
+  if (hasAts) return 1;
+
+  return 0;
+}
+
+function getFlowColor(app: ApplicationRow) {
+  const status = normalizeStatus(app.status);
+  const recommendation = getAtsRecommendation(app);
+
+  if (status.includes('reject') || recommendation === 'REJECT') return C.red;
+  if (status.includes('hired') || status.includes('offer')) return C.green;
+  if (status.includes('interview') || status.includes('scheduled')) return C.purple;
+  if (status.includes('shortlist') || recommendation === 'SHORTLIST') return C.yellow;
+  if (app.ats_score !== null && app.ats_score !== undefined) return C.sky;
+
+  return C.faint;
+}
+
+function CandidateFlow({ app }: { app: ApplicationRow }) {
+  const activeIndex = getPipelineIndex(app);
+  const color = getFlowColor(app);
+
+  return (
+    <div style={candidateFlowStyle}>
+      {FLOW_STAGES.map((stage, index) => {
+        const done = index <= activeIndex;
+
+        return (
+          <div key={stage} style={flowItemStyle}>
+            <span
+              style={{
+                ...flowDotStyle,
+                background: done ? color : 'rgba(255,255,255,0.14)',
+                boxShadow: done ? `0 0 12px ${color}` : 'none',
+              }}
+            >
+              {done ? '✓' : ''}
+            </span>
+            <span style={{ color: done ? C.text : C.faint }}>{stage}</span>
+            {index < FLOW_STAGES.length - 1 && (
+              <i
+                style={{
+                  ...flowConnectorStyle,
+                  background: index < activeIndex ? color : 'rgba(255,255,255,0.10)',
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status?: string | null }) {
   const s = normalizeStatus(status);
+  let color = C.sky;
 
-  if (s.includes('shortlist')) return C.yellow;
-  if (s.includes('interview')) return C.purple;
-  if (s.includes('offer') || s.includes('hire')) return C.green;
-  if (s.includes('reject') || s.includes('fail')) return C.red;
+  if (s.includes('shortlist')) color = C.yellow;
+  if (s.includes('interview')) color = C.purple;
+  if (s.includes('offer') || s.includes('hired')) color = C.green;
+  if (s.includes('reject') || s.includes('fail')) color = C.red;
 
-  return C.sky;
+  return (
+    <span
+      style={{
+        ...statusPillStyle,
+        color,
+        borderColor: `${color}55`,
+        background: `${color}14`,
+      }}
+    >
+      {s}
+    </span>
+  );
 }
 
 function PostJobModal({
@@ -418,7 +509,7 @@ function PostJobModal({
   onSubmit: (payload: PostJobForm) => void;
 }) {
   const [mounted, setMounted] = useState(false);
-
+  const [customSkill, setCustomSkill] = useState('');
   const [form, setForm] = useState<PostJobForm>({
     title: '',
     company: '',
@@ -428,8 +519,6 @@ function PostJobModal({
     description: '',
     requiredSkills: '',
   });
-
-  const [customSkill, setCustomSkill] = useState('');
 
   useEffect(() => {
     setMounted(true);
@@ -463,11 +552,7 @@ function PostJobModal({
 
   const updateSkills = (skills: string[]) => {
     const unique = Array.from(
-      new Set(
-        skills
-          .map((skill) => skill.trim().toLowerCase())
-          .filter(Boolean),
-      ),
+      new Set(skills.map((skill) => skill.trim().toLowerCase()).filter(Boolean)),
     );
 
     update('requiredSkills', unique.join(', '));
@@ -477,26 +562,18 @@ function PostJobModal({
     const normalized = skill.trim().toLowerCase();
     const next = new Set(selectedSkillSet);
 
-    if (next.has(normalized)) {
-      next.delete(normalized);
-    } else {
-      next.add(normalized);
-    }
+    if (next.has(normalized)) next.delete(normalized);
+    else next.add(normalized);
 
     updateSkills(Array.from(next));
   };
 
   const addCustomSkill = () => {
     const clean = customSkill.trim().toLowerCase();
-
     if (!clean) return;
 
     updateSkills([...selectedSkills, clean]);
     setCustomSkill('');
-  };
-
-  const removeSkill = (skill: string) => {
-    updateSkills(selectedSkills.filter((item) => item !== skill));
   };
 
   if (!open || !mounted) return null;
@@ -504,21 +581,15 @@ function PostJobModal({
   return createPortal(
     <div style={modalBackdropStyle}>
       <div style={modalCardStyle}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: 16,
-          }}
-        >
+        <div style={modalHeaderStyle}>
           <div>
             <p style={eyebrowStyle}>Post Job Portal</p>
             <h2 style={{ margin: 0, color: C.text, fontSize: 24 }}>
               Create a new job posting
             </h2>
             <p style={{ margin: '6px 0 0', color: C.faint, fontSize: 13 }}>
-              This job will be tracked by jobId, applications, shortlist,
-              interviews, and final result.
+              This job will be tracked by jobId, applications, ATS checks,
+              interviews, feedback, and final result.
             </p>
           </div>
 
@@ -566,10 +637,7 @@ function PostJobModal({
               <select
                 value={form.workMode}
                 onChange={(event) =>
-                  update(
-                    'workMode',
-                    event.target.value as PostJobForm['workMode'],
-                  )
+                  update('workMode', event.target.value as PostJobForm['workMode'])
                 }
                 style={inputStyle}
               >
@@ -603,22 +671,22 @@ function PostJobModal({
             <span style={labelStyle}>Required Skills *</span>
 
             <div style={selectedSkillsBoxStyle}>
-              {selectedSkills.length > 0 ? (
+              {selectedSkills.length ? (
                 selectedSkills.map((skill) => (
                   <button
                     key={skill}
                     type="button"
-                    onClick={() => removeSkill(skill)}
+                    onClick={() =>
+                      updateSkills(selectedSkills.filter((item) => item !== skill))
+                    }
                     style={selectedSkillPillStyle}
-                    title="Click to remove"
                   >
-                    {skill}
-                    <span style={{ opacity: 0.75 }}>×</span>
+                    {skill} <span>×</span>
                   </button>
                 ))
               ) : (
                 <span style={{ color: C.faint, fontSize: 12 }}>
-                  No skills selected yet. Choose from IT skill groups below.
+                  No skills selected yet.
                 </span>
               )}
             </div>
@@ -656,13 +724,7 @@ function PostJobModal({
               ))}
             </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr auto',
-                gap: 10,
-              }}
-            >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
               <input
                 value={customSkill}
                 onChange={(event) => setCustomSkill(event.target.value)}
@@ -672,15 +734,11 @@ function PostJobModal({
                     addCustomSkill();
                   }
                 }}
-                placeholder="Add custom IT skill, e.g. socket.io"
+                placeholder="Add custom IT skill"
                 style={inputStyle}
               />
 
-              <button
-                type="button"
-                onClick={addCustomSkill}
-                style={secondaryButtonStyle}
-              >
+              <button type="button" onClick={addCustomSkill} style={secondaryButtonStyle}>
                 Add
               </button>
             </div>
@@ -688,21 +746,9 @@ function PostJobModal({
             <input
               value={form.requiredSkills}
               onChange={(event) => update('requiredSkills', event.target.value)}
-              placeholder="Final skills: react, next.js, typescript, node.js"
+              placeholder="Final skills: react, next.js, typescript"
               style={inputStyle}
             />
-
-            <p
-              style={{
-                margin: 0,
-                color: C.faint,
-                fontSize: 11,
-                lineHeight: 1.6,
-              }}
-            >
-              These skills are saved as structured job requirements and used for
-              ATS matching, recommendations, and shortlist ranking.
-            </p>
           </div>
 
           <label style={fieldWrapStyle}>
@@ -717,22 +763,11 @@ function PostJobModal({
           </label>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 10,
-            marginTop: 20,
-          }}
-        >
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            style={secondaryButtonStyle}
-          >
+        <div style={modalFooterStyle}>
+          <button type="button" onClick={onClose} disabled={loading} style={secondaryButtonStyle}>
             Cancel
           </button>
+
           <button
             type="button"
             disabled={loading}
@@ -754,7 +789,6 @@ function PostJobModal({
 
 export default function RecruiterRecruitmentDashboardPage() {
   const [tab, setTab] = useState<TabKey>('overview');
-
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
@@ -767,14 +801,14 @@ export default function RecruiterRecruitmentDashboardPage() {
   const [postJobOpen, setPostJobOpen] = useState(false);
   const [postJobLoading, setPostJobLoading] = useState(false);
 
-  const [scheduleApplicationId, setScheduleApplicationId] = useState<string>('');
-  const [scheduleAt, setScheduleAt] = useState<string>('');
-  const [roundType, setRoundType] = useState<string>('technical');
-  const [durationMins, setDurationMins] = useState<number>(45);
+  const [atsLoadingId, setAtsLoadingId] = useState<string | null>(null);
+
+  const [scheduleApplicationId, setScheduleApplicationId] = useState('');
+  const [scheduleAt, setScheduleAt] = useState('');
+  const [roundType, setRoundType] = useState('technical');
+  const [durationMins, setDurationMins] = useState(45);
   const [scheduling, setScheduling] = useState(false);
-  const [scheduleResult, setScheduleResult] = useState<ScheduleResult | null>(
-    null,
-  );
+  const [scheduleResult, setScheduleResult] = useState<ScheduleResult | null>(null);
 
   const selectedJob = useMemo(
     () => jobs.find((job) => job.id === selectedJobId) ?? null,
@@ -787,69 +821,52 @@ export default function RecruiterRecruitmentDashboardPage() {
   );
 
   const stats = useMemo(() => {
-    const totalApplications = applications.length;
-    const shortlisted = applications.filter((app) =>
-      normalizeStatus(app.status).includes('shortlist'),
-    ).length;
-    const interviews = applications.filter((app) =>
-      normalizeStatus(app.status).includes('interview'),
-    ).length;
-    const rejected = applications.filter((app) =>
-      normalizeStatus(app.status).includes('reject'),
-    ).length;
-
     return {
       totalJobs: jobs.length,
       activeJobs: jobs.filter((job) =>
-        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(
-          safeString(job.status),
-        ),
+        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(safeString(job.status)),
       ).length,
-      totalApplications,
-      shortlisted,
-      interviews,
-      rejected,
+      totalApplications: applications.length,
+      atsChecked: applications.filter((app) => app.ats_score !== null && app.ats_score !== undefined).length,
+      shortlisted: applications.filter((app) =>
+        normalizeStatus(app.status).includes('shortlist'),
+      ).length,
+      scheduled: applications.filter((app) =>
+        normalizeStatus(app.status).includes('scheduled') ||
+        normalizeStatus(app.status).includes('interview'),
+      ).length,
+      hired: applications.filter((app) =>
+        normalizeStatus(app.status).includes('hired'),
+      ).length,
     };
   }, [applications, jobs]);
 
   const loadJobs = useCallback(async () => {
+    const { data } = await api.get('/jobs/mine');
+    const rows = toArray<JobRow>(data, 'jobs').filter(
+      (job) => job && typeof job === 'object' && job.id,
+    );
+
+    setJobs(rows);
+    setSelectedJobId((current) => {
+      if (current && rows.some((job) => job.id === current)) return current;
+      return rows[0]?.id ?? null;
+    });
+
     try {
-      const { data } = await api.get('/jobs/mine');
-      const rows = toArray<JobRow>(data, 'jobs').filter(
-        (job) => job && typeof job === 'object' && job.id,
-      );
-
-      setJobs(rows);
-
-      const activeJobs = rows.filter((job) =>
-        ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(
-          safeString(job.status),
-        ),
-      ).length;
-
-      try {
-        localStorage.setItem(
-          'jc_recruiter_stats',
-          JSON.stringify({
-            activeJobs,
-            newApplicants: rows.reduce(
-              (sum, job) => sum + getApplicantCount(job),
-              0,
+      localStorage.setItem(
+        'jc_recruiter_stats',
+        JSON.stringify({
+          activeJobs: rows.filter((job) =>
+            ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(
+              safeString(job.status),
             ),
-          }),
-        );
-      } catch {
-        // Ignore localStorage issues.
-      }
-
-      setSelectedJobId((current) => {
-        if (current && rows.some((job) => job.id === current)) return current;
-        return rows[0]?.id ?? null;
-      });
-    } catch (error) {
-      setJobs([]);
-      setSelectedJobId(null);
-      throw error;
+          ).length,
+          newApplicants: rows.reduce((sum, job) => sum + getApplicantCount(job), 0),
+        }),
+      );
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -868,17 +885,9 @@ export default function RecruiterRecruitmentDashboardPage() {
       );
 
       setApplications(rows);
-
       setScheduleApplicationId((current) => {
         if (current && rows.some((app) => app.id === current)) return current;
-
-        return (
-          rows.find((app) =>
-            normalizeStatus(app.status).includes('shortlist'),
-          )?.id ??
-          rows[0]?.id ??
-          ''
-        );
+        return rows[0]?.id ?? '';
       });
     } catch (error) {
       setApplications([]);
@@ -945,35 +954,21 @@ export default function RecruiterRecruitmentDashboardPage() {
   async function createRecruiterJob(form: PostJobForm) {
     setMessage(null);
 
-    if (!form.title.trim()) {
-      setMessage('Job title is required.');
-      return;
-    }
-
-    if (!form.company.trim()) {
-      setMessage('Company name is required.');
-      return;
-    }
-
-    if (!form.description.trim()) {
-      setMessage('Job description is required.');
-      return;
-    }
+    if (!form.title.trim()) return setMessage('Job title is required.');
+    if (!form.company.trim()) return setMessage('Company name is required.');
+    if (!form.description.trim()) return setMessage('Job description is required.');
 
     const skills = form.requiredSkills
       .split(',')
       .map((skill) => skill.trim().toLowerCase())
       .filter(Boolean);
 
-    if (!skills.length) {
-      setMessage('Add at least one required skill.');
-      return;
-    }
+    if (!skills.length) return setMessage('Add at least one required skill.');
 
     setPostJobLoading(true);
 
     try {
-      const payload = {
+      await api.post('/jobs', {
         title: form.title.trim(),
         company: form.company.trim(),
         location: form.location.trim() || undefined,
@@ -984,21 +979,33 @@ export default function RecruiterRecruitmentDashboardPage() {
         salaryCurrency: 'INR',
         experienceMin: 0,
         industry: 'IT / Software',
-      };
+      });
 
-      await api.post('/jobs', payload);
-
-      setMessage(
-        'Job posted successfully. Applications will now be tracked under this job.',
-      );
+      setMessage('Job posted successfully.');
       setPostJobOpen(false);
       setTab('jobs');
-
       await loadData();
     } catch (error) {
       setMessage(getErrorMessage(error, 'Failed to post job.'));
     } finally {
       setPostJobLoading(false);
+    }
+  }
+
+  async function runAtsCheck(app: ApplicationRow) {
+    setMessage(null);
+    setAtsLoadingId(app.id);
+
+    try {
+      const { data } = await api.post(`/jobs/applications/${app.id}/ats-check`);
+      const score = data?.ats?.atsScore ?? data?.application?.ats_score ?? 'done';
+
+      setMessage(`ATS check completed for ${getCandidateName(app)}. Score: ${score}%`);
+      await loadApplicants(selectedJobId);
+    } catch (error) {
+      setMessage(getErrorMessage(error, 'ATS check failed.'));
+    } finally {
+      setAtsLoadingId(null);
     }
   }
 
@@ -1010,12 +1017,8 @@ export default function RecruiterRecruitmentDashboardPage() {
         status: 'shortlisted',
       });
 
-      setMessage(`${getCandidateName(app)} shortlisted for interview workflow.`);
-
-      await Promise.all([
-        loadApplicants(selectedJobId),
-        loadDashboard(selectedJobId),
-      ]);
+      setMessage(`${getCandidateName(app)} shortlisted.`);
+      await Promise.all([loadApplicants(selectedJobId), loadDashboard(selectedJobId)]);
     } catch (error) {
       setMessage(getErrorMessage(error, 'Failed to shortlist candidate.'));
     }
@@ -1025,15 +1028,8 @@ export default function RecruiterRecruitmentDashboardPage() {
     setMessage(null);
     setScheduleResult(null);
 
-    if (!selectedApplication) {
-      setMessage('Select an application first.');
-      return;
-    }
-
-    if (!scheduleAt) {
-      setMessage('Select interview date and time.');
-      return;
-    }
+    if (!selectedApplication) return setMessage('Select an application first.');
+    if (!scheduleAt) return setMessage('Select interview date and time.');
 
     setScheduling(true);
 
@@ -1051,13 +1047,11 @@ export default function RecruiterRecruitmentDashboardPage() {
         throw new Error('Interview was created but interviewId was not returned.');
       }
 
-      const scheduledAtIso = new Date(scheduleAt).toISOString();
-
       const roundResponse = await api.post(
         `/recruiter/interviews/${interviewId}/rounds`,
         {
           roundType,
-          scheduledAt: scheduledAtIso,
+          scheduledAt: new Date(scheduleAt).toISOString(),
           durationMins,
           mode: 'video',
         },
@@ -1065,7 +1059,7 @@ export default function RecruiterRecruitmentDashboardPage() {
 
       const round = roundResponse.data;
 
-      const result: ScheduleResult = {
+      setScheduleResult({
         interviewId,
         roundId: round?.id ?? round?.roundId ?? null,
         joinUrl:
@@ -1073,17 +1067,10 @@ export default function RecruiterRecruitmentDashboardPage() {
           round?.meeting_join_url ??
           round?.joinUrl ??
           null,
-      };
+      });
 
-      setScheduleResult(result);
-      setMessage(
-        'Interview scheduled. Candidate will see this in Alerts and Interviews section.',
-      );
-
-      await Promise.all([
-        loadApplicants(selectedJobId),
-        loadDashboard(selectedJobId),
-      ]);
+      setMessage('Interview scheduled. Candidate will see alert and interview entry.');
+      await Promise.all([loadApplicants(selectedJobId), loadDashboard(selectedJobId)]);
     } catch (error) {
       setMessage(getErrorMessage(error, 'Failed to schedule interview.'));
     } finally {
@@ -1099,17 +1086,12 @@ export default function RecruiterRecruitmentDashboardPage() {
         <div>
           <h1 style={titleStyle}>Recruitment Center</h1>
           <p style={subtitleStyle}>
-            Track every job, application, shortlist, interview schedule and
-            result.
+            Track each job, ATS check, shortlist, interview, feedback, and hiring phase.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={() => void loadData()}
-            style={secondaryButtonStyle}
-          >
+          <button type="button" onClick={() => void loadData()} style={secondaryButtonStyle}>
             Refresh
           </button>
 
@@ -1147,7 +1129,7 @@ export default function RecruiterRecruitmentDashboardPage() {
         {[
           ['overview', 'Overview'],
           ['jobs', 'Jobs'],
-          ['applications', 'Applications'],
+          ['applications', 'Applications + ATS'],
           ['schedule', 'Schedule Interview'],
           ['results', 'Results'],
         ].map(([key, label]) => {
@@ -1176,48 +1158,41 @@ export default function RecruiterRecruitmentDashboardPage() {
           {tab === 'overview' && (
             <>
               <section style={gridStyle}>
-                <StatCard
-                  label="Total Jobs"
-                  value={stats.totalJobs}
-                  color={C.purple}
-                />
-                <StatCard
-                  label="Active Jobs"
-                  value={stats.activeJobs}
-                  color={C.green}
-                />
-                <StatCard
-                  label="Applications"
-                  value={stats.totalApplications}
-                  color={C.sky}
-                />
-                <StatCard
-                  label="Shortlisted"
-                  value={stats.shortlisted}
-                  color={C.yellow}
-                />
-                <StatCard
-                  label="In Interview"
-                  value={stats.interviews}
-                  color={C.purple}
-                />
-                <StatCard
-                  label="Rejected"
-                  value={stats.rejected}
-                  color={C.red}
-                />
+                <StatCard label="Total Jobs" value={stats.totalJobs} color={C.purple} />
+                <StatCard label="Active Jobs" value={stats.activeJobs} color={C.green} />
+                <StatCard label="Applications" value={stats.totalApplications} color={C.sky} />
+                <StatCard label="ATS Checked" value={stats.atsChecked} color={C.yellow} />
+                <StatCard label="Shortlisted" value={stats.shortlisted} color={C.purple} />
+                <StatCard label="Scheduled" value={stats.scheduled} color={C.pink} />
+                <StatCard label="Hired" value={stats.hired} color={C.green} />
               </section>
 
               <section style={panelStyle}>
-                <p style={sectionTitleStyle}>Selected job tracking</p>
-                {selectedJob ? (
-                  <JobSummary job={selectedJob} />
-                ) : (
-                  <p style={emptyTextStyle}>
-                    No jobs yet. Click Post Job to create your first recruiter
-                    job.
-                  </p>
-                )}
+                <p style={sectionTitleStyle}>Recruitment phase map</p>
+                <p style={sectionSubStyle}>
+                  Every candidate card below follows: Applied → ATS Checked → Shortlisted → Scheduled → Interview → Feedback → Hired.
+                </p>
+
+                <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
+                  {applications.length ? (
+                    applications.map((app) => (
+                      <div key={app.id} style={miniCandidateFlowCardStyle}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <div>
+                            <strong>{getCandidateName(app)}</strong>
+                            <p style={smallMutedStyle}>{app.candidate?.email ?? 'No email shown'}</p>
+                          </div>
+                          <StatusPill status={app.status} />
+                        </div>
+                        <CandidateFlow app={app} />
+                      </div>
+                    ))
+                  ) : (
+                    <p style={emptyTextStyle}>
+                      Select a job with applicants to see candidate phase tracking.
+                    </p>
+                  )}
+                </div>
               </section>
             </>
           )}
@@ -1228,15 +1203,11 @@ export default function RecruiterRecruitmentDashboardPage() {
                 <div>
                   <p style={sectionTitleStyle}>My Jobs</p>
                   <p style={sectionSubStyle}>
-                    Select a job to track its applications and interviews.
+                    Select a job to track applications and interviews.
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setPostJobOpen(true)}
-                  style={primaryButtonStyle}
-                >
+                <button type="button" onClick={() => setPostJobOpen(true)} style={primaryButtonStyle}>
                   + Post Job
                 </button>
               </div>
@@ -1257,58 +1228,25 @@ export default function RecruiterRecruitmentDashboardPage() {
                         style={{
                           ...jobRowStyle,
                           borderColor: active ? C.borderStrong : C.border,
-                          background: active
-                            ? 'rgba(124,58,237,0.10)'
-                            : C.panel2,
+                          background: active ? 'rgba(124,58,237,0.10)' : C.panel2,
                         }}
                       >
                         <div style={{ flex: 1, textAlign: 'left' }}>
-                          <strong style={{ color: C.text, fontSize: 15 }}>
-                            {job.title}
-                          </strong>
-                          <p
-                            style={{
-                              margin: '5px 0 0',
-                              color: C.faint,
-                              fontSize: 12,
-                            }}
-                          >
-                            {getCompany(job)} ·{' '}
-                            {job.location ?? 'Location not set'} ·{' '}
-                            {getWorkMode(job)}
+                          <strong style={{ color: C.text, fontSize: 15 }}>{job.title}</strong>
+                          <p style={smallMutedStyle}>
+                            {getCompany(job)} · {job.location ?? 'Location not set'} · {getWorkMode(job)}
                           </p>
 
-                          <div
-                            style={{
-                              display: 'flex',
-                              gap: 6,
-                              flexWrap: 'wrap',
-                              marginTop: 10,
-                            }}
-                          >
-                            {getRequiredSkills(job)
-                              .slice(0, 6)
-                              .map((skill) => (
-                                <span key={skill} style={skillPillStyle}>
-                                  {skill}
-                                </span>
-                              ))}
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                            {getRequiredSkills(job).slice(0, 6).map((skill) => (
+                              <span key={skill} style={skillPillStyle}>{skill}</span>
+                            ))}
                           </div>
                         </div>
 
                         <div style={{ textAlign: 'right' }}>
-                          <span style={statusPillStyle}>
-                            {job.status ?? 'active'}
-                          </span>
-                          <p
-                            style={{
-                              margin: '10px 0 0',
-                              color: C.faint,
-                              fontSize: 12,
-                            }}
-                          >
-                            {getApplicantCount(job)} applicants
-                          </p>
+                          <StatusPill status={job.status ?? 'active'} />
+                          <p style={smallMutedStyle}>{getApplicantCount(job)} applicants</p>
                         </div>
                       </button>
                     );
@@ -1324,11 +1262,9 @@ export default function RecruiterRecruitmentDashboardPage() {
             <section style={panelStyle}>
               <div style={sectionHeadStyle}>
                 <div>
-                  <p style={sectionTitleStyle}>Applications by Job</p>
+                  <p style={sectionTitleStyle}>Applications + ATS Resume Checker</p>
                   <p style={sectionSubStyle}>
-                    {selectedJob
-                      ? `${selectedJob.title} · ${getCompany(selectedJob)}`
-                      : 'Select a job first'}
+                    Run ATS per candidate before shortlisting.
                   </p>
                 </div>
 
@@ -1338,9 +1274,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                   style={inputStyle}
                 >
                   {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.title}
-                    </option>
+                    <option key={job.id} value={job.id}>{job.title}</option>
                   ))}
                 </select>
               </div>
@@ -1353,6 +1287,8 @@ export default function RecruiterRecruitmentDashboardPage() {
                     <ApplicationCard
                       key={app.id}
                       app={app}
+                      atsLoading={atsLoadingId === app.id}
+                      onRunAts={() => void runAtsCheck(app)}
                       onShortlist={() => void shortlistApplication(app)}
                       onSchedule={() => {
                         setScheduleApplicationId(app.id);
@@ -1363,8 +1299,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                 </div>
               ) : (
                 <p style={emptyTextStyle}>
-                  No applications for this job yet. Candidate applications will
-                  appear here by jobId.
+                  No applications for this job yet.
                 </p>
               )}
             </section>
@@ -1374,8 +1309,7 @@ export default function RecruiterRecruitmentDashboardPage() {
             <section style={panelStyle}>
               <p style={sectionTitleStyle}>Schedule Interview</p>
               <p style={sectionSubStyle}>
-                Select one application, create an interview round, notify
-                candidate, and generate room link.
+                Schedule after ATS check and shortlist decision.
               </p>
 
               <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
@@ -1383,15 +1317,13 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <span style={labelStyle}>Application</span>
                   <select
                     value={scheduleApplicationId}
-                    onChange={(event) =>
-                      setScheduleApplicationId(event.target.value)
-                    }
+                    onChange={(event) => setScheduleApplicationId(event.target.value)}
                     style={inputStyle}
                   >
                     <option value="">Select candidate application</option>
                     {applications.map((app) => (
                       <option key={app.id} value={app.id}>
-                        {getCandidateName(app)} · {normalizeStatus(app.status)}
+                        {getCandidateName(app)} · ATS {getAtsScore(app)}% · {normalizeStatus(app.status)}
                       </option>
                     ))}
                   </select>
@@ -1400,12 +1332,9 @@ export default function RecruiterRecruitmentDashboardPage() {
                 {selectedApplication && (
                   <div style={miniInfoStyle}>
                     <strong>{getCandidateName(selectedApplication)}</strong>
-                    <span>
-                      {selectedApplication.candidate?.email ?? 'No email shown'}
-                    </span>
-                    <span>
-                      Status: {normalizeStatus(selectedApplication.status)}
-                    </span>
+                    <span>{selectedApplication.candidate?.email ?? 'No email shown'}</span>
+                    <span>ATS: {getAtsScore(selectedApplication)}% · {getAtsRecommendation(selectedApplication)}</span>
+                    <CandidateFlow app={selectedApplication} />
                   </div>
                 )}
 
@@ -1459,20 +1388,14 @@ export default function RecruiterRecruitmentDashboardPage() {
                     cursor: scheduling ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {scheduling
-                    ? 'Scheduling...'
-                    : 'Schedule Interview + Notify Candidate'}
+                  {scheduling ? 'Scheduling...' : 'Schedule Interview + Notify Candidate'}
                 </button>
 
                 {scheduleResult && (
                   <div style={successBoxStyle}>
-                    <strong style={{ color: C.green }}>
-                      Interview scheduled.
-                    </strong>
+                    <strong style={{ color: C.green }}>Interview scheduled.</strong>
                     <div>Interview ID: {scheduleResult.interviewId}</div>
-                    {scheduleResult.roundId && (
-                      <div>Round ID: {scheduleResult.roundId}</div>
-                    )}
+                    {scheduleResult.roundId && <div>Round ID: {scheduleResult.roundId}</div>}
                     {scheduleResult.joinUrl && (
                       <a
                         href={scheduleResult.joinUrl}
@@ -1493,42 +1416,22 @@ export default function RecruiterRecruitmentDashboardPage() {
             <section style={panelStyle}>
               <p style={sectionTitleStyle}>Interview Results & Pipeline</p>
               <p style={sectionSubStyle}>
-                Results submitted from interview rounds will reflect here and in
-                Recruitment tracking.
+                Results and final hiring phase will be tracked here.
               </p>
 
               <div style={{ display: 'grid', gap: 12, marginTop: 18 }}>
                 {applications.length ? (
                   applications.map((app) => (
                     <div key={app.id} style={resultRowStyle}>
-                      <div>
-                        <strong style={{ color: C.text }}>
-                          {getCandidateName(app)}
-                        </strong>
-                        <p
-                          style={{
-                            margin: '4px 0 0',
-                            color: C.faint,
-                            fontSize: 12,
-                          }}
-                        >
-                          {selectedJob?.title ??
-                            app.jobs?.title ??
-                            app.job?.title ??
-                            'Job'}
+                      <div style={{ flex: 1 }}>
+                        <strong style={{ color: C.text }}>{getCandidateName(app)}</strong>
+                        <p style={smallMutedStyle}>
+                          ATS {getAtsScore(app)}% · {getAtsRecommendation(app)}
                         </p>
+                        <CandidateFlow app={app} />
                       </div>
 
-                      <span
-                        style={{
-                          ...statusPillStyle,
-                          color: statusColor(app.status),
-                          borderColor: `${statusColor(app.status)}55`,
-                          background: `${statusColor(app.status)}14`,
-                        }}
-                      >
-                        {normalizeStatus(app.status)}
-                      </span>
+                      <StatusPill status={app.status} />
                     </div>
                   ))
                 ) : (
@@ -1536,9 +1439,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                 )}
               </div>
 
-              {dashboard && (
-                <pre style={debugStyle}>{JSON.stringify(dashboard, null, 2)}</pre>
-              )}
+              {dashboard && <pre style={debugStyle}>{JSON.stringify(dashboard, null, 2)}</pre>}
             </section>
           )}
         </main>
@@ -1571,69 +1472,98 @@ function StatCard({
   );
 }
 
-function JobSummary({ job }: { job: JobRow }) {
-  return (
-    <div style={summaryStyle}>
-      <div>
-        <strong style={{ color: C.text }}>{job.title}</strong>
-        <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
-          {getCompany(job)} · {job.location ?? 'Location not set'} ·{' '}
-          {getEmploymentType(job)}
-        </p>
-      </div>
-
-      <span style={statusPillStyle}>{job.status ?? 'active'}</span>
-    </div>
-  );
-}
-
 function ApplicationCard({
   app,
+  atsLoading,
+  onRunAts,
   onShortlist,
   onSchedule,
 }: {
   app: ApplicationRow;
+  atsLoading: boolean;
+  onRunAts: () => void;
   onShortlist: () => void;
   onSchedule: () => void;
 }) {
-  const alreadyShortlisted = normalizeStatus(app.status).includes('shortlist');
+  const atsScore = getAtsScore(app);
+  const atsRecommendation = getAtsRecommendation(app);
+  const hasAts = app.ats_score !== null && app.ats_score !== undefined;
 
   return (
     <article style={applicationCardStyle}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <strong style={{ color: C.text }}>{getCandidateName(app)}</strong>
-        <p style={{ margin: '5px 0 0', color: C.faint, fontSize: 12 }}>
-          {app.candidate?.email ?? 'No email shown'}
-        </p>
-        <p style={{ margin: '8px 0 0', color: C.faint, fontSize: 11 }}>
-          Applied:{' '}
-          {formatDate(
-            app.applied_at ?? app.appliedAt ?? app.created_at ?? app.createdAt,
+        <div style={applicationHeaderStyle}>
+          <div>
+            <strong style={{ color: C.text }}>{getCandidateName(app)}</strong>
+            <p style={smallMutedStyle}>{app.candidate?.email ?? 'No email shown'}</p>
+            <p style={tinyMutedStyle}>
+              Applied: {formatDate(app.applied_at ?? app.appliedAt ?? app.created_at ?? app.createdAt)}
+            </p>
+          </div>
+
+          <StatusPill status={app.status} />
+        </div>
+
+        <CandidateFlow app={app} />
+
+        <div style={atsBoxStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <p style={atsTitleStyle}>ATS Resume Check</p>
+              {hasAts ? (
+                <p style={smallMutedStyle}>
+                  Score: <strong style={{ color: C.green }}>{atsScore}%</strong> · Recommendation:{' '}
+                  <strong style={{ color: atsRecommendation === 'REJECT' ? C.red : C.yellow }}>
+                    {atsRecommendation}
+                  </strong>
+                </p>
+              ) : (
+                <p style={smallMutedStyle}>
+                  Not checked yet. Run Python ATS before shortlisting.
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={onRunAts}
+              disabled={atsLoading}
+              style={{
+                ...secondaryButtonStyle,
+                opacity: atsLoading ? 0.65 : 1,
+                cursor: atsLoading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {atsLoading ? 'Checking...' : hasAts ? 'Re-check ATS' : 'Run ATS Check'}
+            </button>
+          </div>
+
+          {hasAts && (
+            <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+              <div style={skillRowStyle}>
+                {(app.ats_matched_skills ?? []).slice(0, 8).map((skill) => (
+                  <span key={skill} style={matchedSkillStyle}>{skill}</span>
+                ))}
+                {!(app.ats_matched_skills ?? []).length && (
+                  <span style={tinyMutedStyle}>No matched skills returned.</span>
+                )}
+              </div>
+
+              <div style={skillRowStyle}>
+                {(app.ats_missing_skills ?? []).slice(0, 8).map((skill) => (
+                  <span key={skill} style={missingSkillStyle}>{skill}</span>
+                ))}
+              </div>
+
+              {app.ats_reason && <p style={atsReasonStyle}>{app.ats_reason}</p>}
+            </div>
           )}
-        </p>
+        </div>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
-        }}
-      >
-        <span
-          style={{
-            ...statusPillStyle,
-            color: statusColor(app.status),
-            borderColor: `${statusColor(app.status)}55`,
-            background: `${statusColor(app.status)}14`,
-          }}
-        >
-          {normalizeStatus(app.status)}
-        </span>
-
+      <div style={applicationActionStyle}>
         <button type="button" onClick={onShortlist} style={secondaryButtonStyle}>
-          {alreadyShortlisted ? 'Shortlisted' : 'Shortlist'}
+          Shortlist
         </button>
 
         <button type="button" onClick={onSchedule} style={primaryButtonStyle}>
@@ -1685,7 +1615,7 @@ const tabBarStyle: CSSProperties = {
 };
 
 const tabButtonStyle: CSSProperties = {
-  border: `1px solid transparent`,
+  border: '1px solid transparent',
   background: 'transparent',
   color: C.faint,
   borderRadius: 12,
@@ -1710,7 +1640,7 @@ const panelStyle: CSSProperties = {
 
 const gridStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
   gap: 14,
 };
 
@@ -1751,6 +1681,18 @@ const emptyTextStyle: CSSProperties = {
   color: C.faint,
   fontSize: 13,
   lineHeight: 1.7,
+};
+
+const smallMutedStyle: CSSProperties = {
+  margin: '5px 0 0',
+  color: C.faint,
+  fontSize: 12,
+};
+
+const tinyMutedStyle: CSSProperties = {
+  margin: 0,
+  color: C.faint,
+  fontSize: 11,
 };
 
 const primaryButtonStyle: CSSProperties = {
@@ -1928,6 +1870,19 @@ const modalCardStyle: CSSProperties = {
   boxShadow: '0 30px 100px rgba(0,0,0,0.65)',
 };
 
+const modalHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+};
+
+const modalFooterStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: 10,
+  marginTop: 20,
+};
+
 const eyebrowStyle: CSSProperties = {
   margin: '0 0 6px',
   color: C.purple,
@@ -1982,34 +1937,121 @@ const statusPillStyle: CSSProperties = {
 const applicationCardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
   background: C.panel2,
-  borderRadius: 16,
+  borderRadius: 18,
   padding: '1rem',
-  display: 'flex',
-  justifyContent: 'space-between',
+  display: 'grid',
   gap: 14,
-  alignItems: 'center',
 };
 
-const resultRowStyle: CSSProperties = {
+const applicationHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 14,
+};
+
+const applicationActionStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+
+const atsBoxStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: 'rgba(2,6,23,0.30)',
+  borderRadius: 14,
+  padding: '0.9rem',
+  marginTop: 12,
+};
+
+const atsTitleStyle: CSSProperties = {
+  margin: 0,
+  color: C.text,
+  fontSize: 12,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const atsReasonStyle: CSSProperties = {
+  margin: 0,
+  color: C.muted,
+  fontSize: 12,
+  lineHeight: 1.65,
+};
+
+const skillRowStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+};
+
+const matchedSkillStyle: CSSProperties = {
+  border: '1px solid rgba(52,211,153,0.25)',
+  background: 'rgba(52,211,153,0.08)',
+  color: '#6EE7B7',
+  borderRadius: 999,
+  padding: '4px 8px',
+  fontSize: 11,
+  fontWeight: 850,
+};
+
+const missingSkillStyle: CSSProperties = {
+  border: '1px solid rgba(248,113,113,0.25)',
+  background: 'rgba(248,113,113,0.08)',
+  color: '#FCA5A5',
+  borderRadius: 999,
+  padding: '4px 8px',
+  fontSize: 11,
+  fontWeight: 850,
+};
+
+const candidateFlowStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: `repeat(${FLOW_STAGES.length}, minmax(0, 1fr))`,
+  gap: 4,
+  marginTop: 12,
+  overflowX: 'auto',
+};
+
+const flowItemStyle: CSSProperties = {
+  position: 'relative',
+  display: 'grid',
+  justifyItems: 'center',
+  gap: 6,
+  minWidth: 80,
+  fontSize: 10,
+  fontWeight: 800,
+  textAlign: 'center',
+};
+
+const flowDotStyle: CSSProperties = {
+  width: 24,
+  height: 24,
+  borderRadius: '50%',
+  display: 'grid',
+  placeItems: 'center',
+  color: '#020617',
+  fontSize: 11,
+  fontWeight: 950,
+  zIndex: 2,
+};
+
+const flowConnectorStyle: CSSProperties = {
+  position: 'absolute',
+  top: 11,
+  left: '50%',
+  width: '100%',
+  height: 3,
+  zIndex: 1,
+};
+
+const miniCandidateFlowCardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
   background: C.panel2,
   borderRadius: 16,
   padding: '1rem',
-  display: 'flex',
-  justifyContent: 'space-between',
-  gap: 14,
-  alignItems: 'center',
-};
-
-const summaryStyle: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  background: C.panel2,
-  borderRadius: 16,
-  padding: '1rem',
-  display: 'flex',
-  justifyContent: 'space-between',
-  gap: 14,
-  alignItems: 'center',
 };
 
 const miniInfoStyle: CSSProperties = {
@@ -2018,7 +2060,7 @@ const miniInfoStyle: CSSProperties = {
   borderRadius: 14,
   padding: '12px 14px',
   display: 'grid',
-  gap: 4,
+  gap: 6,
   color: C.faint,
   fontSize: 13,
 };
@@ -2034,6 +2076,17 @@ const successBoxStyle: CSSProperties = {
   lineHeight: 1.8,
   display: 'grid',
   gap: 3,
+};
+
+const resultRowStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 16,
+  padding: '1rem',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 14,
+  alignItems: 'center',
 };
 
 const debugStyle: CSSProperties = {

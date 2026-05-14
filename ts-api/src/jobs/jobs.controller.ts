@@ -17,10 +17,12 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { Observable, map } from 'rxjs';
+
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorators';
 import { JobsService } from './jobs.service';
 import { JobsStreamService } from './jobs-stream.service';
+import { ApplicationAtsService } from './application-ats.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateApplicationStatusDto } from './dto/update-application-status.dto';
 
@@ -30,16 +32,20 @@ export class JobsController {
   constructor(
     private readonly jobs: JobsService,
     private readonly stream: JobsStreamService,
+    private readonly applicationAts: ApplicationAtsService,
   ) {}
 
   @Public()
   @Sse('stream')
   liveStream(): Observable<MessageEvent> {
     return this.stream.stream.pipe(
-      map((event) => ({
-        data: JSON.stringify(event),
-        type: event.type,
-      }) as MessageEvent),
+      map(
+        (event) =>
+          ({
+            data: JSON.stringify(event),
+            type: event.type,
+          }) as MessageEvent,
+      ),
     );
   }
 
@@ -62,7 +68,9 @@ export class JobsController {
       skills: skills ? skills.split(',') : undefined,
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : undefined,
-      source: (source as 'internal' | 'serpapi' | 'linkedin' | 'indeed' | 'all') ?? 'all',
+      source:
+        (source as 'internal' | 'serpapi' | 'linkedin' | 'indeed' | 'all') ??
+        'all',
     });
   }
 
@@ -87,8 +95,13 @@ export class JobsController {
   }
 
   @Post()
-  create(@Body() dto: CreateJobDto, @Req() req: any) {
+  create(@Req() req: any, @Body() dto: CreateJobDto) {
     return this.jobs.createJob(req.user.id, dto);
+  }
+
+  @Post('applications/:appId/ats-check')
+  runApplicationAtsCheck(@Param('appId') appId: string, @Req() req: any) {
+    return this.applicationAts.runApplicationAtsCheck(appId, req.user.id);
   }
 
   @Post(':id/apply')
