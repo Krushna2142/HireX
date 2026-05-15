@@ -37,13 +37,14 @@ const CANDIDATE_NAV: NavGroup[] = [
   {
     label: 'Workspace',
     items: [
-      { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
+      { href: '/candidate/dashboard', icon: '⊞', label: 'Dashboard' },
       { href: '/jobs', icon: '💼', label: 'Jobs' },
       { href: '/saved-jobs', icon: '🔖', label: 'Saved Jobs' },
       { href: '/resumes', icon: '📄', label: 'Resume' },
       { href: '/resume-analysis', icon: '🧠', label: 'Resume Analysis' },
-      { href: '/interviews', icon: '🎥', label: 'Interviews' },
-      { href: '/alerts', icon: '🔔', label: 'Alerts' },
+      { href: '/candidate/applications', icon: '📌', label: 'Applications' },
+      { href: '/candidate/interviews', icon: '🎥', label: 'Interviews' },
+      { href: '/candidate/alerts', icon: '🔔', label: 'Alerts' },
     ],
   },
   {
@@ -59,8 +60,9 @@ const RECRUITER_NAV: NavGroup[] = [
   {
     label: 'Workspace',
     items: [
-      { href: '/dashboard', icon: '⊞', label: 'Overview' },
       { href: '/recruiter/dashboard', icon: '📊', label: 'Recruitment' },
+      { href: '/recruiter/profile', icon: '🏢', label: 'Profile' },
+      { href: '/recruiter/candidates', icon: '👥', label: 'Candidates' },
       { href: '/recruiter/interviews', icon: '🎥', label: 'Interviews' },
       { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],
