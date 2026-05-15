@@ -1,69 +1,115 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// frontend/app/(protected)/recruiter/interviews/page.tsx
+
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useRouter } from 'next/navigation';
+
 import { interviewApi, type InterviewStage } from '@/lib/axios';
 
-type InterviewItem = {
+type RoundType = 'technical' | 'hr' | 'managerial' | 'assignment';
+type RoundMode = 'video' | 'phone' | 'offline';
+type RoundResult = 'pass' | 'fail' | 'pending' | 'no_show' | 'reschedule';
+
+type ScheduleRoundPayload = {
+  roundType: RoundType;
+  scheduledAt: string;
+  durationMins?: number;
+  mode?: RoundMode;
+  interviewerId?: string;
+};
+
+type RecruiterInterview = {
   id: string;
-  current_stage: InterviewStage;
-  status_code: number;
-  final_status: string | null;
-  updated_at: string;
-  created_at: string;
-  job_title?: string;
-  company?: string;
-  candidate_name?: string;
-  candidate_email?: string;
+  current_stage?: InterviewStage | string | null;
+  currentStage?: InterviewStage | string | null;
+  status_code?: number | null;
+  statusCode?: number | null;
+  final_status?: string | null;
+  finalStatus?: string | null;
+  created_at?: string | null;
+  createdAt?: string | null;
+  updated_at?: string | null;
+  updatedAt?: string | null;
+  job_id?: string | null;
+  jobId?: string | null;
+  candidate_id?: string | null;
+  candidateId?: string | null;
+  job_title?: string | null;
+  jobTitle?: string | null;
+  company?: string | null;
+  company_name?: string | null;
+  companyName?: string | null;
+  candidate_name?: string | null;
+  candidateName?: string | null;
+  candidate_email?: string | null;
+  candidateEmail?: string | null;
 };
 
 type RoundItem = {
   id: string;
-  round_number: number;
-  round_type: RoundType;
-  scheduled_at: string | null;
-  duration_mins: number | null;
-  mode: InterviewMode | null;
-  meeting_join_url: string | null;
-  result: RoundResult | null;
-  score: number | null;
-  feedback: string | null;
+  round_number?: number | null;
+  roundNumber?: number | null;
+  round_type?: string | null;
+  roundType?: string | null;
+  scheduled_at?: string | null;
+  scheduledAt?: string | null;
+  duration_mins?: number | null;
+  durationMins?: number | null;
+  mode?: string | null;
+  meeting_join_url?: string | null;
+  meetingJoinUrl?: string | null;
+  joinUrl?: string | null;
+  result?: string | null;
+  score?: number | null;
+  feedback?: string | null;
 };
-
-type RoundType = 'hr' | 'technical' | 'managerial' | 'assignment';
-type InterviewMode = 'video' | 'phone' | 'offline';
-type RoundResult = 'pending' | 'pass' | 'fail' | 'no_show' | 'reschedule';
 
 type InterviewEvent = {
   id: string;
-  event_type: string;
+  event_type?: string | null;
+  eventType?: string | null;
   from_stage?: string | null;
+  fromStage?: string | null;
   to_stage?: string | null;
+  toStage?: string | null;
   metadata?: Record<string, unknown> | null;
-  created_at: string;
+  created_at?: string | null;
+  createdAt?: string | null;
 };
 
-const S = {
-  bg: '#07090F',
-  card: '#0D1120',
-  border: 'rgba(255,255,255,.08)',
-  muted: 'rgba(255,255,255,.6)',
-  blue: '#38BDF8',
-  green: '#10B981',
-  red: '#EF4444',
-  amber: '#F59E0B',
+const ROUND_TYPES: RoundType[] = ['technical', 'hr', 'managerial', 'assignment'];
+const ROUND_MODES: RoundMode[] = ['video', 'phone', 'offline'];
+const ROUND_RESULTS: { value: RoundResult; label: string }[] = [
+  { value: 'pass', label: 'Pass' },
+  { value: 'fail', label: 'Fail' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'no_show', label: 'No Show' },
+  { value: 'reschedule', label: 'Reschedule' },
+];
+
+const JOIN_OPEN_BEFORE_MINUTES = 15;
+const JOIN_CLOSE_AFTER_MINUTES = 20;
+
+const C = {
+  bg: '#080C14',
+  panel: '#0D1220',
+  panel2: '#101827',
+  border: 'rgba(255,255,255,0.08)',
+  borderStrong: 'rgba(167,139,250,0.30)',
+  text: '#F8FAFC',
+  muted: 'rgba(226,232,240,0.68)',
+  faint: 'rgba(226,232,240,0.42)',
+  sky: '#38BDF8',
   purple: '#A78BFA',
-  white: '#F8FAFC',
+  green: '#34D399',
+  yellow: '#FBBF24',
+  red: '#F87171',
+  orange: '#FB923C',
 };
 
-const stageColor = (stage: string) => {
-  if (stage === 'REJECTED' || stage === 'INTERVIEW_FAILED') return S.red;
-  if (stage === 'HIRED' || stage === 'INTERVIEW_PASSED') return S.green;
-  if (stage === 'SHORTLISTED') return S.blue;
-  if (stage.includes('INTERVIEW')) return S.purple;
-  return 'rgba(255,255,255,0.75)';
-};
-
-const stages = [
+const STAGE_OPTIONS: InterviewStage[] = [
   'APPLIED',
   'UNDER_REVIEW',
   'SHORTLISTED',
@@ -77,507 +123,1229 @@ const stages = [
   'REJECTED',
   'ON_HOLD',
   'WITHDRAWN',
-] as const satisfies readonly InterviewStage[];
+] as InterviewStage[];
 
-export default function RecruiterInterviewsPage() {
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<InterviewItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [rounds, setRounds] = useState<RoundItem[]>([]);
-  const [events, setEvents] = useState<InterviewEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
+const STAGE_LABELS: Record<string, string> = {
+  APPLIED: 'Applied',
+  UNDER_REVIEW: 'Under Review',
+  SHORTLISTED: 'Shortlisted',
+  INTERVIEW_SCHEDULED: 'Interview Scheduled',
+  INTERVIEW_IN_PROGRESS: 'Interview In Progress',
+  INTERVIEW_PASSED: 'Interview Passed',
+  INTERVIEW_FAILED: 'Interview Failed',
+  FINAL_REVIEW: 'Final Review',
+  OFFERED: 'Offered',
+  HIRED: 'Hired',
+  REJECTED: 'Rejected',
+  ON_HOLD: 'On Hold',
+  WITHDRAWN: 'Withdrawn',
+};
 
-  const [schedOpen, setSchedOpen] = useState(false);
-  const [schedBusy, setSchedBusy] = useState(false);
+function safeString(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function safeUpper(value: unknown, fallback = ''): string {
+  return safeString(value, fallback).toUpperCase();
+}
+
+function safeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toArray<T>(raw: unknown, key?: string): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw !== 'object') return [];
+
+  const obj = raw as Record<string, unknown>;
+  const keys = ['data', 'items', 'results', 'interviews', 'rounds', 'events', key].filter(Boolean) as string[];
+
+  for (const candidate of keys) {
+    const value = obj[candidate];
+
+    if (Array.isArray(value)) return value as T[];
+
+    if (value && typeof value === 'object') {
+      const nested = value as Record<string, unknown>;
+
+      if (Array.isArray(nested.data)) return nested.data as T[];
+      if (Array.isArray(nested.items)) return nested.items as T[];
+      if (Array.isArray(nested.results)) return nested.results as T[];
+      if (Array.isArray(nested.interviews)) return nested.interviews as T[];
+      if (Array.isArray(nested.rounds)) return nested.rounds as T[];
+      if (Array.isArray(nested.events)) return nested.events as T[];
+    }
+  }
+
+  return [];
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  const anyError = error as any;
+
+  return safeString(
+    anyError?.response?.data?.detail ??
+      anyError?.response?.data?.message ??
+      anyError?.response?.data?.error ??
+      anyError?.message,
+    fallback,
+  );
+}
+
+function normalizeStage(stage?: string | null): InterviewStage {
+  const value = safeUpper(stage, 'APPLIED').replace(/\s+/g, '_');
+
+  if (STAGE_OPTIONS.includes(value as InterviewStage)) {
+    return value as InterviewStage;
+  }
+
+  return 'APPLIED' as InterviewStage;
+}
+
+function getStage(item?: RecruiterInterview | null): InterviewStage {
+  return normalizeStage(item?.current_stage ?? item?.currentStage ?? item?.final_status ?? item?.finalStatus);
+}
+
+function getStageLabel(stage?: string | null): string {
+  const normalized = normalizeStage(stage);
+  return STAGE_LABELS[normalized] ?? 'Applied';
+}
+
+function getCandidateName(item?: RecruiterInterview | null): string {
+  return safeString(item?.candidateName ?? item?.candidate_name, 'Candidate');
+}
+
+function getCandidateEmail(item?: RecruiterInterview | null): string {
+  return safeString(item?.candidateEmail ?? item?.candidate_email, 'No email shown');
+}
+
+function getJobTitle(item?: RecruiterInterview | null): string {
+  return safeString(item?.jobTitle ?? item?.job_title, 'Job');
+}
+
+function getCompany(item?: RecruiterInterview | null): string {
+  return safeString(item?.companyName ?? item?.company_name ?? item?.company, 'Company');
+}
+
+function getRoundNumber(round?: RoundItem | null): number {
+  return safeNumber(round?.round_number ?? round?.roundNumber, 1);
+}
+
+function getRoundType(round?: RoundItem | null): string {
+  return safeString(round?.round_type ?? round?.roundType, 'technical');
+}
+
+function getRoundScheduledAt(round?: RoundItem | null): string | null {
+  return round?.scheduled_at ?? round?.scheduledAt ?? null;
+}
+
+function getRoundDuration(round?: RoundItem | null): number {
+  return safeNumber(round?.duration_mins ?? round?.durationMins, 45);
+}
+
+function getRoundResult(round?: RoundItem | null): string {
+  return safeString(round?.result).toLowerCase();
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return 'Not scheduled';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not scheduled';
+
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getRoomPath(interviewId: string, round?: RoundItem | null): string {
+  return `/interviews/room/jc-${interviewId}-r${getRoundNumber(round)}`;
+}
+
+function getRoundTimeInfo(round?: RoundItem | null) {
+  const scheduledAt = getRoundScheduledAt(round);
+
+  if (!scheduledAt) {
+    return {
+      valid: false,
+      nowMs: Date.now(),
+      startMs: 0,
+      openMs: 0,
+      closeMs: 0,
+    };
+  }
+
+  const startMs = new Date(scheduledAt).getTime();
+  const durationMs = getRoundDuration(round) * 60 * 1000;
+
+  return {
+    valid: Number.isFinite(startMs),
+    nowMs: Date.now(),
+    startMs,
+    openMs: startMs - JOIN_OPEN_BEFORE_MINUTES * 60 * 1000,
+    closeMs: startMs + durationMs + JOIN_CLOSE_AFTER_MINUTES * 60 * 1000,
+  };
+}
+
+function canJoinRound(round?: RoundItem | null): boolean {
+  const result = getRoundResult(round);
+
+  if (result && !['pending', 'reschedule'].includes(result)) return false;
+
+  const time = getRoundTimeInfo(round);
+
+  return time.valid && time.nowMs >= time.openMs && time.nowMs <= time.closeMs;
+}
+
+function getRoundStatus(round?: RoundItem | null) {
+  const result = getRoundResult(round);
+
+  if (result === 'pass') return { label: 'Passed', color: C.green };
+  if (result === 'fail') return { label: 'Failed', color: C.red };
+  if (result === 'no_show') return { label: 'No Show', color: C.red };
+  if (result === 'reschedule') return { label: 'Needs Reschedule', color: C.yellow };
+
+  const time = getRoundTimeInfo(round);
+
+  if (!time.valid) return { label: 'Scheduled', color: C.yellow };
+
+  if (time.nowMs < time.openMs) {
+    const minutes = Math.max(1, Math.ceil((time.openMs - time.nowMs) / 60_000));
+    return { label: `Join opens in ${minutes}m`, color: C.faint };
+  }
+
+  if (time.nowMs >= time.openMs && time.nowMs <= time.closeMs) {
+    return { label: 'Join now', color: C.green };
+  }
+
+  return { label: 'Waiting feedback', color: C.yellow };
+}
+
+function getNextRound(rounds: RoundItem[]): RoundItem | null {
+  const now = Date.now() - 60 * 60 * 1000;
+
+  const active = rounds
+    .filter((round) => {
+      const scheduledAt = getRoundScheduledAt(round);
+      if (!scheduledAt) return false;
+
+      const start = new Date(scheduledAt).getTime();
+      if (!Number.isFinite(start)) return false;
+
+      const result = getRoundResult(round);
+      const terminal = ['pass', 'fail', 'no_show'].includes(result);
+
+      return start >= now && !terminal;
+    })
+    .sort((a, b) => {
+      const aTime = new Date(getRoundScheduledAt(a) ?? '').getTime();
+      const bTime = new Date(getRoundScheduledAt(b) ?? '').getTime();
+      return aTime - bTime;
+    });
+
+  return active[0] ?? null;
+}
+
+function formatEvent(event: InterviewEvent): string {
+  const type = safeString(event.event_type ?? event.eventType);
+  const fromStage = safeString(event.from_stage ?? event.fromStage);
+  const toStage = safeString(event.to_stage ?? event.toStage);
+
+  if (type === 'STATUS_CHANGED' || type === 'stage_changed') {
+    return `Stage moved from ${fromStage || 'unknown'} to ${toStage || 'unknown'}`;
+  }
+
+  if (type === 'round_scheduled') return 'Interview round scheduled';
+  if (type === 'ROUND_COMPLETED') return 'Interview round completed';
+  if (type === 'round_result_submitted') return 'Round result submitted';
+  if (type === 'room_started') return 'Interview room started';
+  if (type === 'room_ended') return 'Interview room ended';
+
+  return type ? type.replaceAll('_', ' ') : 'Interview updated';
+}
+
+function ScheduleModal({
+  open,
+  title,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  title: string;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (payload: ScheduleRoundPayload) => void;
+}) {
   const [roundType, setRoundType] = useState<RoundType>('technical');
   const [scheduledAt, setScheduledAt] = useState('');
   const [durationMins, setDurationMins] = useState(45);
-  const [mode, setMode] = useState<InterviewMode>('video');
-
-  const [updatingStage, setUpdatingStage] = useState(false);
-
-  const selectedInterview = useMemo(
-    () => items.find((x) => x.id === selectedId) ?? null,
-    [items, selectedId],
-  );
-
-  const stats = useMemo(
-    () => ({
-      total: items.length,
-      scheduled: items.filter((item) => item.current_stage === 'INTERVIEW_SCHEDULED').length,
-      active: items.filter((item) =>
-        ['INTERVIEW_IN_PROGRESS', 'INTERVIEW_PASSED', 'FINAL_REVIEW', 'OFFERED'].includes(item.current_stage),
-      ).length,
-      hired: items.filter((item) => item.current_stage === 'HIRED').length,
-    }),
-    [items],
-  );
-
-  const loadList = async () => {
-    try {
-      setLoading(true);
-      const res = await interviewApi.listRecruiterInterviews({ limit: 50 });
-      const data = (res.data ?? []) as InterviewItem[];
-      setItems(data);
-      setSelectedId((prev) => (prev && data.some((x) => x.id === prev) ? prev : data[0]?.id ?? null));
-      setError(null);
-    } catch (error: unknown) {
-      setError(getErrorMessage(error, 'Failed to load recruiter interviews'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadDetail = async (id: string) => {
-    try {
-      const res = await interviewApi.getRecruiterInterview(id);
-      setRounds((res.data?.rounds ?? []) as RoundItem[]);
-      setEvents((res.data?.events ?? []) as InterviewEvent[]);
-    } catch {
-      setRounds([]);
-      setEvents([]);
-    }
-  };
+  const [mode, setMode] = useState<RoundMode>('video');
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    void loadList();
-    const iv = setInterval(loadList, 30_000);
-    return () => clearInterval(iv);
-  }, []);
+    if (!open) return;
 
-  useEffect(() => {
-    if (!selectedId) {
-      setRounds([]);
-      return;
-    }
-    void loadDetail(selectedId);
-  }, [selectedId]);
+    setRoundType('technical');
+    setScheduledAt('');
+    setDurationMins(45);
+    setMode('video');
+    setError('');
+  }, [open]);
 
-  const nextRound = useMemo(() => {
-    const now = Date.now();
-    return rounds
-      .filter((r) => r.scheduled_at && new Date(r.scheduled_at).getTime() >= now)
-      .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())[0];
-  }, [rounds]);
+  if (!open) return null;
 
-  const schedule = async () => {
-    if (!selectedInterview) return;
+  const submit = () => {
     if (!scheduledAt) {
-      alert('Please select date/time');
+      setError('Select interview date and time.');
       return;
     }
-    try {
-      setSchedBusy(true);
-      await interviewApi.scheduleRound(selectedInterview.id, {
-        roundType,
-        scheduledAt: new Date(scheduledAt).toISOString(),
-        durationMins: Number(durationMins) || 45,
-        mode,
-      });
-      setSchedOpen(false);
-      setScheduledAt('');
-      await loadDetail(selectedInterview.id);
-      await loadList();
-    } catch (error: unknown) {
-      alert(getErrorMessage(error, 'Failed to schedule round'));
-    } finally {
-      setSchedBusy(false);
-    }
-  };
 
-  const updateStage = async (stage: InterviewStage) => {
-    if (!selectedInterview) return;
-    try {
-      setUpdatingStage(true);
-      await interviewApi.updateStage(selectedInterview.id, stage);
-      await loadList();
-      await loadDetail(selectedInterview.id);
-    } catch (error: unknown) {
-      alert(getErrorMessage(error, 'Failed to update stage'));
-    } finally {
-      setUpdatingStage(false);
-    }
-  };
-
-  const submitRoundResult = async (roundId: string, result: RoundResult) => {
-    try {
-      await interviewApi.submitRoundResult(roundId, { result });
-      if (selectedInterview) await loadDetail(selectedInterview.id);
-      await loadList();
-    } catch (error: unknown) {
-      alert(getErrorMessage(error, 'Failed to update round result'));
-    }
-  };
-
-  const joinRoom = (round: RoundItem) => {
-    if (!selectedInterview) return;
-    window.location.href = buildInterviewRoomPath(selectedInterview.id, round.round_number);
+    onSubmit({
+      roundType,
+      scheduledAt: new Date(scheduledAt).toISOString(),
+      durationMins: Number(durationMins) || 45,
+      mode,
+    });
   };
 
   return (
-    <main style={{ padding: 20, color: S.white }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 6 }}>Recruiter Interviews</h1>
-      <p style={{ color: S.muted, marginBottom: 16 }}>
-        Schedule rounds, track outcomes, and join live interview rooms.
-      </p>
-
-      {error && <div style={{ color: '#FCA5A5', marginBottom: 12 }}>{error}</div>}
-
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 16 }}>
-        {[
-          { label: 'Tracked', value: stats.total, color: S.blue },
-          { label: 'Scheduled', value: stats.scheduled, color: S.purple },
-          { label: 'Active Review', value: stats.active, color: S.amber },
-          { label: 'Hired', value: stats.hired, color: S.green },
-        ].map((card) => (
-          <div
-            key={card.label}
-            style={{
-              padding: 14,
-              borderRadius: 10,
-              border: `1px solid ${card.color}33`,
-              background: `${card.color}14`,
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 800, color: card.color, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              {card.label}
-            </div>
-            <div style={{ marginTop: 8, fontSize: 26, fontWeight: 800 }}>{card.value}</div>
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <section style={modalStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={modalHeaderStyle}>
+          <div>
+            <p style={eyebrowStyle}>Interview Scheduling</p>
+            <h2 style={modalTitleStyle}>{title}</h2>
           </div>
-        ))}
-      </section>
 
-      {nextRound && selectedInterview && (
-        <section style={{ marginBottom: 16, padding: 14, border: `1px solid ${S.blue}44`, borderRadius: 10, background: `${S.blue}14` }}>
-          <div style={{ fontSize: 12, color: S.blue, fontWeight: 800 }}>Next Scheduled Round</div>
-          <div style={{ marginTop: 4, fontSize: 14 }}>
-            {selectedInterview.candidate_name ?? 'Candidate'} · Round {nextRound.round_number} ({nextRound.round_type.toUpperCase()}) ·{' '}
-            {nextRound.scheduled_at ? new Date(nextRound.scheduled_at).toLocaleString() : 'TBD'}
-          </div>
-          <button
-            onClick={() => joinRoom(nextRound)}
-            style={{ marginTop: 10, border: 'none', borderRadius: 8, padding: '8px 12px', background: S.blue, color: '#001018', fontWeight: 800, cursor: 'pointer' }}
-          >
-            Join Interview Room
+          <button type="button" onClick={onClose} style={closeButtonStyle}>
+            ✕
           </button>
-        </section>
-      )}
+        </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 16 }}>
-        <section style={{ border: `1px solid ${S.border}`, borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 12px', borderBottom: `1px solid ${S.border}`, fontWeight: 700 }}>
-            Interviews
-          </div>
+        <div style={formGridStyle}>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Round Type</span>
+            <div style={roundTypeWrapStyle}>
+              {ROUND_TYPES.map((item) => {
+                const active = roundType === item;
 
-          <div style={{ maxHeight: 620, overflowY: 'auto' }}>
-            {loading ? (
-              <div style={{ padding: 12, color: S.muted }}>Loading…</div>
-            ) : items.length === 0 ? (
-              <div style={{ padding: 12, color: S.muted }}>No interviews found.</div>
-            ) : (
-              items.map((it) => {
-                const active = selectedId === it.id;
                 return (
                   <button
-                    key={it.id}
-                    onClick={() => setSelectedId(it.id)}
+                    key={item}
+                    type="button"
+                    onClick={() => setRoundType(item)}
                     style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      border: 'none',
-                      borderBottom: `1px solid rgba(255,255,255,.06)`,
-                      padding: 12,
-                      color: S.white,
-                      background: active ? 'rgba(255,255,255,.06)' : 'transparent',
-                      cursor: 'pointer',
+                      ...roundTypeButtonStyle,
+                      ...(active ? activeRoundTypeButtonStyle : {}),
                     }}
                   >
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{it.job_title ?? 'Role'}</div>
-                    <div style={{ fontSize: 12, color: S.muted }}>{it.company ?? '-'} · {it.candidate_name ?? 'Candidate'}</div>
-                    <div style={{ marginTop: 6, fontSize: 11, fontWeight: 800, color: stageColor(it.current_stage) }}>
-                      {it.current_stage}
-                    </div>
+                    {safeString(item, 'round').replaceAll('_', ' ')}
+                  </button>
+                );
+              })}
+            </div>
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Date & Time</span>
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(event) => setScheduledAt(event.target.value)}
+              style={inputStyle}
+            />
+          </label>
+
+          <div style={twoColStyle}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Duration</span>
+              <input
+                type="number"
+                min={15}
+                step={5}
+                value={durationMins}
+                onChange={(event) => setDurationMins(Number(event.target.value))}
+                style={inputStyle}
+              />
+            </label>
+
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Mode</span>
+              <select
+                value={mode}
+                onChange={(event) => setMode(event.target.value as RoundMode)}
+                style={inputStyle}
+              >
+                {ROUND_MODES.map((item) => (
+                  <option key={item} value={item}>
+                    {safeString(item, 'video').replaceAll('_', ' ')}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {error && <div style={errorTextStyle}>{error}</div>}
+        </div>
+
+        <div style={modalFooterStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            style={{
+              ...primaryButtonStyle,
+              opacity: busy ? 0.6 : 1,
+              cursor: busy ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {busy ? 'Scheduling...' : 'Save Round'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default function RecruiterInterviewsPage() {
+  const router = useRouter();
+
+  const [items, setItems] = useState<RecruiterInterview[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [rounds, setRounds] = useState<RoundItem[]>([]);
+  const [events, setEvents] = useState<InterviewEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [stageBusy, setStageBusy] = useState(false);
+  const [, forceClock] = useState(0);
+
+  const selectedInterview = useMemo(
+    () => items.find((item) => item.id === selectedId) ?? null,
+    [items, selectedId],
+  );
+
+  const nextRound = useMemo(() => getNextRound(rounds), [rounds]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => forceClock((value) => value + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const loadList = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await interviewApi.listRecruiterInterviews({ limit: 200 });
+      const rows = toArray<RecruiterInterview>(response.data, 'interviews').filter(
+        (item) => item && typeof item === 'object' && item.id,
+      );
+
+      setItems(rows);
+
+      setSelectedId((current) => {
+        if (current && rows.some((item) => item.id === current)) return current;
+        return rows[0]?.id ?? '';
+      });
+    } catch (err) {
+      setItems([]);
+      setError(getErrorMessage(err, 'Failed to load recruiter interviews.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadDetail = useCallback(async (interviewId: string) => {
+    if (!interviewId) {
+      setRounds([]);
+      setEvents([]);
+      return;
+    }
+
+    setDetailLoading(true);
+
+    try {
+      const response = await interviewApi.getRecruiterInterview(interviewId);
+      setRounds(toArray<RoundItem>(response.data, 'rounds'));
+      setEvents(toArray<InterviewEvent>(response.data, 'events'));
+    } catch {
+      setRounds([]);
+      setEvents([]);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadList();
+  }, [loadList]);
+
+  useEffect(() => {
+    void loadDetail(selectedId);
+  }, [loadDetail, selectedId]);
+
+  const stats = useMemo(() => {
+    const total = items.length;
+
+    const scheduled = items.filter((item) => {
+      const stage = getStage(item);
+      return stage === 'INTERVIEW_SCHEDULED' || stage === 'INTERVIEW_IN_PROGRESS';
+    }).length;
+
+    const active = items.filter((item) => {
+      const stage = getStage(item);
+      return ['APPLIED', 'UNDER_REVIEW', 'SHORTLISTED', 'FINAL_REVIEW'].includes(stage);
+    }).length;
+
+    const hired = items.filter((item) => getStage(item) === 'HIRED').length;
+
+    return { total, scheduled, active, hired };
+  }, [items]);
+
+  async function scheduleRound(payload: ScheduleRoundPayload) {
+    if (!selectedInterview) return;
+
+    setScheduleBusy(true);
+    setError('');
+
+    try {
+      await interviewApi.scheduleRound(selectedInterview.id, payload);
+      setScheduleOpen(false);
+
+      await Promise.all([
+        loadList(),
+        loadDetail(selectedInterview.id),
+      ]);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to schedule interview round.'));
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  async function updateStage(stage: InterviewStage) {
+    if (!selectedInterview) return;
+
+    setStageBusy(true);
+    setError('');
+
+    try {
+      await interviewApi.updateStage(selectedInterview.id, stage);
+
+      setItems((current) =>
+        current.map((item) =>
+          item.id === selectedInterview.id
+            ? { ...item, current_stage: stage }
+            : item,
+        ),
+      );
+
+      await loadDetail(selectedInterview.id);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to update interview stage.'));
+    } finally {
+      setStageBusy(false);
+    }
+  }
+
+  async function submitRoundResult(roundId: string, result: RoundResult) {
+    if (!selectedInterview) return;
+
+    setError('');
+
+    try {
+      await interviewApi.submitRoundResult(roundId, { result });
+      await Promise.all([
+        loadList(),
+        loadDetail(selectedInterview.id),
+      ]);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to update round result.'));
+    }
+  }
+
+  function joinRound(round: RoundItem) {
+    if (!selectedInterview) return;
+    router.push(getRoomPath(selectedInterview.id, round));
+  }
+
+  const scheduleTitle = rounds.length
+    ? 'Reschedule / Add Next Round'
+    : 'Schedule First Interview Round';
+
+  return (
+    <main style={pageStyle}>
+      <header style={headerStyle}>
+        <div>
+          <h1 style={titleStyle}>Recruiter Interviews</h1>
+          <p style={subtitleStyle}>
+            Schedule rounds, track outcomes, join rooms, and submit feedback.
+          </p>
+        </div>
+
+        <button type="button" onClick={() => void loadList()} style={secondaryButtonStyle}>
+          Refresh
+        </button>
+      </header>
+
+      {error && <section style={errorBoxStyle}>{error}</section>}
+
+      <section style={statsGridStyle}>
+        <StatCard label="Tracked" value={stats.total} color={C.sky} />
+        <StatCard label="Scheduled" value={stats.scheduled} color={C.purple} />
+        <StatCard label="Active Review" value={stats.active} color={C.yellow} />
+        <StatCard label="Hired" value={stats.hired} color={C.green} />
+      </section>
+
+      <section style={workspaceStyle}>
+        <aside style={listPanelStyle}>
+          <div style={panelHeaderStyle}>
+            <strong>Interviews</strong>
+            <span>{items.length}</span>
+          </div>
+
+          <div style={scrollListStyle}>
+            {loading ? (
+              <div style={emptyStateStyle}>Loading interviews...</div>
+            ) : items.length ? (
+              items.map((item) => {
+                const stage = getStage(item);
+                const active = item.id === selectedId;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedId(item.id)}
+                    style={{
+                      ...interviewRowStyle,
+                      borderColor: active ? C.borderStrong : C.border,
+                      background: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.025)',
+                    }}
+                  >
+                    <strong style={rowTitleStyle}>{getJobTitle(item)}</strong>
+                    <span style={rowSubStyle}>
+                      {getCompany(item)} · {getCandidateName(item)}
+                    </span>
+                    <span style={stageBadgeStyle}>{getStageLabel(stage)}</span>
                   </button>
                 );
               })
+            ) : (
+              <div style={emptyStateStyle}>No interviews found.</div>
             )}
           </div>
-        </section>
+        </aside>
 
-        <section style={{ border: `1px solid ${S.border}`, borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 12px', borderBottom: `1px solid ${S.border}`, fontWeight: 700 }}>
-            {selectedInterview ? `Interview Details` : 'Select an interview'}
-          </div>
-
+        <section style={detailPanelStyle}>
           {!selectedInterview ? (
-            <div style={{ padding: 12, color: S.muted }}>Select from the left panel.</div>
+            <div style={emptyStateStyle}>Select an interview to view details.</div>
           ) : (
-            <div style={{ padding: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <>
+              <div style={detailHeaderStyle}>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>{selectedInterview.job_title ?? 'Role'}</div>
-                  <div style={{ fontSize: 12, color: S.muted }}>
-                    {selectedInterview.company ?? '-'} · {selectedInterview.candidate_name ?? '-'} {selectedInterview.candidate_email ? `(${selectedInterview.candidate_email})` : ''}
-                  </div>
+                  <h2 style={detailTitleStyle}>{getJobTitle(selectedInterview)}</h2>
+                  <p style={detailSubStyle}>
+                    {getCompany(selectedInterview)} · {getCandidateName(selectedInterview)} ({getCandidateEmail(selectedInterview)})
+                  </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={detailActionRowStyle}>
                   <select
-                    disabled={updatingStage}
-                    value={selectedInterview.current_stage}
-                    onChange={(e) => void updateStage(e.target.value as InterviewStage)}
-                    style={{
-                      background: 'rgba(255,255,255,.05)',
-                      border: `1px solid ${S.border}`,
-                      color: S.white,
-                      borderRadius: 8,
-                      padding: '8px 10px',
-                    }}
+                    value={getStage(selectedInterview)}
+                    disabled={stageBusy}
+                    onChange={(event) => void updateStage(event.target.value as InterviewStage)}
+                    style={selectStyle}
                   >
-                    {stages.map((s) => (
-                      <option key={s} value={s} style={{ color: '#111' }}>
-                        {s}
+                    {STAGE_OPTIONS.map((stage) => (
+                      <option key={stage} value={stage}>
+                        {getStageLabel(stage)}
                       </option>
                     ))}
                   </select>
 
                   <button
-                    onClick={() => setSchedOpen((v) => !v)}
-                    style={{
-                      border: 'none',
-                      borderRadius: 8,
-                      padding: '8px 12px',
-                      background: S.green,
-                      color: '#052E16',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
+                    type="button"
+                    onClick={() => setScheduleOpen(true)}
+                    style={rounds.length ? secondaryButtonStyle : primaryButtonStyle}
                   >
-                    {schedOpen ? 'Close Scheduler' : 'Schedule Round'}
+                    {rounds.length ? 'Reschedule / Add Round' : 'Schedule Round'}
                   </button>
                 </div>
               </div>
 
-              {schedOpen && (
-                <div style={{ marginTop: 12, padding: 10, border: `1px solid ${S.border}`, borderRadius: 10, background: 'rgba(255,255,255,.03)' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Schedule New Round</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 8 }}>
-                    <select value={roundType} onChange={(e) => setRoundType(e.target.value as RoundType)} style={inputStyle}>
-                      <option value="hr">HR</option>
-                      <option value="technical">Technical</option>
-                      <option value="managerial">Managerial</option>
-                      <option value="assignment">Assignment</option>
-                    </select>
-
-                    <input
-                      type="datetime-local"
-                      value={scheduledAt}
-                      onChange={(e) => setScheduledAt(e.target.value)}
-                      style={inputStyle}
-                    />
-
-                    <input
-                      type="number"
-                      min={15}
-                      step={5}
-                      value={durationMins}
-                      onChange={(e) => setDurationMins(Number(e.target.value))}
-                      style={inputStyle}
-                    />
-
-                    <select value={mode} onChange={(e) => setMode(e.target.value as InterviewMode)} style={inputStyle}>
-                      <option value="video">Video</option>
-                      <option value="phone">Phone</option>
-                      <option value="offline">Offline</option>
-                    </select>
+              {nextRound && (
+                <section style={nextRoundStyle}>
+                  <div>
+                    <p style={eyebrowStyle}>Next Scheduled Round</p>
+                    <strong>
+                      Round {getRoundNumber(nextRound)} · {safeUpper(getRoundType(nextRound), 'TECHNICAL')}
+                    </strong>
+                    <p style={detailSubStyle}>
+                      {formatDateTime(getRoundScheduledAt(nextRound))} · {getRoundDuration(nextRound)} min · {safeString(nextRound.mode, 'video')}
+                    </p>
                   </div>
 
-                  <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={() => void schedule()}
-                      disabled={schedBusy}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <span
                       style={{
-                        border: 'none',
-                        borderRadius: 8,
-                        padding: '8px 12px',
-                        background: S.blue,
-                        color: '#001018',
-                        fontWeight: 800,
-                        cursor: schedBusy ? 'wait' : 'pointer',
-                        opacity: schedBusy ? 0.7 : 1,
+                        ...statusPillStyle,
+                        color: getRoundStatus(nextRound).color,
+                        borderColor: `${getRoundStatus(nextRound).color}55`,
+                        background: `${getRoundStatus(nextRound).color}14`,
                       }}
                     >
-                      {schedBusy ? 'Scheduling…' : 'Confirm Schedule'}
-                    </button>
+                      {getRoundStatus(nextRound).label}
+                    </span>
+
+                    {canJoinRound(nextRound) && (
+                      <button type="button" onClick={() => joinRound(nextRound)} style={joinButtonStyle}>
+                        Join Room
+                      </button>
+                    )}
                   </div>
-                </div>
+                </section>
               )}
 
-              <h3 style={{ margin: '14px 0 8px', fontSize: 14 }}>Rounds</h3>
-              {rounds.length === 0 ? (
-                <div style={{ color: S.muted, fontSize: 13 }}>No rounds scheduled yet.</div>
-              ) : (
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {rounds.map((r) => (
-                    <div key={r.id} style={{ border: `1px solid ${S.border}`, borderRadius: 8, padding: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13 }}>
-                          Round {r.round_number}: {r.round_type.toUpperCase()}
-                        </div>
-                        <div style={{ fontSize: 12, color: S.muted }}>{r.result ?? 'pending'}</div>
-                      </div>
+              <section style={{ marginTop: 18 }}>
+                <p style={sectionTitleStyle}>Rounds</p>
 
-                      <div style={{ marginTop: 6, fontSize: 12, color: 'rgba(255,255,255,.75)' }}>
-                        {r.scheduled_at ? new Date(r.scheduled_at).toLocaleString() : 'Not scheduled'} · {r.mode ?? '-'} · {r.duration_mins ?? '-'} mins
-                      </div>
+                {detailLoading ? (
+                  <div style={emptyStateStyle}>Loading rounds...</div>
+                ) : rounds.length ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {rounds.map((round) => {
+                      const status = getRoundStatus(round);
+                      const joinable = canJoinRound(round);
 
-                      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button onClick={() => joinRoom(r)} style={linkBtn}>Join Room</button>
-                        <button
-                          onClick={() => {
-                            if (!selectedInterview) return;
-                            window.location.href = `/recruiter/interviews/${selectedInterview.id}/feedback?roundId=${r.id}`;
-                          }}
-                          style={miniBtn(S.purple, '#140C2C')}
-                        >
-                          Feedback
-                        </button>
-                        <button onClick={() => void submitRoundResult(r.id, 'pass')} style={miniBtn(S.green, '#052E16')}>Mark Pass</button>
-                        <button onClick={() => void submitRoundResult(r.id, 'fail')} style={miniBtn(S.red, '#fff')}>Mark Fail</button>
-                        <button onClick={() => void submitRoundResult(r.id, 'no_show')} style={miniBtn(S.amber, '#111827')}>No Show</button>
-                      </div>
+                      return (
+                        <article key={round.id} style={roundCardStyle}>
+                          <div>
+                            <strong>
+                              Round {getRoundNumber(round)}: {safeUpper(getRoundType(round), 'TECHNICAL')}
+                            </strong>
+                            <p style={detailSubStyle}>
+                              {formatDateTime(getRoundScheduledAt(round))} · {safeString(round.mode, 'video')} · {getRoundDuration(round)}m
+                            </p>
+                          </div>
 
-                      {typeof r.score === 'number' && (
-                        <div style={{ marginTop: 8, fontSize: 12, color: S.purple }}>Score: {r.score}</div>
-                      )}
-                      {r.feedback && (
-                        <div style={{ marginTop: 6, fontSize: 12, color: 'rgba(255,255,255,.75)' }}>{r.feedback}</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+                          <div style={roundActionStyle}>
+                            <span
+                              style={{
+                                ...statusPillStyle,
+                                color: status.color,
+                                borderColor: `${status.color}55`,
+                                background: `${status.color}14`,
+                              }}
+                            >
+                              {status.label}
+                            </span>
 
-              {events.length > 0 && (
-                <>
-                  <h3 style={{ margin: '16px 0 8px', fontSize: 14 }}>Tracking Timeline</h3>
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {events.slice(0, 8).map((event) => (
-                      <div key={event.id} style={{ border: `1px solid ${S.border}`, borderRadius: 8, padding: 10 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700 }}>
-                          {formatEvent(event)}
-                        </div>
-                        <div style={{ marginTop: 4, fontSize: 11, color: S.muted }}>
-                          {new Date(event.created_at).toLocaleString()}
-                        </div>
+                            {joinable && (
+                              <button type="button" onClick={() => joinRound(round)} style={smallButtonStyle}>
+                                Join
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => router.push(`/recruiter/interviews/${selectedInterview.id}/feedback?roundId=${round.id}`)}
+                              style={smallButtonStyle}
+                            >
+                              Feedback
+                            </button>
+
+                            <select
+                              defaultValue=""
+                              onChange={(event) => {
+                                const value = event.target.value as RoundResult;
+                                if (value) void submitRoundResult(round.id, value);
+                                event.target.value = '';
+                              }}
+                              style={smallSelectStyle}
+                            >
+                              <option value="">Result</option>
+                              {ROUND_RESULTS.map((item) => (
+                                <option key={item.value} value={item.value}>
+                                  {item.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={emptyStateStyle}>
+                    No rounds scheduled yet. Click Schedule Round to create first round.
+                  </div>
+                )}
+              </section>
+
+              <section style={{ marginTop: 18 }}>
+                <p style={sectionTitleStyle}>Activity Timeline</p>
+
+                {events.length ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {events.slice(0, 10).map((event) => (
+                      <div key={event.id} style={eventCardStyle}>
+                        <span>{formatEvent(event)}</span>
+                        <strong>{formatDateTime(event.created_at ?? event.createdAt)}</strong>
                       </div>
                     ))}
                   </div>
-                </>
-              )}
-            </div>
+                ) : (
+                  <div style={emptyStateStyle}>No interview events yet.</div>
+                )}
+              </section>
+            </>
           )}
         </section>
-      </div>
+      </section>
+
+      <ScheduleModal
+        open={scheduleOpen}
+        title={scheduleTitle}
+        busy={scheduleBusy}
+        onClose={() => setScheduleOpen(false)}
+        onSubmit={(payload) => void scheduleRound(payload)}
+      />
     </main>
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,.05)',
-  border: '1px solid rgba(255,255,255,.12)',
-  color: '#F8FAFC',
-  borderRadius: 8,
-  padding: '8px 10px',
-  outline: 'none',
-  fontFamily: 'inherit',
-};
-
-const linkBtn: React.CSSProperties = {
-  border: 'none',
-  borderRadius: 7,
-  padding: '6px 10px',
-  background: '#38BDF8',
-  color: '#001018',
-  fontWeight: 800,
-  fontSize: 12,
-  cursor: 'pointer',
-};
-
-const miniBtn = (bg: string, color: string): React.CSSProperties => ({
-  border: 'none',
-  borderRadius: 7,
-  padding: '6px 10px',
-  background: bg,
+function StatCard({
+  label,
+  value,
   color,
-  fontWeight: 800,
-  fontSize: 12,
+}: {
+  label: string;
+  value: number;
+  color: string;
+}) {
+  return (
+    <div style={{ ...statCardStyle, borderColor: `${color}33`, background: `${color}10` }}>
+      <p>{label}</p>
+      <strong style={{ color }}>{value}</strong>
+    </div>
+  );
+}
+
+const pageStyle: CSSProperties = {
+  minHeight: '100vh',
+  background: C.bg,
+  color: C.text,
+  padding: '2rem',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const headerStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 16,
+  marginBottom: 18,
+};
+
+const titleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 28,
+  fontWeight: 950,
+  letterSpacing: '-0.05em',
+};
+
+const subtitleStyle: CSSProperties = {
+  margin: '8px 0 0',
+  color: C.muted,
+  fontSize: 14,
+};
+
+const statsGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gap: 14,
+  marginBottom: 18,
+};
+
+const statCardStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 16,
+  padding: '1rem',
+};
+
+const workspaceStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '360px 1fr',
+  gap: 16,
+};
+
+const listPanelStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 18,
+  overflow: 'hidden',
+};
+
+const detailPanelStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 18,
+  padding: '1.1rem',
+  minHeight: 420,
+};
+
+const panelHeaderStyle: CSSProperties = {
+  padding: '1rem',
+  borderBottom: `1px solid ${C.border}`,
+  display: 'flex',
+  justifyContent: 'space-between',
+};
+
+const scrollListStyle: CSSProperties = {
+  maxHeight: 650,
+  overflowY: 'auto',
+  display: 'grid',
+};
+
+const interviewRowStyle: CSSProperties = {
+  border: 'none',
+  borderBottom: `1px solid ${C.border}`,
+  padding: '1rem',
+  textAlign: 'left',
   cursor: 'pointer',
-});
+  color: C.text,
+  fontFamily: "'Sora', sans-serif",
+  display: 'grid',
+  gap: 5,
+};
 
-function formatEvent(event: InterviewEvent): string {
-  if (event.event_type === 'stage_changed' || event.event_type === 'STATUS_CHANGED') {
-    return `Stage moved from ${event.from_stage ?? 'unknown'} to ${event.to_stage ?? 'unknown'}`;
-  }
+const rowTitleStyle: CSSProperties = {
+  fontSize: 14,
+  fontWeight: 900,
+};
 
-  if (event.event_type === 'round_scheduled') {
-    const roundNumber = getNumber(event.metadata, 'round_number');
-    return roundNumber ? `Round ${roundNumber} scheduled` : 'Round scheduled';
-  }
+const rowSubStyle: CSSProperties = {
+  fontSize: 12,
+  color: C.muted,
+};
 
-  if (event.event_type === 'ROUND_COMPLETED' || event.event_type === 'round_result_submitted') {
-    const roundId = getString(event.metadata, 'roundId') ?? getString(event.metadata, 'round_id');
-    const result = getString(event.metadata, 'result');
-    if (result) {
-      return `${roundId ? `Round ${roundId}` : 'Interview round'} marked ${result.replaceAll('_', ' ')}`;
-    }
-  }
+const stageBadgeStyle: CSSProperties = {
+  marginTop: 4,
+  width: 'fit-content',
+  color: C.purple,
+  background: 'rgba(167,139,250,0.12)',
+  borderRadius: 999,
+  padding: '4px 8px',
+  fontSize: 10,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+};
 
-  const labels: Record<string, string> = {
-    round_scheduled: 'Round scheduled',
-    round_result_submitted: 'Round result submitted',
-    room_started: 'Live room started',
-    room_ended: 'Live room ended',
-    STATUS_CHANGED: 'Status changed',
-    ROUND_COMPLETED: 'Round completed',
-  };
+const detailHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+  alignItems: 'flex-start',
+  borderBottom: `1px solid ${C.border}`,
+  paddingBottom: 16,
+};
 
-  return labels[event.event_type] ?? event.event_type.replaceAll('_', ' ');
-}
+const detailTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 18,
+  fontWeight: 950,
+};
 
-function buildInterviewRoomPath(interviewId: string, roundNumber: number): string {
-  return `/interviews/room/jc-${interviewId}-r${roundNumber}`;
-}
+const detailSubStyle: CSSProperties = {
+  margin: '5px 0 0',
+  color: C.muted,
+  fontSize: 12,
+};
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof error.response === 'object' &&
-    error.response !== null &&
-    'data' in error.response &&
-    typeof error.response.data === 'object' &&
-    error.response.data !== null &&
-    'message' in error.response.data &&
-    typeof error.response.data.message === 'string'
-  ) {
-    return error.response.data.message;
-  }
+const detailActionRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: 10,
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+};
 
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
+const sectionTitleStyle: CSSProperties = {
+  margin: '0 0 10px',
+  color: C.faint,
+  fontSize: 12,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
 
-  return fallback;
-}
+const nextRoundStyle: CSSProperties = {
+  marginTop: 16,
+  padding: '1rem',
+  borderRadius: 16,
+  border: '1px solid rgba(56,189,248,0.25)',
+  background: 'rgba(56,189,248,0.07)',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+  alignItems: 'center',
+};
 
-function getNumber(metadata: InterviewEvent['metadata'], key: string): number | null {
-  const value = metadata?.[key];
-  return typeof value === 'number' ? value : null;
-}
+const roundCardStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 14,
+  padding: '1rem',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 14,
+  alignItems: 'center',
+};
 
-function getString(metadata: InterviewEvent['metadata'], key: string): string | null {
-  const value = metadata?.[key];
-  return typeof value === 'string' ? value : null;
-}
+const roundActionStyle: CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+};
+
+const eventCardStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 14,
+  padding: '0.85rem',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 14,
+  color: C.muted,
+  fontSize: 12,
+};
+
+const statusPillStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 999,
+  padding: '5px 9px',
+  fontSize: 10,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+};
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 12,
+  padding: '11px 12px',
+  color: C.text,
+  outline: 'none',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const selectStyle: CSSProperties = {
+  ...inputStyle,
+  minWidth: 230,
+};
+
+const smallSelectStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 10,
+  padding: '7px 9px',
+  color: C.text,
+  fontSize: 12,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  border: 'none',
+  borderRadius: 14,
+  padding: '11px 16px',
+  color: '#020617',
+  fontWeight: 950,
+  cursor: 'pointer',
+  background: `linear-gradient(135deg, ${C.sky}, ${C.purple}, ${C.red})`,
+  fontFamily: "'Sora', sans-serif",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: '11px 16px',
+  color: C.text,
+  fontWeight: 850,
+  cursor: 'pointer',
+  background: 'rgba(15,23,42,0.72)',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const smallButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 10,
+  padding: '7px 10px',
+  color: C.text,
+  cursor: 'pointer',
+  background: 'rgba(255,255,255,0.04)',
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const joinButtonStyle: CSSProperties = {
+  border: 'none',
+  borderRadius: 10,
+  padding: '8px 12px',
+  color: '#001018',
+  cursor: 'pointer',
+  background: C.green,
+  fontSize: 12,
+  fontWeight: 950,
+};
+
+const errorBoxStyle: CSSProperties = {
+  border: '1px solid rgba(248,113,113,0.28)',
+  background: 'rgba(248,113,113,0.08)',
+  color: '#FCA5A5',
+  borderRadius: 16,
+  padding: '12px 14px',
+  marginBottom: 16,
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const emptyStateStyle: CSSProperties = {
+  color: C.faint,
+  fontSize: 13,
+  padding: '1rem',
+};
+
+const modalOverlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 100,
+  background: 'rgba(0,0,0,0.72)',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 20,
+};
+
+const modalStyle: CSSProperties = {
+  width: 'min(540px, 100%)',
+  background: C.panel,
+  border: `1px solid ${C.border}`,
+  borderRadius: 22,
+  padding: '1.3rem',
+};
+
+const modalHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+};
+
+const eyebrowStyle: CSSProperties = {
+  margin: '0 0 6px',
+  color: C.purple,
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const modalTitleStyle: CSSProperties = {
+  margin: 0,
+  color: C.text,
+  fontSize: 20,
+  fontWeight: 950,
+};
+
+const closeButtonStyle: CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: 12,
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  color: C.text,
+  cursor: 'pointer',
+  fontSize: 18,
+};
+
+const formGridStyle: CSSProperties = {
+  display: 'grid',
+  gap: 14,
+  marginTop: 18,
+};
+
+const fieldStyle: CSSProperties = {
+  display: 'grid',
+  gap: 7,
+};
+
+const labelStyle: CSSProperties = {
+  color: C.faint,
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.07em',
+};
+
+const roundTypeWrapStyle: CSSProperties = {
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+
+const roundTypeButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: 'rgba(255,255,255,0.04)',
+  color: C.muted,
+  borderRadius: 999,
+  padding: '7px 12px',
+  cursor: 'pointer',
+  fontWeight: 850,
+};
+
+const activeRoundTypeButtonStyle: CSSProperties = {
+  borderColor: 'rgba(167,139,250,0.45)',
+  background: 'rgba(167,139,250,0.14)',
+  color: C.purple,
+};
+
+const twoColStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 12,
+};
+
+const modalFooterStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: 10,
+  marginTop: 18,
+};
+
+const errorTextStyle: CSSProperties = {
+  color: C.red,
+  fontSize: 12,
+  fontWeight: 800,
+};

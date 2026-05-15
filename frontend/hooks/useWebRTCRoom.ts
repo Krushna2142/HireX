@@ -3,22 +3,12 @@
 /**
  * useWebRTCRoom — Production WebRTC hook for interview video conferencing
  *
- * Architecture: Full-mesh WebRTC (each peer connects directly to every other peer)
- * Suitable for ≤6 participants. Beyond that, use an SFU (mediasoup, Livekit).
- *
- * Signal flow:
- *   1. Socket connects and authenticates via JWT
- *   2. Server sends room:snapshot with current participants
- *   3. For each existing participant: lower userId sends offer (avoids race)
- *   4. Receiving peer answers, ICE candidates exchanged
- *   5. WebRTC tracks flow directly peer-to-peer (bypassing server)
- *
- * Key design decisions:
- *   - RTCPeerConnection per remote peer (not shared)
- *   - ICE candidate queuing until remote description is set (critical fix)
- *   - Screen sharing replaces video track in existing senders (no renegotiation needed)
- *   - Exponential backoff reconnection for Socket.io
- *   - Refs for all mutable state touched in async callbacks (avoids stale closures)
+ * Fix included:
+ * - Prevents "max-bundle configured but session description has no BUNDLE group"
+ * - Ensures PeerConnection has tracks/transceivers before createOffer()
+ * - Uses one safe offer creator for initial offers and negotiationneeded offers
+ * - Keeps ICE candidate queueing
+ * - Keeps screen sharing, chat, room end, and media toggle flow
  */
 
 import {
@@ -28,8 +18,6 @@ import {
   useState,
 } from 'react';
 import { io, Socket } from 'socket.io-client';
-
-// ─── Public types ─────────────────────────────────────────────────────────────
 
 export type RemotePeer = {
   userId: string;
@@ -73,11 +61,13 @@ type UseWebRTCRoomArgs = {
   user: { id: string; full_name?: string; role?: string } | null;
 };
 
-// ─── ICE configuration ────────────────────────────────────────────────────────
-// For production, configure TURN servers via the NEXT_PUBLIC_TURN_SERVERS env var.
-// Example (stringified JSON array):
-// NEXT_PUBLIC_TURN_SERVERS=[{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]
-// STUN alone fails across some NATs; TURN improves connectivity reliability.
+type PeerState = {
+  pc: RTCPeerConnection;
+  makingOffer: boolean;
+  ignoreOffer: boolean;
+  iceCandidateQueue: RTCIceCandidateInit[];
+  remoteDescSet: boolean;
+};
 
 const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -86,15 +76,16 @@ const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
 ];
 
 let TURN_SERVERS: RTCIceServer[] = [];
+
 try {
   const raw = process.env.NEXT_PUBLIC_TURN_SERVERS;
   if (raw) {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) TURN_SERVERS = parsed as RTCIceServer[];
+    if (Array.isArray(parsed)) {
+      TURN_SERVERS = parsed as RTCIceServer[];
+    }
   }
 } catch (err) {
-  // Non-fatal: fall back to STUN-only
-  // eslint-disable-next-line no-console
   console.warn('Failed to parse NEXT_PUBLIC_TURN_SERVERS:', err);
 }
 
@@ -109,8 +100,6 @@ const RTC_CONFIG: RTCConfiguration = {
   bundlePolicy: 'max-bundle',
   rtcpMuxPolicy: 'require',
 };
-
-// ─── Media constraints ────────────────────────────────────────────────────────
 
 const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   width: { ideal: 1280, max: 1920 },
@@ -127,20 +116,111 @@ const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   channelCount: 1,
 };
 
-// ─── Internal state types ─────────────────────────────────────────────────────
+function safeString(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
 
-type PeerState = {
-  pc: RTCPeerConnection;
-  makingOffer: boolean;
-  ignoreOffer: boolean;
-  iceCandidateQueue: RTCIceCandidateInit[];
-  remoteDescSet: boolean;
-};
+  return fallback;
+}
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+function getDisplayName(user: UseWebRTCRoomArgs['user']) {
+  return safeString(user?.full_name, 'User');
+}
+
+function getAuthToken() {
+  if (typeof window === 'undefined') return '';
+
+  return (
+    localStorage.getItem('jc_token') ??
+    localStorage.getItem('token') ??
+    localStorage.getItem('accessToken') ??
+    localStorage.getItem('authToken') ??
+    ''
+  );
+}
+
+function getSocketBaseUrl() {
+  const raw = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
+
+  return raw
+    .replace(/\/api\/?$/, '')
+    .replace(/\/$/, '');
+}
+
+function hasBundleGroup(description: RTCSessionDescriptionInit | null | undefined) {
+  const sdp = description?.sdp ?? '';
+
+  return sdp.includes('a=group:BUNDLE');
+}
+
+function bundleErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  return message.toLowerCase().includes('bundle');
+}
+
+/**
+ * Critical WebRTC fix:
+ * With bundlePolicy=max-bundle, Chrome can throw:
+ * "Failed to set local offer sdp: max-bundle configured but session description has no BUNDLE group"
+ *
+ * This happens when createOffer() is called before any track/transceiver/data channel exists.
+ * So before every offer, guarantee at least recvonly audio/video transceivers exist.
+ */
+function ensureBundleSafePeer(pc: RTCPeerConnection) {
+  const hasSenderTrack = pc.getSenders().some((sender) => Boolean(sender.track));
+  const hasTransceiver = pc.getTransceivers().length > 0;
+
+  if (!hasSenderTrack && !hasTransceiver && pc.signalingState === 'stable') {
+    pc.addTransceiver('audio', { direction: 'recvonly' });
+    pc.addTransceiver('video', { direction: 'recvonly' });
+  }
+}
+
+async function createOfferWithBundle(pc: RTCPeerConnection, label: string) {
+  ensureBundleSafePeer(pc);
+
+  let offer = await pc.createOffer();
+
+  if (!hasBundleGroup(offer)) {
+    console.warn(`[${label}] Offer SDP did not contain BUNDLE group. Retrying with guaranteed transceivers.`);
+
+    ensureBundleSafePeer(pc);
+    offer = await pc.createOffer();
+  }
+
+  if (!hasBundleGroup(offer)) {
+    throw new Error(
+      `[${label}] Invalid WebRTC offer: missing BUNDLE group. This usually means offer was created before media/transceivers existed.`,
+    );
+  }
+
+  return offer;
+}
+
+async function setLocalOfferWithBundle(pc: RTCPeerConnection, label: string) {
+  const offer = await createOfferWithBundle(pc, label);
+
+  try {
+    await pc.setLocalDescription(offer);
+  } catch (err) {
+    if (!bundleErrorMessage(err)) {
+      throw err;
+    }
+
+    console.warn(`[${label}] setLocalDescription failed because of BUNDLE. Retrying once.`, err);
+
+    const retryOffer = await createOfferWithBundle(pc, `${label}:retry`);
+    await pc.setLocalDescription(retryOffer);
+  }
+}
+
+function isTerminalRoundResult(value: string) {
+  return value === 'pass' || value === 'fail' || value === 'no_show' || value === 'completed';
+}
 
 export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
-  // ── Public state ───────────────────────────────────────────────────────────
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [peers, setPeers] = useState<RemotePeer[]>([]);
@@ -153,151 +233,55 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
   const [hostPresent, setHostPresent] = useState(false);
   const [roomEnded, setRoomEnded] = useState(false);
 
-  // ── Internal refs (not reactive — used in async callbacks) ────────────────
   const socketRef = useRef<Socket | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const savedCamTrackRef = useRef<MediaStreamTrack | null>(null);
 
-  // userId → PeerState
   const peersRef = useRef<Map<string, PeerState>>(new Map());
 
-  // Stable copies of toggle state for closures
   const micOnRef = useRef(true);
   const camOnRef = useRef(true);
   const screenSharingRef = useRef(false);
   const userIdRef = useRef(user?.id ?? '');
 
-  useEffect(() => { micOnRef.current = micOn; }, [micOn]);
-  useEffect(() => { camOnRef.current = camOn; }, [camOn]);
-  useEffect(() => { screenSharingRef.current = screenSharing; }, [screenSharing]);
-  useEffect(() => { userIdRef.current = user?.id ?? ''; }, [user?.id]);
+  useEffect(() => {
+    micOnRef.current = micOn;
+  }, [micOn]);
 
-  // ── Utility: update a single peer in state ─────────────────────────────────
+  useEffect(() => {
+    camOnRef.current = camOn;
+  }, [camOn]);
+
+  useEffect(() => {
+    screenSharingRef.current = screenSharing;
+  }, [screenSharing]);
+
+  useEffect(() => {
+    userIdRef.current = user?.id ?? '';
+  }, [user?.id]);
+
   const updatePeer = useCallback((userId: string, patch: Partial<RemotePeer>) => {
-    setPeers(prev =>
-      prev.map(p => p.userId === userId ? { ...p, ...patch } : p)
+    setPeers((prev) =>
+      prev.map((peer) => (peer.userId === userId ? { ...peer, ...patch } : peer)),
     );
   }, []);
 
   const removePeer = useCallback((userId: string) => {
-    const ps = peersRef.current.get(userId);
-    if (ps) {
-      ps.pc.close();
+    const peerState = peersRef.current.get(userId);
+
+    if (peerState) {
+      peerState.pc.close();
       peersRef.current.delete(userId);
     }
-    setPeers(prev => prev.filter(p => p.userId !== userId));
+
+    setPeers((prev) => prev.filter((peer) => peer.userId !== userId));
   }, []);
 
-  // ── Create RTCPeerConnection for a remote user ────────────────────────────
-  const createPC = useCallback((
-    remoteUserId: string,
-    socket: Socket,
-  ): PeerState => {
-    // Clean up any existing connection
-    const existing = peersRef.current.get(remoteUserId);
-    if (existing) {
-      existing.pc.close();
-      peersRef.current.delete(remoteUserId);
-    }
-
-    const pc = new RTCPeerConnection(RTC_CONFIG);
-    const state: PeerState = {
-      pc,
-      makingOffer: false,
-      ignoreOffer: false,
-      iceCandidateQueue: [],
-      remoteDescSet: false,
-    };
-    peersRef.current.set(remoteUserId, state);
-
-    // Add local tracks immediately so remote can receive them
-    if (localStreamRef.current) {
-      for (const track of localStreamRef.current.getTracks()) {
-        pc.addTrack(track, localStreamRef.current);
-      }
-    }
-
-    // ICE candidates
-    pc.onicecandidate = (evt) => {
-      if (!evt.candidate) return;
-      socket.emit('interview:ice-candidate', {
-        roomId,
-        targetUserId: remoteUserId,
-        candidate: evt.candidate.toJSON(),
-      });
-    };
-
-    pc.onicecandidateerror = (evt) => {
-      // Non-fatal; some ICE errors are expected (e.g., failed STUN checks)
-      if ((evt as RTCPeerConnectionIceErrorEvent).errorCode !== 701) {
-        console.warn('[ICE] Candidate error:', evt);
-      }
-    };
-
-    // Receive remote tracks
-    pc.ontrack = (evt) => {
-      const [stream] = evt.streams;
-      if (!stream) return;
-
-      setPeers(prev => {
-        const exists = prev.find(p => p.userId === remoteUserId);
-        if (exists) {
-          return prev.map(p =>
-            p.userId === remoteUserId ? { ...p, stream } : p
-          );
-        }
-        return [...prev, {
-          userId: remoteUserId,
-          stream,
-          micOn: true,
-          camOn: true,
-          screenSharing: false,
-        }];
-      });
-    };
-
-    // Connection state changes
-    pc.onconnectionstatechange = () => {
-      const cs = pc.connectionState;
-      console.debug(`[PC:${remoteUserId}] connectionState → ${cs}`);
-
-      if (cs === 'failed') {
-        // Attempt ICE restart
-        console.warn(`[PC:${remoteUserId}] Connection failed — restarting ICE`);
-        pc.restartIce();
-      }
-      if (cs === 'closed') {
-        removePeer(remoteUserId);
-      }
-    };
-
-    pc.onnegotiationneeded = async () => {
-      if (state.makingOffer) return;
-      try {
-        state.makingOffer = true;
-        const offer = await pc.createOffer();
-        if (pc.signalingState !== 'stable') return; // Collided — abort
-        await pc.setLocalDescription(offer);
-        socket.emit('interview:offer', {
-          roomId,
-          targetUserId: remoteUserId,
-          sdp: pc.localDescription,
-        });
-      } catch (err) {
-        console.error(`[PC:${remoteUserId}] Negotiation error:`, err);
-      } finally {
-        state.makingOffer = false;
-      }
-    };
-
-    return state;
-  }, [removePeer, roomId]);
-
-  // ── Process queued ICE candidates after remote description is set ─────────
   const drainIceQueue = useCallback(async (state: PeerState, remoteUserId: string) => {
     const candidates = [...state.iceCandidateQueue];
     state.iceCandidateQueue = [];
+
     for (const candidate of candidates) {
       try {
         await state.pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -307,11 +291,147 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     }
   }, []);
 
-  // ── Acquire local media ────────────────────────────────────────────────────
+  const makeAndSendOffer = useCallback(
+    async (remoteUserId: string, socket: Socket, reason: string) => {
+      const state = peersRef.current.get(remoteUserId);
+
+      if (!state) return;
+      if (state.makingOffer) return;
+
+      const { pc } = state;
+
+      if (pc.signalingState !== 'stable') {
+        console.debug(`[PC:${remoteUserId}] Skip offer (${reason}); signalingState=${pc.signalingState}`);
+        return;
+      }
+
+      try {
+        state.makingOffer = true;
+
+        await setLocalOfferWithBundle(pc, `PC:${remoteUserId}:${reason}`);
+
+        if (!pc.localDescription) {
+          throw new Error(`[PC:${remoteUserId}:${reason}] localDescription missing after setLocalDescription.`);
+        }
+
+        socket.emit('interview:offer', {
+          roomId,
+          targetUserId: remoteUserId,
+          sdp: pc.localDescription,
+        });
+      } catch (err) {
+        console.error(`[PC:${remoteUserId}] Offer failed (${reason}):`, err);
+      } finally {
+        state.makingOffer = false;
+      }
+    },
+    [roomId],
+  );
+
+  const createPC = useCallback(
+    (remoteUserId: string, socket: Socket): PeerState => {
+      const existing = peersRef.current.get(remoteUserId);
+
+      if (existing) {
+        existing.pc.close();
+        peersRef.current.delete(remoteUserId);
+      }
+
+      const pc = new RTCPeerConnection(RTC_CONFIG);
+
+      const state: PeerState = {
+        pc,
+        makingOffer: false,
+        ignoreOffer: false,
+        iceCandidateQueue: [],
+        remoteDescSet: false,
+      };
+
+      peersRef.current.set(remoteUserId, state);
+
+      const stream = localStreamRef.current;
+
+      if (stream?.getTracks().length) {
+        for (const track of stream.getTracks()) {
+          pc.addTrack(track, stream);
+        }
+      } else {
+        ensureBundleSafePeer(pc);
+      }
+
+      pc.onicecandidate = (event) => {
+        if (!event.candidate) return;
+
+        socket.emit('interview:ice-candidate', {
+          roomId,
+          targetUserId: remoteUserId,
+          candidate: event.candidate.toJSON(),
+        });
+      };
+
+      pc.onicecandidateerror = (event) => {
+        const iceError = event as RTCPeerConnectionIceErrorEvent;
+
+        if (iceError.errorCode !== 701) {
+          console.warn('[ICE] Candidate error:', event);
+        }
+      };
+
+      pc.ontrack = (event) => {
+        const streamFromEvent = event.streams?.[0] ?? new MediaStream([event.track]);
+
+        setPeers((prev) => {
+          const exists = prev.find((peer) => peer.userId === remoteUserId);
+
+          if (exists) {
+            return prev.map((peer) =>
+              peer.userId === remoteUserId
+                ? { ...peer, stream: streamFromEvent }
+                : peer,
+            );
+          }
+
+          return [
+            ...prev,
+            {
+              userId: remoteUserId,
+              stream: streamFromEvent,
+              micOn: true,
+              camOn: true,
+              screenSharing: false,
+            },
+          ];
+        });
+      };
+
+      pc.onconnectionstatechange = () => {
+        const stateValue = pc.connectionState;
+        console.debug(`[PC:${remoteUserId}] connectionState → ${stateValue}`);
+
+        if (stateValue === 'failed') {
+          console.warn(`[PC:${remoteUserId}] Connection failed — restarting ICE`);
+          pc.restartIce();
+        }
+
+        if (stateValue === 'closed') {
+          removePeer(remoteUserId);
+        }
+      };
+
+      pc.onnegotiationneeded = async () => {
+        await makeAndSendOffer(remoteUserId, socket, 'negotiationneeded');
+      };
+
+      return state;
+    },
+    [makeAndSendOffer, removePeer, roomId],
+  );
+
   const acquireMedia = useCallback(async (): Promise<MediaStream> => {
     if (localStreamRef.current) return localStreamRef.current;
 
     setConnectionState('acquiring-media');
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: AUDIO_CONSTRAINTS,
       video: VIDEO_CONSTRAINTS,
@@ -319,50 +439,43 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
 
     localStreamRef.current = stream;
     setLocalStream(stream);
-    setMicOn(stream.getAudioTracks().every(t => t.enabled));
-    setCamOn(stream.getVideoTracks().every(t => t.enabled));
+    setMicOn(stream.getAudioTracks().every((track) => track.enabled));
+    setCamOn(stream.getVideoTracks().every((track) => track.enabled));
+
     return stream;
   }, []);
 
-  // ── Connect and join room ──────────────────────────────────────────────────
   const join = useCallback(async () => {
     if (!user?.id || !roomId) return;
-    if (socketRef.current?.connected) return; // Already connected
+    if (socketRef.current?.connected) return;
 
     try {
       setError('');
+      setRoomEnded(false);
 
-      // 1. Get local media
       await acquireMedia();
 
-      // 2. Connect socket
       setConnectionState('connecting-socket');
-      const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api')
-        .replace(/\/api\/?$/, '');
 
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('jc_token') ?? ''
-        : '';
-
-      const socket: Socket = io(`${apiBase}/interview`, {
+      const socket: Socket = io(`${getSocketBaseUrl()}/interview`, {
         transports: ['websocket'],
         withCredentials: true,
-        auth: { token },
+        auth: { token: getAuthToken() },
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 10_000,
         timeout: 15_000,
       });
-      socketRef.current = socket;
 
-      // ── Socket event handlers ──────────────────────────────────────────────
+      socketRef.current = socket;
 
       socket.on('connect', () => {
         console.log('[Socket] Connected:', socket.id);
         setConnectionState('joining-room');
+
         socket.emit('interview:join-room', {
           roomId,
-          name: user.full_name,
+          name: getDisplayName(user),
         });
       });
 
@@ -374,6 +487,7 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
 
       socket.on('disconnect', (reason) => {
         console.warn('[Socket] Disconnected:', reason);
+
         if (reason !== 'io client disconnect') {
           setConnectionState('reconnecting');
         }
@@ -381,141 +495,132 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
 
       socket.on('reconnect', () => {
         console.log('[Socket] Reconnected — rejoining room');
+
         socket.emit('interview:join-room', {
           roomId,
-          name: user.full_name,
+          name: getDisplayName(user),
         });
       });
 
-      socket.on('interview:error', (data: { message: string }) => {
-        setError(data.message);
+      socket.on('interview:error', (data: { message?: string }) => {
+        setError(safeString(data?.message, 'Interview room error.'));
         setConnectionState('error');
       });
 
-      // Room snapshot: current participants when we join
       socket.on('interview:room-snapshot', async (data: { participants: ParticipantSnapshot[] }) => {
         setConnectionState('connected');
         setRoomEnded(false);
 
-        const others = data.participants.filter(p => p.userId !== user.id);
+        const participants = Array.isArray(data.participants) ? data.participants : [];
+        const others = participants.filter((participant) => participant.userId !== user.id);
 
-        // Update metadata for existing peers
-        setPeers(prev => {
-          const existing = new Map(prev.map(p => [p.userId, p]));
-          for (const snap of others) {
-            const e = existing.get(snap.userId);
-            if (e) {
-              existing.set(snap.userId, { ...e, ...snap });
+        setPeers((prev) => {
+          const existing = new Map(prev.map((peer) => [peer.userId, peer]));
+
+          for (const snapshot of others) {
+            const current = existing.get(snapshot.userId);
+
+            if (current) {
+              existing.set(snapshot.userId, { ...current, ...snapshot });
             } else {
-              existing.set(snap.userId, {
-                userId: snap.userId,
+              existing.set(snapshot.userId, {
+                userId: snapshot.userId,
                 stream: null,
-                name: snap.name,
-                role: snap.role,
-                micOn: snap.micOn,
-                camOn: snap.camOn,
-                screenSharing: snap.screenSharing,
+                name: snapshot.name,
+                role: snapshot.role,
+                micOn: snapshot.micOn,
+                camOn: snapshot.camOn,
+                screenSharing: snapshot.screenSharing,
               });
             }
           }
+
           return Array.from(existing.values());
         });
 
-        // Polite peer model: lower userId is the "polite" peer (waits)
-        // Higher userId sends the offer (initiates)
         for (const participant of others) {
           if (user.id > participant.userId) {
-            // We are the impolite peer — send the offer
-            const ps = createPC(participant.userId, socket);
-            try {
-              ps.makingOffer = true;
-              const offer = await ps.pc.createOffer();
-              await ps.pc.setLocalDescription(offer);
-              socket.emit('interview:offer', {
-                roomId,
-                targetUserId: participant.userId,
-                sdp: ps.pc.localDescription,
-              });
-            } catch (err) {
-              console.error(`[PC:${participant.userId}] Initial offer failed:`, err);
-            } finally {
-              ps.makingOffer = false;
-            }
+            createPC(participant.userId, socket);
+            await makeAndSendOffer(participant.userId, socket, 'room-snapshot');
           }
-          // Polite peer (lower userId) waits for incoming offer
         }
       });
 
-      // New participant joined after us
       socket.on('interview:user-joined', async (data: { participant: ParticipantSnapshot }) => {
-        const { participant } = data;
+        const participant = data.participant;
+
+        if (!participant?.userId) return;
         if (participant.userId === user.id) return;
 
-        // Add to peer list (no stream yet)
-        setPeers(prev => {
-          if (prev.some(p => p.userId === participant.userId)) return prev;
-          return [...prev, {
-            userId: participant.userId,
-            stream: null,
-            name: participant.name,
-            role: participant.role,
-            micOn: participant.micOn,
-            camOn: participant.camOn,
-            screenSharing: participant.screenSharing,
-          }];
+        setPeers((prev) => {
+          if (prev.some((peer) => peer.userId === participant.userId)) return prev;
+
+          return [
+            ...prev,
+            {
+              userId: participant.userId,
+              stream: null,
+              name: participant.name,
+              role: participant.role,
+              micOn: participant.micOn,
+              camOn: participant.camOn,
+              screenSharing: participant.screenSharing,
+            },
+          ];
         });
 
-        // If we are the impolite peer (higher userId), send offer
         if (user.id > participant.userId) {
-          const ps = createPC(participant.userId, socket);
-          try {
-            ps.makingOffer = true;
-            const offer = await ps.pc.createOffer();
-            await ps.pc.setLocalDescription(offer);
-            socket.emit('interview:offer', {
-              roomId,
-              targetUserId: participant.userId,
-              sdp: ps.pc.localDescription,
-            });
-          } catch (err) {
-            console.error(`[PC:${participant.userId}] Offer error on join:`, err);
-          } finally {
-            ps.makingOffer = false;
-          }
+          createPC(participant.userId, socket);
+          await makeAndSendOffer(participant.userId, socket, 'user-joined');
         }
       });
 
-      // Incoming offer (from impolite peer)
       socket.on('interview:offer', async (data: {
         fromUserId: string;
         sdp: RTCSessionDescriptionInit;
       }) => {
-        let ps = peersRef.current.get(data.fromUserId);
-        if (!ps) {
-          ps = createPC(data.fromUserId, socket);
+        if (!data?.fromUserId || !data?.sdp) return;
+
+        if (data.sdp.type === 'offer' && !hasBundleGroup(data.sdp)) {
+          console.warn(`[PC:${data.fromUserId}] Ignoring invalid offer without BUNDLE group.`);
+          return;
         }
 
-        const { pc } = ps;
+        let peerState = peersRef.current.get(data.fromUserId);
+
+        if (!peerState) {
+          peerState = createPC(data.fromUserId, socket);
+        }
+
+        const { pc } = peerState;
+
         const offerCollision =
           data.sdp.type === 'offer' &&
-          (ps.makingOffer || pc.signalingState !== 'stable');
+          (peerState.makingOffer || pc.signalingState !== 'stable');
 
-        // Polite peer ignores colliding offers; impolite peer rolls back
         const isPolite = user.id < data.fromUserId;
-        ps.ignoreOffer = !isPolite && offerCollision;
-        if (ps.ignoreOffer) return;
+        peerState.ignoreOffer = !isPolite && offerCollision;
+
+        if (peerState.ignoreOffer) return;
 
         try {
           if (offerCollision) {
-            // Rollback for polite peer
             await pc.setLocalDescription({ type: 'rollback' });
           }
+
           await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          ps.remoteDescSet = true;
-          await drainIceQueue(ps, data.fromUserId);
+          peerState.remoteDescSet = true;
+
+          await drainIceQueue(peerState, data.fromUserId);
 
           const answer = await pc.createAnswer();
+
+          if (!hasBundleGroup(answer)) {
+            console.warn(`[PC:${data.fromUserId}] Answer SDP missing BUNDLE group.`);
+          }
+
           await pc.setLocalDescription(answer);
+
           socket.emit('interview:answer', {
             roomId,
             targetUserId: data.fromUserId,
@@ -526,67 +631,72 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
         }
       });
 
-      // Incoming answer
       socket.on('interview:answer', async (data: {
         fromUserId: string;
         sdp: RTCSessionDescriptionInit;
       }) => {
-        const ps = peersRef.current.get(data.fromUserId);
-        if (!ps || ps.ignoreOffer) return;
+        if (!data?.fromUserId || !data?.sdp) return;
+
+        const peerState = peersRef.current.get(data.fromUserId);
+
+        if (!peerState || peerState.ignoreOffer) return;
+
         try {
-          await ps.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          ps.remoteDescSet = true;
-          await drainIceQueue(ps, data.fromUserId);
+          await peerState.pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          peerState.remoteDescSet = true;
+
+          await drainIceQueue(peerState, data.fromUserId);
         } catch (err) {
           console.error(`[PC:${data.fromUserId}] answer handling error:`, err);
         }
       });
 
-      // ICE candidates
       socket.on('interview:ice-candidate', async (data: {
         fromUserId: string;
         candidate: RTCIceCandidateInit;
       }) => {
-        const ps = peersRef.current.get(data.fromUserId);
-        if (!ps) return;
+        if (!data?.fromUserId || !data?.candidate) return;
 
-        // Queue until remote description is set (critical — prevents ordering issues)
-        if (!ps.remoteDescSet || ps.pc.remoteDescription === null) {
-          ps.iceCandidateQueue.push(data.candidate);
+        const peerState = peersRef.current.get(data.fromUserId);
+
+        if (!peerState) return;
+
+        if (!peerState.remoteDescSet || peerState.pc.remoteDescription === null) {
+          peerState.iceCandidateQueue.push(data.candidate);
           return;
         }
 
         try {
-          await ps.pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          await peerState.pc.addIceCandidate(new RTCIceCandidate(data.candidate));
         } catch (err) {
-          if (!ps.ignoreOffer) {
+          if (!peerState.ignoreOffer) {
             console.error(`[PC:${data.fromUserId}] ICE candidate error:`, err);
           }
         }
       });
 
-      // Participant left
       socket.on('interview:user-left', (data: { userId: string }) => {
+        if (!data?.userId) return;
         removePeer(data.userId);
       });
 
-      // Media state changes
       socket.on('interview:user-media-toggled', (data: {
         userId: string;
         micOn: boolean;
         camOn: boolean;
         screenSharing: boolean;
       }) => {
+        if (!data?.userId) return;
+
         updatePeer(data.userId, {
-          micOn: data.micOn,
-          camOn: data.camOn,
-          screenSharing: data.screenSharing,
+          micOn: Boolean(data.micOn),
+          camOn: Boolean(data.camOn),
+          screenSharing: Boolean(data.screenSharing),
         });
       });
 
-      // In-room chat
-      socket.on('interview:chat-message', (msg: ChatMessage) => {
-        setMessages(prev => [...prev, msg]);
+      socket.on('interview:chat-message', (message: ChatMessage) => {
+        setMessages((prev) => [...prev, message]);
       });
 
       socket.on('interview:room-status', (data: {
@@ -595,7 +705,8 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
         ended: boolean;
       }) => {
         setHostUserId(data.hostUserId ?? null);
-        setHostPresent(!!data.hostPresent);
+        setHostPresent(Boolean(data.hostPresent));
+
         if (data.ended) {
           setRoomEnded(true);
           setConnectionState('left');
@@ -606,33 +717,42 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
         setRoomEnded(true);
         setConnectionState('left');
       });
-
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to join room';
-      setError(msg);
+      const message = err instanceof Error ? err.message : 'Failed to join room';
+
+      setError(message);
       setConnectionState('error');
+
       console.error('[useWebRTCRoom] join error:', err);
     }
-  }, [acquireMedia, createPC, drainIceQueue, removePeer, roomId, updatePeer, user]);
+  }, [
+    acquireMedia,
+    createPC,
+    drainIceQueue,
+    makeAndSendOffer,
+    removePeer,
+    roomId,
+    updatePeer,
+    user,
+  ]);
 
-  // ── Leave ──────────────────────────────────────────────────────────────────
   const leave = useCallback(() => {
-    // Signal leave before disconnecting
     socketRef.current?.emit('interview:leave-room', { roomId });
     socketRef.current?.disconnect();
     socketRef.current = null;
 
-    // Close all peer connections
-    for (const [, ps] of peersRef.current) {
-      ps.pc.close();
+    for (const [, peerState] of peersRef.current) {
+      peerState.pc.close();
     }
+
     peersRef.current.clear();
 
-    // Stop all local tracks
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
-    screenStreamRef.current?.getTracks().forEach(t => t.stop());
+
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
     screenStreamRef.current = null;
+
     savedCamTrackRef.current = null;
 
     setLocalStream(null);
@@ -645,13 +765,19 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     setConnectionState('left');
   }, [roomId]);
 
-  // ── Mic toggle ─────────────────────────────────────────────────────────────
   const toggleMic = useCallback(() => {
     const stream = localStreamRef.current;
+
     if (!stream) return;
+
     const next = !micOnRef.current;
-    stream.getAudioTracks().forEach(t => (t.enabled = next));
+
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = next;
+    });
+
     setMicOn(next);
+
     socketRef.current?.emit('interview:toggle-media', {
       roomId,
       micOn: next,
@@ -660,16 +786,21 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     });
   }, [roomId]);
 
-  // ── Camera toggle ──────────────────────────────────────────────────────────
   const toggleCam = useCallback(() => {
     const stream = localStreamRef.current;
+
     if (!stream) return;
+
     const next = !camOnRef.current;
-    // Only toggle the actual track if not screen sharing
+
     if (!screenSharingRef.current) {
-      stream.getVideoTracks().forEach(t => (t.enabled = next));
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = next;
+      });
     }
+
     setCamOn(next);
+
     socketRef.current?.emit('interview:toggle-media', {
       roomId,
       micOn: micOnRef.current,
@@ -678,9 +809,64 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     });
   }, [roomId]);
 
-  // ── Screen share start ─────────────────────────────────────────────────────
+  const stopScreenShare = useCallback(async () => {
+    if (!screenSharingRef.current) return;
+
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+
+    let cameraTrack: MediaStreamTrack | null = savedCamTrackRef.current;
+    savedCamTrackRef.current = null;
+
+    if (!cameraTrack || cameraTrack.readyState === 'ended') {
+      try {
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: VIDEO_CONSTRAINTS,
+        });
+
+        cameraTrack = cameraStream.getVideoTracks()[0] ?? null;
+      } catch {
+        cameraTrack = null;
+      }
+    }
+
+    if (cameraTrack) {
+      cameraTrack.enabled = camOnRef.current;
+
+      const replaceOps: Promise<void>[] = [];
+
+      for (const [, peerState] of peersRef.current) {
+        const sender = peerState.pc
+          .getSenders()
+          .find((item) => item.track?.kind === 'video');
+
+        if (sender) {
+          replaceOps.push(sender.replaceTrack(cameraTrack));
+        }
+      }
+
+      await Promise.allSettled(replaceOps);
+    }
+
+    const audioTracks = localStreamRef.current?.getAudioTracks() ?? [];
+    const restoredTracks = cameraTrack ? [...audioTracks, cameraTrack] : audioTracks;
+    const restoredStream = new MediaStream(restoredTracks);
+
+    localStreamRef.current = restoredStream;
+    setLocalStream(new MediaStream(restoredStream.getTracks()));
+    setScreenSharing(false);
+
+    socketRef.current?.emit('interview:toggle-media', {
+      roomId,
+      micOn: micOnRef.current,
+      camOn: camOnRef.current,
+      screenSharing: false,
+    });
+  }, [roomId]);
+
   const startScreenShare = useCallback(async () => {
     if (screenSharingRef.current) return;
+
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -696,42 +882,48 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
       } as any);
 
       screenStreamRef.current = screenStream;
+
       const screenTrack = screenStream.getVideoTracks()[0];
 
-      // Save current camera track before replacing
-      const localVidTrack = localStreamRef.current?.getVideoTracks()[0];
-      if (localVidTrack) {
-        savedCamTrackRef.current = localVidTrack;
+      if (!screenTrack) {
+        throw new Error('Screen share track was not created.');
       }
 
-      // Replace video track in all PeerConnections
+      const localVideoTrack = localStreamRef.current?.getVideoTracks()[0];
+
+      if (localVideoTrack) {
+        savedCamTrackRef.current = localVideoTrack;
+      }
+
       const replaceOps: Promise<void>[] = [];
-      for (const [, ps] of peersRef.current) {
-        const sender = ps.pc.getSenders().find(s => s.track?.kind === 'video');
+
+      for (const [, peerState] of peersRef.current) {
+        const sender = peerState.pc
+          .getSenders()
+          .find((item) => item.track?.kind === 'video');
+
         if (sender) {
           replaceOps.push(sender.replaceTrack(screenTrack));
         }
       }
+
       await Promise.allSettled(replaceOps);
 
-      // Also update local stream for preview
       if (localStreamRef.current) {
-        const local = localStreamRef.current;
-        local.getVideoTracks().forEach(t => {
-          t.enabled = false; // pause camera
+        localStreamRef.current.getVideoTracks().forEach((track) => {
+          track.enabled = false;
         });
       }
 
-      // Replace in local stream for preview
       const newStream = new MediaStream([
         ...(localStreamRef.current?.getAudioTracks() ?? []),
         screenTrack,
       ]);
+
       localStreamRef.current = newStream;
       setLocalStream(new MediaStream(newStream.getTracks()));
       setScreenSharing(true);
 
-      // Auto-stop when browser's native "Stop sharing" is clicked
       screenTrack.addEventListener('ended', () => {
         void stopScreenShare();
       });
@@ -748,86 +940,40 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
         console.error('[Screen share] error:', err);
       }
     }
-  }, [roomId]); // stopScreenShare is defined below; safe because it's only called via event listener
+  }, [roomId, stopScreenShare]);
 
-  // ── Screen share stop ──────────────────────────────────────────────────────
-  const stopScreenShare = useCallback(async () => {
-    if (!screenSharingRef.current) return;
-
-    // Stop screen stream tracks
-    screenStreamRef.current?.getTracks().forEach(t => t.stop());
-    screenStreamRef.current = null;
-
-    // Restore camera
-    let cameraTrack: MediaStreamTrack | null = savedCamTrackRef.current;
-    savedCamTrackRef.current = null;
-
-    // If saved track ended (user had video off), try to get a new one
-    if (!cameraTrack || cameraTrack.readyState === 'ended') {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({
-          video: VIDEO_CONSTRAINTS,
-        });
-        cameraTrack = s.getVideoTracks()[0] ?? null;
-      } catch {
-        cameraTrack = null;
-      }
-    }
-
-    // Replace back in all PeerConnections
-    if (cameraTrack) {
-      cameraTrack.enabled = camOnRef.current;
-      const replaceOps: Promise<void>[] = [];
-      for (const [, ps] of peersRef.current) {
-        const sender = ps.pc.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) {
-          replaceOps.push(sender.replaceTrack(cameraTrack!));
-        }
-      }
-      await Promise.allSettled(replaceOps);
-    }
-
-    // Restore local stream
-    const audioTracks = localStreamRef.current?.getAudioTracks() ?? [];
-    const newTracks = cameraTrack ? [...audioTracks, cameraTrack] : audioTracks;
-    const restored = new MediaStream(newTracks);
-    localStreamRef.current = restored;
-    setLocalStream(new MediaStream(restored.getTracks()));
-    setScreenSharing(false);
-
-    socketRef.current?.emit('interview:toggle-media', {
-      roomId,
-      micOn: micOnRef.current,
-      camOn: camOnRef.current,
-      screenSharing: false,
-    });
-  }, [roomId]);
-
-  // ── Chat ───────────────────────────────────────────────────────────────────
   const sendMessage = useCallback((message: string) => {
     const trimmed = message.trim();
+
     if (!trimmed || !socketRef.current?.connected) return;
-    socketRef.current.emit('interview:chat-message', { roomId, message: trimmed });
+
+    socketRef.current.emit('interview:chat-message', {
+      roomId,
+      message: trimmed,
+    });
   }, [roomId]);
 
   const endRoom = useCallback(() => {
     if (!socketRef.current?.connected) return;
+
     socketRef.current.emit('interview:end-room', { roomId });
   }, [roomId]);
 
-  // ── Cleanup on unmount ─────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      if (socketRef.current) leave();
+      if (socketRef.current) {
+        leave();
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [leave]);
 
   return {
-    // State
     connectionState,
     connected: connectionState === 'connected',
-    connecting: connectionState === 'connecting-socket' || connectionState === 'joining-room' || connectionState === 'acquiring-media',
+    connecting:
+      connectionState === 'connecting-socket' ||
+      connectionState === 'joining-room' ||
+      connectionState === 'acquiring-media',
     localStream,
     peers,
     messages,
@@ -838,8 +984,7 @@ export function useWebRTCRoom({ roomId, user }: UseWebRTCRoomArgs) {
     hostUserId,
     hostPresent,
     roomEnded,
-    canEndRoom: user?.role === 'recruiter' && !!hostUserId && user?.id === hostUserId,
-    // Actions
+    canEndRoom: user?.role === 'recruiter' && Boolean(hostUserId) && user?.id === hostUserId,
     join,
     leave,
     toggleMic,

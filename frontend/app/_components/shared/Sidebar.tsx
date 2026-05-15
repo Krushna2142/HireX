@@ -62,7 +62,6 @@ const RECRUITER_NAV: NavGroup[] = [
     items: [
       { href: '/recruiter/dashboard', icon: '📊', label: 'Recruitment' },
       { href: '/recruiter/profile', icon: '🏢', label: 'Profile' },
-      { href: '/recruiter/candidates', icon: '👥', label: 'Candidates' },
       { href: '/recruiter/interviews', icon: '🎥', label: 'Interviews' },
       { href: '/alerts', icon: '🔔', label: 'Alerts' },
     ],

@@ -1,65 +1,250 @@
 'use client';
 
-// frontend/app/(protected)/recruiter/interviews/[interviewId]/feedback/page.tsx
-//
-// Post-interview feedback form for recruiters.
-//
-// Architecture:
-//   - Route: /recruiter/interviews/[interviewId]/feedback?roundId=<uuid>
-//   - If roundId is provided → feedback for that specific round
-//   - Otherwise → recruiter picks which round to score
-//   - On submit → POST /feedback/round/:roundId
-//   - Auto-navigates back with success toast after submission
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// frontend/app/(protected)/recruiter/interviews/[interview-id]/live/feedback/page.tsx
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { interviewApi, feedbackApi, CreateFeedbackPayload, FeedbackRecommendation } from '@/lib/axios';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
+import {
+  feedbackApi,
+  interviewApi,
+  type CreateFeedbackPayload,
+  type FeedbackRecommendation,
+} from '@/lib/axios';
 
-interface Round {
-  id:            string;
-  round_number:  number;
-  round_type:    string;
-  scheduled_at:  string | null;
-  result:        string | null;
-}
+type RouteParams = Record<string, string | string[]>;
 
-interface InterviewDetail {
-  interview: {
-    id:              string;
-    current_stage:   string;
-    job_id:          string;
-    candidate_id:    string;
-    recruiter_id:    string;
-    job_title?:      string;
-    company?:        string;
-    candidate_name?: string;
-    candidate_email?:string;
-  };
-  rounds: Round[];
-}
-
-interface ExistingFeedback {
+type Round = {
   id: string;
-  technical_score: number;
-  communication_score: number;
-  problem_solving_score: number;
-  culture_fit_score: number;
-  overall_score: number;
-  recommendation: FeedbackRecommendation;
+  round_number?: number | null;
+  roundNumber?: number | null;
+  round_type?: string | null;
+  roundType?: string | null;
+  scheduled_at?: string | null;
+  scheduledAt?: string | null;
+  result?: string | null;
+};
+
+type InterviewDetail = {
+  interview?: {
+    id?: string | null;
+    current_stage?: string | null;
+    currentStage?: string | null;
+    job_title?: string | null;
+    jobTitle?: string | null;
+    company?: string | null;
+    company_name?: string | null;
+    companyName?: string | null;
+    candidate_name?: string | null;
+    candidateName?: string | null;
+    candidate_email?: string | null;
+    candidateEmail?: string | null;
+  } | null;
+  rounds?: Round[] | null;
+};
+
+type ExistingFeedback = {
+  id: string;
+  technical_score?: number | null;
+  communication_score?: number | null;
+  problem_solving_score?: number | null;
+  culture_fit_score?: number | null;
+  overall_score?: number | null;
+  recommendation?: FeedbackRecommendation | null;
   strengths?: string | null;
   improvements?: string | null;
   notes?: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+const C = {
+  bg: '#080C14',
+  panel: '#0D1220',
+  panel2: '#101827',
+  border: 'rgba(255,255,255,0.08)',
+  borderStrong: 'rgba(167,139,250,0.35)',
+  text: '#F8FAFC',
+  muted: 'rgba(226,232,240,0.68)',
+  faint: 'rgba(226,232,240,0.42)',
+  sky: '#38BDF8',
+  purple: '#A78BFA',
+  green: '#34D399',
+  yellow: '#FBBF24',
+  red: '#F87171',
+};
+
+const RECOMMENDATIONS: { value: FeedbackRecommendation; label: string; tone: string }[] = [
+  { value: 'HIRE', label: 'Hire', tone: C.green },
+  { value: 'HOLD', label: 'Hold / Review', tone: C.yellow },
+  { value: 'REJECT', label: 'Reject', tone: C.red },
+];
+
+function safeString(value: unknown, fallback = ''): string {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Score Selector (5-star visual rating)
-// ─────────────────────────────────────────────────────────────────────────────
+function safeUpper(value: unknown, fallback = ''): string {
+  return safeString(value, fallback).toUpperCase();
+}
+
+function safeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampScore(value: unknown, fallback = 3): number {
+  const parsed = safeNumber(value, fallback);
+  return Math.max(1, Math.min(5, Math.round(parsed)));
+}
+
+function getParam(params: RouteParams | null | undefined, key: string): string {
+  const value = params?.[key];
+
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value[0] ?? '';
+
+  return '';
+}
+
+function getInterviewId(params: RouteParams | null | undefined): string {
+  return (
+    getParam(params, 'interview-id') ||
+    getParam(params, 'interviewId') ||
+    getParam(params, 'id')
+  );
+}
+
+function toArray<T>(raw: unknown, key?: string): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw !== 'object') return [];
+
+  const obj = raw as Record<string, unknown>;
+  const keys = ['data', 'items', 'results', 'rounds', 'feedback', key].filter(Boolean) as string[];
+
+  for (const candidate of keys) {
+    const value = obj[candidate];
+
+    if (Array.isArray(value)) return value as T[];
+
+    if (value && typeof value === 'object') {
+      const nested = value as Record<string, unknown>;
+
+      if (Array.isArray(nested.data)) return nested.data as T[];
+      if (Array.isArray(nested.items)) return nested.items as T[];
+      if (Array.isArray(nested.results)) return nested.results as T[];
+      if (Array.isArray(nested.rounds)) return nested.rounds as T[];
+      if (Array.isArray(nested.feedback)) return nested.feedback as T[];
+    }
+  }
+
+  return [];
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  const anyError = error as any;
+
+  return safeString(
+    anyError?.response?.data?.detail ??
+      anyError?.response?.data?.message ??
+      anyError?.response?.data?.error ??
+      anyError?.message,
+    fallback,
+  );
+}
+
+function getRoundNumber(round?: Round | null): number {
+  return safeNumber(round?.round_number ?? round?.roundNumber, 1);
+}
+
+function getRoundType(round?: Round | null): string {
+  return safeString(round?.round_type ?? round?.roundType, 'technical');
+}
+
+function getRoundResult(round?: Round | null): string {
+  return safeString(round?.result, 'pending');
+}
+
+function getRoundScheduledAt(round?: Round | null): string | null {
+  return round?.scheduled_at ?? round?.scheduledAt ?? null;
+}
+
+function getRoundLabel(round?: Round | null): string {
+  if (!round) return 'Round';
+
+  const number = getRoundNumber(round);
+  const type = safeUpper(getRoundType(round), 'TECHNICAL');
+  const result = getRoundResult(round);
+
+  return `Round ${number}: ${type}${result && result !== 'pending' ? ` (${result.replaceAll('_', ' ')})` : ''}`;
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return 'Not scheduled';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not scheduled';
+
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getInterviewFromPayload(payload: unknown): InterviewDetail['interview'] {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const obj = payload as Record<string, unknown>;
+
+  if (obj.interview && typeof obj.interview === 'object') {
+    return obj.interview as InterviewDetail['interview'];
+  }
+
+  if (obj.data && typeof obj.data === 'object') {
+    const data = obj.data as Record<string, unknown>;
+
+    if (data.interview && typeof data.interview === 'object') {
+      return data.interview as InterviewDetail['interview'];
+    }
+  }
+
+  return null;
+}
+
+function getRoundsFromPayload(payload: unknown): Round[] {
+  return toArray<Round>(payload, 'rounds').filter((round) => round && typeof round === 'object' && round.id);
+}
+
+function getFeedbackFromPayload(payload: unknown): ExistingFeedback | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const obj = payload as Record<string, unknown>;
+
+  if (obj.id) return obj as ExistingFeedback;
+
+  if (obj.data && typeof obj.data === 'object') {
+    const data = obj.data as Record<string, unknown>;
+
+    if (data.id) return data as ExistingFeedback;
+    if (data.feedback && typeof data.feedback === 'object') return data.feedback as ExistingFeedback;
+  }
+
+  if (obj.feedback && typeof obj.feedback === 'object') return obj.feedback as ExistingFeedback;
+
+  return null;
+}
 
 function ScoreSelector({
   label,
@@ -68,557 +253,859 @@ function ScoreSelector({
   onChange,
   icon,
 }: {
-  label:       string;
+  label: string;
   description: string;
-  value:       number;
-  onChange:    (v: number) => void;
-  icon:        string;
+  value: number;
+  onChange: (value: number) => void;
+  icon: string;
 }) {
   const [hovered, setHovered] = useState(0);
 
-  const SCORE_LABELS = ['', 'Poor', 'Below Average', 'Average', 'Good', 'Excellent'];
-  const SCORE_COLORS = ['', '#F87171', '#FB923C', '#FBBF24', '#34D399', '#10B981'];
-
+  const scoreLabels = ['', 'Poor', 'Below Average', 'Average', 'Good', 'Excellent'];
+  const scoreColors = ['', '#F87171', '#FB923C', '#FBBF24', '#34D399', '#10B981'];
   const display = hovered || value;
+  const color = scoreColors[display] || C.border;
 
   return (
-    <div style={{
-      padding: '1rem 1.25rem', borderRadius: 12,
-      border: `1px solid ${display ? `${SCORE_COLORS[display]}30` : 'rgba(255,255,255,0.08)'}`,
-      background: display ? `${SCORE_COLORS[display]}06` : 'rgba(255,255,255,0.02)',
-      transition: 'all 0.2s',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+    <div
+      style={{
+        padding: '1rem 1.25rem',
+        borderRadius: 16,
+        border: `1px solid ${display ? `${color}44` : C.border}`,
+        background: display ? `${color}08` : 'rgba(255,255,255,0.02)',
+      }}
+    >
+      <div style={scoreHeaderStyle}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-            <span style={{ fontSize: 18 }}>{icon}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#F1F5F9' }}>{label}</span>
-          </div>
-          <p style={{ margin: 0, fontSize: 11, color: 'rgba(255,255,255,0.35)', lineHeight: 1.4 }}>
-            {description}
-          </p>
+          <strong style={scoreTitleStyle}>
+            {icon} {label}
+          </strong>
+          <p style={scoreDescriptionStyle}>{description}</p>
         </div>
-        {display > 0 && (
-          <div style={{ textAlign: 'center', flexShrink: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: SCORE_COLORS[display], fontFamily: 'monospace', lineHeight: 1 }}>
-              {display}/5
-            </div>
-            <div style={{ fontSize: 10, color: SCORE_COLORS[display], marginTop: 2, fontWeight: 600 }}>
-              {SCORE_LABELS[display]}
-            </div>
-          </div>
-        )}
+
+        <span style={{ ...scoreValueStyle, color }}>{value}/5</span>
       </div>
 
-      {/* Stars */}
-      <div style={{ display: 'flex', gap: 6 }}>
-        {[1, 2, 3, 4, 5].map(n => (
-          <button
-            key={n}
-            onMouseEnter={() => setHovered(n)}
-            onMouseLeave={() => setHovered(0)}
-            onClick={() => onChange(n)}
-            style={{
-              flex: 1, height: 40, borderRadius: 8, border: 'none',
-              cursor: 'pointer', transition: 'all 0.15s',
-              background: n <= (hovered || value)
-                ? SCORE_COLORS[hovered || value]
-                : 'rgba(255,255,255,0.06)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16,
-              transform: n === hovered ? 'scale(1.1)' : 'scale(1)',
-            }}
-          >
-            {n <= (hovered || value) ? '★' : '☆'}
-          </button>
-        ))}
+      <div style={starsRowStyle}>
+        {[1, 2, 3, 4, 5].map((score) => {
+          const active = score <= display;
+
+          return (
+            <button
+              key={score}
+              type="button"
+              onMouseEnter={() => setHovered(score)}
+              onMouseLeave={() => setHovered(0)}
+              onClick={() => onChange(score)}
+              style={{
+                ...starButtonStyle,
+                color: active ? color : 'rgba(255,255,255,0.16)',
+                transform: active ? 'scale(1.08)' : 'scale(1)',
+              }}
+            >
+              ★
+            </button>
+          );
+        })}
       </div>
-    </div>
-  );
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Recommendation Selector
-// ─────────────────────────────────────────────────────────────────────────────
-
-function RecommendationSelector({
-  value,
-  onChange,
-}: {
-  value:    FeedbackRecommendation | '';
-  onChange: (v: FeedbackRecommendation) => void;
-}) {
-  const options: {
-    value: FeedbackRecommendation;
-    label: string;
-    sub:   string;
-    icon:  string;
-    color: string;
-    bg:    string;
-    border:string;
-  }[] = [
-    {
-      value:  'HIRE',
-      label:  'Hire',
-      sub:    'Strong candidate, recommend proceeding',
-      icon:   '🎉',
-      color:  '#10B981',
-      bg:     'rgba(16,185,129,0.1)',
-      border: 'rgba(16,185,129,0.4)',
-    },
-    {
-      value:  'HOLD',
-      label:  'Hold',
-      sub:    'Needs further evaluation or comparison',
-      icon:   '⏸',
-      color:  '#FBBF24',
-      bg:     'rgba(251,191,36,0.1)',
-      border: 'rgba(251,191,36,0.4)',
-    },
-    {
-      value:  'REJECT',
-      label:  'Reject',
-      sub:    'Not a fit for this role at this time',
-      icon:   '✗',
-      color:  '#F87171',
-      bg:     'rgba(248,113,113,0.1)',
-      border: 'rgba(248,113,113,0.4)',
-    },
-  ];
-
-  return (
-    <div>
-      <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-        Final Recommendation *
+      <p style={{ ...scoreLabelStyle, color }}>
+        {scoreLabels[display] || 'Select score'}
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-        {options.map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => onChange(opt.value)}
-            style={{
-              padding: '14px 12px', borderRadius: 12, cursor: 'pointer',
-              border: `2px solid ${value === opt.value ? opt.border : 'rgba(255,255,255,0.08)'}`,
-              background: value === opt.value ? opt.bg : 'rgba(255,255,255,0.02)',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-              transition: 'all 0.2s', fontFamily: 'Sora, sans-serif',
-              transform: value === opt.value ? 'scale(1.02)' : 'scale(1)',
-            }}
-          >
-            <span style={{ fontSize: 24 }}>{opt.icon}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: value === opt.value ? opt.color : '#F1F5F9' }}>
-              {opt.label}
-            </span>
-            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', textAlign: 'center', lineHeight: 1.4 }}>
-              {opt.sub}
-            </span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Page
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function FeedbackFormPage() {
-  const params       = useParams<Record<string, string | string[]>>();
+  const params = useParams<RouteParams>();
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const router       = useRouter();
-  const interviewId  = getRouteParam(params, 'interview-id');
-  const preselectedRoundId = searchParams?.get('roundId');
 
-  // ── Load interview details ──────────────────────────────────────────────
-  const [detail,     setDetail]     = useState<InterviewDetail | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(true);
-  const [selectedRoundId, setSelectedRoundId] = useState<string>(preselectedRoundId ?? '');
+  const interviewId = useMemo(() => getInterviewId(params), [params]);
+  const roundIdFromQuery = searchParams.get('roundId');
 
-  // ── Form state ──────────────────────────────────────────────────────────
-  const [technicalScore,      setTechnicalScore]      = useState(0);
-  const [communicationScore,  setCommunicationScore]  = useState(0);
-  const [problemSolvingScore, setProblemSolvingScore] = useState(0);
-  const [cultureFitScore,     setCultureFitScore]     = useState(3);
-  const [recommendation,      setRecommendation]      = useState<FeedbackRecommendation | ''>('');
-  const [strengths,           setStrengths]           = useState('');
-  const [improvements,        setImprovements]        = useState('');
-  const [notes,               setNotes]               = useState('');
+  const [interview, setInterview] = useState<InterviewDetail['interview']>(null);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [selectedRoundId, setSelectedRoundId] = useState('');
+  const [existingFeedback, setExistingFeedback] = useState<ExistingFeedback | null>(null);
 
-  // ── Submission state ────────────────────────────────────────────────────
-  const [submitting, setSubmitting] = useState(false);
-  const [error,      setError]      = useState('');
-  const [success,    setSuccess]    = useState(false);
+  const [technicalScore, setTechnicalScore] = useState(3);
+  const [communicationScore, setCommunicationScore] = useState(3);
+  const [problemSolvingScore, setProblemSolvingScore] = useState(3);
+  const [cultureFitScore, setCultureFitScore] = useState(3);
+  const [recommendation, setRecommendation] = useState<FeedbackRecommendation>('HOLD');
+  const [strengths, setStrengths] = useState('');
+  const [improvements, setImprovements] = useState('');
+  const [notes, setNotes] = useState('');
 
-  // ── Existing feedback ───────────────────────────────────────────────────
-  const [existing, setExisting] = useState<ExistingFeedback | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const selectedRound = useMemo(
+    () => rounds.find((round) => round.id === selectedRoundId) ?? null,
+    [rounds, selectedRoundId],
+  );
+
+  const overallScore = useMemo(() => {
+    const total = technicalScore + communicationScore + problemSolvingScore + cultureFitScore;
+    return Math.round((total / 20) * 100);
+  }, [technicalScore, communicationScore, problemSolvingScore, cultureFitScore]);
+
+  const candidateName = safeString(
+    interview?.candidateName ?? interview?.candidate_name,
+    'Candidate',
+  );
+
+  const candidateEmail = safeString(
+    interview?.candidateEmail ?? interview?.candidate_email,
+    'No email shown',
+  );
+
+  const jobTitle = safeString(
+    interview?.jobTitle ?? interview?.job_title,
+    'Job',
+  );
+
+  const company = safeString(
+    interview?.companyName ?? interview?.company_name ?? interview?.company,
+    'Company',
+  );
+
+  const applyFeedbackToForm = useCallback((feedback: ExistingFeedback | null) => {
+    if (!feedback) {
+      setExistingFeedback(null);
+      setTechnicalScore(3);
+      setCommunicationScore(3);
+      setProblemSolvingScore(3);
+      setCultureFitScore(3);
+      setRecommendation('HOLD');
+      setStrengths('');
+      setImprovements('');
+      setNotes('');
+      return;
+    }
+
+    setExistingFeedback(feedback);
+    setTechnicalScore(clampScore(feedback.technical_score, 3));
+    setCommunicationScore(clampScore(feedback.communication_score, 3));
+    setProblemSolvingScore(clampScore(feedback.problem_solving_score, 3));
+    setCultureFitScore(clampScore(feedback.culture_fit_score, 3));
+    setRecommendation(feedback.recommendation ?? 'HOLD');
+    setStrengths(safeString(feedback.strengths));
+    setImprovements(safeString(feedback.improvements));
+    setNotes(safeString(feedback.notes));
+  }, []);
+
+  const loadInterview = useCallback(async () => {
+    if (!interviewId) {
+      setError('Missing interview id.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await interviewApi.getRecruiterInterview(interviewId);
+      const payload = response.data;
+
+      const nextInterview = getInterviewFromPayload(payload);
+      const nextRounds = getRoundsFromPayload(payload);
+
+      setInterview(nextInterview);
+      setRounds(nextRounds);
+
+      const preferredRoundId =
+        roundIdFromQuery && nextRounds.some((round) => round.id === roundIdFromQuery)
+          ? roundIdFromQuery
+          : nextRounds[0]?.id ?? '';
+
+      setSelectedRoundId(preferredRoundId);
+
+      if (!preferredRoundId) {
+        applyFeedbackToForm(null);
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load interview feedback page.'));
+      setInterview(null);
+      setRounds([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [applyFeedbackToForm, interviewId, roundIdFromQuery]);
+
+  const loadFeedbackForRound = useCallback(
+    async (roundId: string) => {
+      if (!roundId) {
+        applyFeedbackToForm(null);
+        return;
+      }
+
+      setFeedbackLoading(true);
+      setError('');
+
+      try {
+        const response = await feedbackApi.getByRound(roundId);
+        const feedback = getFeedbackFromPayload(response.data);
+        applyFeedbackToForm(feedback);
+      } catch (err: any) {
+        const status = err?.response?.status;
+
+        if (status === 404) {
+          applyFeedbackToForm(null);
+        } else {
+          setError(getErrorMessage(err, 'Failed to load existing feedback.'));
+          applyFeedbackToForm(null);
+        }
+      } finally {
+        setFeedbackLoading(false);
+      }
+    },
+    [applyFeedbackToForm],
+  );
 
   useEffect(() => {
-    if (!interviewId) return;
-    setLoadingDetail(true);
-    interviewApi.getRecruiterInterview(interviewId)
-      .then(r => {
-        setDetail(r.data as InterviewDetail);
-        if (!selectedRoundId && r.data?.rounds?.length > 0) {
-          // Auto-select the most recent round
-          const lastRound = r.data.rounds[r.data.rounds.length - 1];
-          setSelectedRoundId(lastRound.id);
-        }
-      })
-      .catch(() => setError('Failed to load interview details'))
-      .finally(() => setLoadingDetail(false));
-  }, [interviewId, selectedRoundId]);
+    void loadInterview();
+  }, [loadInterview]);
 
-  // Load existing feedback when round is selected
   useEffect(() => {
     if (!selectedRoundId) return;
-    feedbackApi.getByRound(selectedRoundId)
-      .then(r => {
-        const f = r.data as ExistingFeedback;
-        setExisting(f);
-        setTechnicalScore(f.technical_score);
-        setCommunicationScore(f.communication_score);
-        setProblemSolvingScore(f.problem_solving_score);
-        setCultureFitScore(f.culture_fit_score);
-        setRecommendation(f.recommendation);
-        setStrengths(f.strengths ?? '');
-        setImprovements(f.improvements ?? '');
-        setNotes(f.notes ?? '');
-      })
-      .catch(() => {
-        // 404 = no feedback yet, that's fine
-        setExisting(null);
-      });
-  }, [selectedRoundId]);
+    void loadFeedbackForRound(selectedRoundId);
+  }, [loadFeedbackForRound, selectedRoundId]);
 
-  const overallScore = technicalScore && communicationScore && problemSolvingScore && cultureFitScore
-    ? ((technicalScore + communicationScore + problemSolvingScore + cultureFitScore) / 4) * 20
-    : 0;
+  async function submitFeedback() {
+    if (!selectedRoundId) {
+      setError('Select a round before submitting feedback.');
+      return;
+    }
 
-  const isValid = technicalScore > 0 && communicationScore > 0 &&
-    problemSolvingScore > 0 && recommendation !== '';
-
-  const submit = async () => {
-    if (!isValid) { setError('Please rate all dimensions and set a recommendation.'); return; }
-    if (!selectedRoundId) { setError('Please select a round.'); return; }
-
-    setSubmitting(true);
+    setSaving(true);
     setError('');
-    try {
-      const payload: CreateFeedbackPayload = {
-        technical_score:       technicalScore,
-        communication_score:   communicationScore,
-        problem_solving_score: problemSolvingScore,
-        culture_fit_score:     cultureFitScore,
-        recommendation:        recommendation as FeedbackRecommendation,
-        strengths:             strengths.trim() || undefined,
-        improvements:          improvements.trim() || undefined,
-        notes:                 notes.trim() || undefined,
-      };
+    setSuccess('');
 
-      if (existing) {
-        await feedbackApi.update(existing.id, payload);
+    const payload: CreateFeedbackPayload = {
+      technical_score: technicalScore,
+      communication_score: communicationScore,
+      problem_solving_score: problemSolvingScore,
+      culture_fit_score: cultureFitScore,
+      strengths: strengths.trim(),
+      improvements: improvements.trim(),
+      notes: notes.trim(),
+      recommendation,
+    };
+
+    try {
+      if (existingFeedback?.id) {
+        await feedbackApi.update(existingFeedback.id, payload);
       } else {
         await feedbackApi.create(selectedRoundId, payload);
       }
 
-      setSuccess(true);
-      setTimeout(() => {
-        router.push(`/recruiter/interviews`);
-      }, 2000);
-    } catch (error: unknown) {
-      setError(getErrorMessage(error, 'Failed to submit feedback'));
+      const result =
+        recommendation === 'HIRE'
+          ? 'pass'
+          : recommendation === 'REJECT'
+            ? 'fail'
+            : 'pending';
+
+      await interviewApi.submitRoundResult(selectedRoundId, {
+        result,
+        score: overallScore,
+        feedback: notes.trim() || strengths.trim() || improvements.trim(),
+      });
+
+      setSuccess('Feedback saved successfully.');
+
+      window.setTimeout(() => {
+        router.push('/recruiter/interviews');
+      }, 900);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to save feedback.'));
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
-  };
+  }
 
-  // ── Render ──────────────────────────────────────────────────────────────
-
-  if (success) {
+  if (loading) {
     return (
-      <div style={{ minHeight: '100vh', background: '#080C14', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Sora', sans-serif" }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>
-            {recommendation === 'HIRE' ? '🎉' : recommendation === 'REJECT' ? '📋' : '⏸'}
-          </div>
-          <h2 style={{ color: '#34D399', fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>
-            Feedback Submitted
-          </h2>
-          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: 0 }}>
-            Recommendation: <strong style={{ color: recommendation === 'HIRE' ? '#10B981' : recommendation === 'REJECT' ? '#F87171' : '#FBBF24' }}>{recommendation}</strong>
-            · Score: {overallScore.toFixed(0)}/100
-          </p>
-          <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, marginTop: 8 }}>
-            Redirecting to interview panel…
-          </p>
-        </div>
-      </div>
+      <main style={pageStyle}>
+        <section style={centerCardStyle}>
+          <div style={loaderStyle} />
+          <h1 style={centerTitleStyle}>Loading feedback form...</h1>
+          <p style={centerTextStyle}>Fetching interview rounds and candidate details.</p>
+        </section>
+      </main>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#080C14', fontFamily: "'Sora', sans-serif", color: '#E2E8F0' }}>
-      <style>{`
-        textarea { resize: vertical; }
-        textarea::placeholder, input::placeholder { color: rgba(255,255,255,0.2); }
-        select option { background: #0D1220; color: #F1F5F9; }
-      `}</style>
+    <main style={pageStyle}>
+      <header style={headerStyle}>
+        <div>
+          <p style={eyebrowStyle}>Post Interview Evaluation</p>
+          <h1 style={titleStyle}>Feedback Form</h1>
+          <p style={subtitleStyle}>
+            Score the selected interview round and submit recruiter feedback.
+          </p>
+        </div>
 
-      {/* ── Header ── */}
-      <div style={{
-        background: '#0D1220', borderBottom: '1px solid rgba(255,255,255,0.06)',
-        padding: '1.25rem 2rem', display: 'flex', alignItems: 'center', gap: 16,
-      }}>
         <button
-          onClick={() => router.back()}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', fontSize: 20, padding: 4 }}
+          type="button"
+          onClick={() => router.push('/recruiter/interviews')}
+          style={secondaryButtonStyle}
         >
-          ←
+          Back to Interviews
         </button>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#F1F5F9' }}>
-            {existing ? 'Update Feedback' : 'Submit Interview Feedback'}
-          </h1>
-          {detail?.interview && (
-            <p style={{ margin: '3px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-              {detail.interview.candidate_name ?? 'Candidate'} · {detail.interview.job_title ?? 'Role'}
-            </p>
-          )}
+      </header>
+
+      {error && <section style={errorBoxStyle}>{error}</section>}
+      {success && <section style={successBoxStyle}>{success}</section>}
+
+      <section style={summaryCardStyle}>
+        <div>
+          <h2 style={candidateTitleStyle}>{candidateName}</h2>
+          <p style={mutedTextStyle}>{candidateEmail}</p>
+          <p style={mutedTextStyle}>
+            {jobTitle} · {company}
+          </p>
         </div>
 
-        {/* Overall score preview */}
-        {overallScore > 0 && (
-          <div style={{
-            textAlign: 'center', padding: '8px 20px', borderRadius: 12,
-            background: overallScore >= 80 ? 'rgba(16,185,129,0.1)' : overallScore >= 60 ? 'rgba(251,191,36,0.1)' : 'rgba(248,113,113,0.1)',
-            border: `1px solid ${overallScore >= 80 ? 'rgba(16,185,129,0.3)' : overallScore >= 60 ? 'rgba(251,191,36,0.3)' : 'rgba(248,113,113,0.3)'}`,
-          }}>
-            <div style={{
-              fontSize: 24, fontWeight: 800, fontFamily: 'monospace',
-              color: overallScore >= 80 ? '#10B981' : overallScore >= 60 ? '#FBBF24' : '#F87171',
-            }}>
-              {overallScore.toFixed(0)}
-            </div>
-            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 1 }}>
-              Overall / 100
-            </div>
+        <div style={overallBoxStyle}>
+          <strong style={{ color: overallScore >= 75 ? C.green : overallScore >= 50 ? C.yellow : C.red }}>
+            {overallScore}%
+          </strong>
+          <span>Overall</span>
+        </div>
+      </section>
+
+      <section style={layoutStyle}>
+        <aside style={roundsPanelStyle}>
+          <div style={panelHeaderStyle}>
+            <strong>Interview Rounds</strong>
+            <span>{rounds.length}</span>
           </div>
-        )}
-      </div>
 
-      {loadingDetail ? (
-        <div style={{ padding: '3rem 2rem', textAlign: 'center', color: 'rgba(255,255,255,0.3)' }}>
-          Loading interview details…
-        </div>
-      ) : (
-        <div style={{ maxWidth: 760, margin: '0 auto', padding: '2rem 1.5rem 4rem' }}>
+          {rounds.length ? (
+            <div style={roundListStyle}>
+              {rounds.map((round) => {
+                const active = round.id === selectedRoundId;
 
-          {/* ── Round selector ── */}
-          {detail?.rounds && detail.rounds.length > 1 && (
-            <div style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', borderRadius: 12, background: '#0D1220', border: '1px solid rgba(255,255,255,0.07)' }}>
-              <p style={sectionLabel}>Select Round</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {detail.rounds.map(r => (
+                return (
                   <button
-                    key={r.id}
-                    onClick={() => setSelectedRoundId(r.id)}
+                    key={round.id}
+                    type="button"
+                    onClick={() => setSelectedRoundId(round.id)}
                     style={{
-                      padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
-                      border: selectedRoundId === r.id ? '1px solid rgba(124,58,237,0.5)' : '1px solid rgba(255,255,255,0.1)',
-                      background: selectedRoundId === r.id ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
-                      color: selectedRoundId === r.id ? '#A78BFA' : 'rgba(255,255,255,0.5)',
-                      fontSize: 12, fontWeight: selectedRoundId === r.id ? 700 : 400,
-                      fontFamily: 'Sora, sans-serif',
+                      ...roundButtonStyle,
+                      borderColor: active ? C.borderStrong : C.border,
+                      background: active ? 'rgba(167,139,250,0.14)' : 'rgba(255,255,255,0.03)',
                     }}
                   >
-                    Round {r.round_number}: {r.round_type.toUpperCase()}
-                    {r.result && r.result !== 'pending' && ` (${r.result})`}
+                    <strong>{getRoundLabel(round)}</strong>
+                    <span>{formatDateTime(getRoundScheduledAt(round))}</span>
                   </button>
-                ))}
+                );
+              })}
+            </div>
+          ) : (
+            <p style={emptyTextStyle}>No interview rounds found. Schedule a round first.</p>
+          )}
+        </aside>
+
+        <section style={formPanelStyle}>
+          {selectedRound ? (
+            <>
+              <div style={selectedRoundHeaderStyle}>
+                <div>
+                  <p style={eyebrowStyle}>Selected Round</p>
+                  <h2 style={sectionTitleStyle}>{getRoundLabel(selectedRound)}</h2>
+                  <p style={mutedTextStyle}>{formatDateTime(getRoundScheduledAt(selectedRound))}</p>
+                </div>
+
+                {feedbackLoading && <span style={loadingPillStyle}>Loading feedback...</span>}
+                {existingFeedback?.id && <span style={existingPillStyle}>Existing feedback</span>}
               </div>
-            </div>
-          )}
 
-          {existing && (
-            <div style={{
-              marginBottom: '1rem', padding: '10px 14px', borderRadius: 10,
-              background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)',
-            }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#FBBF24', fontWeight: 600 }}>
-                ⚠ Updating existing feedback — submitted on {new Date(existing.created_at).toLocaleDateString()}
-              </p>
-            </div>
-          )}
+              <div style={scoreGridStyle}>
+                <ScoreSelector
+                  icon="💻"
+                  label="Technical"
+                  description="Technical depth, role skills, coding/design understanding."
+                  value={technicalScore}
+                  onChange={setTechnicalScore}
+                />
 
-          {/* ── Score cards ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: '1.5rem' }}>
-            <ScoreSelector
-              label="Technical Skills"
-              description="Depth of domain knowledge, coding ability, system design thinking"
-              value={technicalScore}
-              onChange={setTechnicalScore}
-              icon="💻"
-            />
-            <ScoreSelector
-              label="Communication"
-              description="Clarity of expression, active listening, ability to explain complex ideas"
-              value={communicationScore}
-              onChange={setCommunicationScore}
-              icon="🗣️"
-            />
-            <ScoreSelector
-              label="Problem Solving"
-              description="Analytical reasoning, approach to ambiguous problems, creativity"
-              value={problemSolvingScore}
-              onChange={setProblemSolvingScore}
-              icon="🧠"
-            />
-            <ScoreSelector
-              label="Culture Fit"
-              description="Team collaboration, values alignment, attitude and growth mindset"
-              value={cultureFitScore}
-              onChange={setCultureFitScore}
-              icon="🤝"
-            />
-          </div>
+                <ScoreSelector
+                  icon="🗣️"
+                  label="Communication"
+                  description="Clarity, confidence, explanation quality."
+                  value={communicationScore}
+                  onChange={setCommunicationScore}
+                />
 
-          {/* ── Qualitative notes ── */}
-          <div style={{ padding: '1.25rem', borderRadius: 12, background: '#0D1220', border: '1px solid rgba(255,255,255,0.07)', marginBottom: '1.5rem' }}>
-            <p style={sectionLabel}>Qualitative Assessment</p>
+                <ScoreSelector
+                  icon="🧩"
+                  label="Problem Solving"
+                  description="Debugging, reasoning, practical thinking."
+                  value={problemSolvingScore}
+                  onChange={setProblemSolvingScore}
+                />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-              <div>
-                <label style={fieldLabel}>Key Strengths</label>
-                <textarea
-                  value={strengths}
-                  onChange={e => setStrengths(e.target.value)}
-                  rows={4}
-                  placeholder="What did the candidate do particularly well? E.g., strong system design, clear communication, excellent problem decomposition…"
-                  style={textareaStyle}
+                <ScoreSelector
+                  icon="🤝"
+                  label="Culture Fit"
+                  description="Professional attitude, ownership, collaboration."
+                  value={cultureFitScore}
+                  onChange={setCultureFitScore}
                 />
               </div>
-              <div>
-                <label style={fieldLabel}>Areas for Improvement</label>
-                <textarea
-                  value={improvements}
-                  onChange={e => setImprovements(e.target.value)}
-                  rows={4}
-                  placeholder="What gaps were observed? E.g., needed more exposure to distributed systems, could improve on edge case handling…"
-                  style={textareaStyle}
-                />
+
+              <section style={recommendationPanelStyle}>
+                <p style={fieldLabelStyle}>Recommendation</p>
+
+                <div style={recommendationRowStyle}>
+                  {RECOMMENDATIONS.map((item) => {
+                    const active = recommendation === item.value;
+
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setRecommendation(item.value)}
+                        style={{
+                          ...recommendationButtonStyle,
+                          borderColor: active ? `${item.tone}88` : C.border,
+                          background: active ? `${item.tone}18` : 'rgba(255,255,255,0.03)',
+                          color: active ? item.tone : C.muted,
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <div style={textareaGridStyle}>
+                <label style={fieldStyle}>
+                  <span style={fieldLabelStyle}>Strengths</span>
+                  <textarea
+                    value={strengths}
+                    onChange={(event) => setStrengths(event.target.value)}
+                    placeholder="What did the candidate do well?"
+                    style={textareaStyle}
+                  />
+                </label>
+
+                <label style={fieldStyle}>
+                  <span style={fieldLabelStyle}>Improvements</span>
+                  <textarea
+                    value={improvements}
+                    onChange={(event) => setImprovements(event.target.value)}
+                    placeholder="Where should the candidate improve?"
+                    style={textareaStyle}
+                  />
+                </label>
+
+                <label style={fieldStyle}>
+                  <span style={fieldLabelStyle}>Recruiter Notes</span>
+                  <textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Final observations, next steps, decision notes..."
+                    style={{ ...textareaStyle, minHeight: 130 }}
+                  />
+                </label>
               </div>
-            </div>
 
-            <div>
-              <label style={fieldLabel}>Internal Notes (not shared with candidate)</label>
-              <textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                rows={3}
-                placeholder="Additional context for the hiring team. Compensation expectations, timeline, comparison notes…"
-                style={textareaStyle}
-              />
-            </div>
-          </div>
+              <div style={footerActionStyle}>
+                <button
+                  type="button"
+                  onClick={() => router.push('/recruiter/interviews')}
+                  style={secondaryButtonStyle}
+                >
+                  Cancel
+                </button>
 
-          {/* ── Recommendation ── */}
-          <div style={{ padding: '1.25rem', borderRadius: 12, background: '#0D1220', border: '1px solid rgba(255,255,255,0.07)', marginBottom: '1.5rem' }}>
-            <RecommendationSelector value={recommendation} onChange={setRecommendation} />
-          </div>
-
-          {/* ── Error + Submit ── */}
-          {error && (
-            <div style={{
-              padding: '10px 14px', borderRadius: 10, marginBottom: '1rem',
-              background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)',
-            }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#FCA5A5' }}>{error}</p>
+                <button
+                  type="button"
+                  onClick={() => void submitFeedback()}
+                  disabled={saving}
+                  style={{
+                    ...primaryButtonStyle,
+                    opacity: saving ? 0.6 : 1,
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {saving ? 'Saving...' : existingFeedback?.id ? 'Update Feedback' : 'Submit Feedback'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={emptyBigStyle}>
+              <strong>No round selected</strong>
+              <p>Select a round from the left side to submit feedback.</p>
             </div>
           )}
-
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={() => router.back()}
-              style={{ padding: '12px 24px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', fontSize: 13, cursor: 'pointer', fontFamily: 'Sora, sans-serif' }}>
-              Cancel
-            </button>
-            <button
-              onClick={() => void submit()}
-              disabled={submitting || !isValid}
-              style={{
-                flex: 1, padding: '12px 24px', borderRadius: 10, border: 'none',
-                background: !isValid || submitting
-                  ? 'rgba(255,255,255,0.06)'
-                  : recommendation === 'HIRE'
-                  ? 'linear-gradient(135deg, #059669, #10B981)'
-                  : recommendation === 'REJECT'
-                  ? 'linear-gradient(135deg, #DC2626, #EF4444)'
-                  : 'linear-gradient(135deg, #D97706, #F59E0B)',
-                color: !isValid ? 'rgba(255,255,255,0.3)' : '#fff',
-                fontSize: 14, fontWeight: 700, cursor: !isValid || submitting ? 'not-allowed' : 'pointer',
-                fontFamily: 'Sora, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                opacity: submitting ? 0.7 : 1,
-              }}
-            >
-              {submitting ? (
-                <><span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} /> Submitting…</>
-              ) : (
-                `${existing ? 'Update' : 'Submit'} Feedback${recommendation ? ` → ${recommendation}` : ''}`
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
+        </section>
+      </section>
+    </main>
   );
 }
 
-function getRouteParam(
-  params: Record<string, string | string[]> | null | undefined,
-  key: string,
-): string {
-  const value = params?.[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof error.response === 'object' &&
-    error.response !== null &&
-    'data' in error.response &&
-    typeof error.response.data === 'object' &&
-    error.response.data !== null &&
-    'message' in error.response.data &&
-    typeof error.response.data.message === 'string'
-  ) {
-    return error.response.data.message;
-  }
-
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  return fallback;
-}
-
-// Style constants
-const sectionLabel: React.CSSProperties = {
-  margin: '0 0 12px', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const,
-  letterSpacing: '0.08em', color: 'rgba(255,255,255,0.35)',
+const pageStyle: CSSProperties = {
+  minHeight: '100vh',
+  background: C.bg,
+  color: C.text,
+  padding: '2rem',
+  fontFamily: "'Sora', sans-serif",
 };
 
-const fieldLabel: React.CSSProperties = {
-  display: 'block', fontSize: 11, fontWeight: 600, marginBottom: 6,
-  color: 'rgba(255,255,255,0.45)',
+const headerStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+  alignItems: 'flex-start',
+  marginBottom: 18,
 };
 
-const textareaStyle: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box' as const, padding: '10px 14px',
-  borderRadius: 8, background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(255,255,255,0.1)', color: '#F1F5F9',
-  fontSize: 13, outline: 'none', fontFamily: 'Sora, sans-serif', lineHeight: 1.6,
+const eyebrowStyle: CSSProperties = {
+  margin: '0 0 6px',
+  color: C.purple,
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const titleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 30,
+  fontWeight: 950,
+  letterSpacing: '-0.05em',
+};
+
+const subtitleStyle: CSSProperties = {
+  margin: '8px 0 0',
+  color: C.faint,
+  fontSize: 14,
+};
+
+const summaryCardStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 22,
+  padding: '1.25rem',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+  alignItems: 'center',
+  marginBottom: 18,
+};
+
+const candidateTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+  fontWeight: 950,
+};
+
+const mutedTextStyle: CSSProperties = {
+  margin: '5px 0 0',
+  color: C.muted,
+  fontSize: 13,
+};
+
+const overallBoxStyle: CSSProperties = {
+  width: 112,
+  height: 92,
+  borderRadius: 18,
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  display: 'grid',
+  placeItems: 'center',
+  textAlign: 'center',
+};
+
+const layoutStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '320px 1fr',
+  gap: 16,
+};
+
+const roundsPanelStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 20,
+  overflow: 'hidden',
+  height: 'fit-content',
+};
+
+const panelHeaderStyle: CSSProperties = {
+  padding: '1rem',
+  borderBottom: `1px solid ${C.border}`,
+  display: 'flex',
+  justifyContent: 'space-between',
+  color: C.text,
+};
+
+const roundListStyle: CSSProperties = {
+  padding: 12,
+  display: 'grid',
+  gap: 10,
+};
+
+const roundButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: '0.9rem',
+  color: C.text,
+  textAlign: 'left',
+  cursor: 'pointer',
+  fontFamily: "'Sora', sans-serif",
+  display: 'grid',
+  gap: 5,
+};
+
+const formPanelStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  borderRadius: 20,
+  padding: '1.25rem',
+};
+
+const selectedRoundHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 12,
+  alignItems: 'center',
+  paddingBottom: 16,
+  borderBottom: `1px solid ${C.border}`,
+  marginBottom: 18,
+};
+
+const sectionTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+  fontWeight: 950,
+};
+
+const scoreGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+  gap: 14,
+};
+
+const scoreHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 10,
+  marginBottom: 12,
+};
+
+const scoreTitleStyle: CSSProperties = {
+  display: 'block',
+  fontSize: 14,
+  color: C.text,
+};
+
+const scoreDescriptionStyle: CSSProperties = {
+  margin: '5px 0 0',
+  color: C.faint,
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
+const scoreValueStyle: CSSProperties = {
+  fontSize: 18,
+  fontWeight: 950,
+};
+
+const starsRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: 6,
+};
+
+const starButtonStyle: CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  cursor: 'pointer',
+  fontSize: 25,
+  transition: '0.15s ease',
+};
+
+const scoreLabelStyle: CSSProperties = {
+  margin: '8px 0 0',
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const recommendationPanelStyle: CSSProperties = {
+  marginTop: 18,
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  borderRadius: 18,
+  padding: '1rem',
+};
+
+const recommendationRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
+const recommendationButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: '10px 14px',
+  cursor: 'pointer',
+  fontWeight: 950,
+  fontFamily: "'Sora', sans-serif",
+};
+
+const textareaGridStyle: CSSProperties = {
+  marginTop: 18,
+  display: 'grid',
+  gap: 14,
+};
+
+const fieldStyle: CSSProperties = {
+  display: 'grid',
+  gap: 7,
+};
+
+const fieldLabelStyle: CSSProperties = {
+  color: C.faint,
+  fontSize: 12,
+  fontWeight: 950,
+  textTransform: 'uppercase',
+  letterSpacing: '0.07em',
+};
+
+const textareaStyle: CSSProperties = {
+  width: '100%',
+  minHeight: 96,
+  resize: 'vertical',
+  boxSizing: 'border-box',
+  border: `1px solid ${C.border}`,
+  background: C.panel2,
+  color: C.text,
+  borderRadius: 14,
+  padding: '12px 14px',
+  outline: 'none',
+  fontFamily: "'Sora', sans-serif",
+  lineHeight: 1.6,
+};
+
+const footerActionStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: 12,
+  marginTop: 18,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  border: 'none',
+  borderRadius: 14,
+  padding: '12px 18px',
+  color: '#020617',
+  fontWeight: 950,
+  cursor: 'pointer',
+  background: `linear-gradient(135deg, ${C.sky}, ${C.purple}, #F472B6)`,
+  fontFamily: "'Sora', sans-serif",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: '12px 18px',
+  color: C.text,
+  fontWeight: 850,
+  cursor: 'pointer',
+  background: 'rgba(15,23,42,0.72)',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const errorBoxStyle: CSSProperties = {
+  border: '1px solid rgba(248,113,113,0.28)',
+  background: 'rgba(248,113,113,0.08)',
+  color: '#FCA5A5',
+  borderRadius: 16,
+  padding: '12px 14px',
+  marginBottom: 16,
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const successBoxStyle: CSSProperties = {
+  border: '1px solid rgba(52,211,153,0.28)',
+  background: 'rgba(52,211,153,0.08)',
+  color: '#86EFAC',
+  borderRadius: 16,
+  padding: '12px 14px',
+  marginBottom: 16,
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const centerCardStyle: CSSProperties = {
+  minHeight: '70vh',
+  display: 'grid',
+  placeItems: 'center',
+  textAlign: 'center',
+};
+
+const centerTitleStyle: CSSProperties = {
+  margin: '0 0 8px',
+  fontSize: 22,
+  fontWeight: 950,
+};
+
+const centerTextStyle: CSSProperties = {
+  margin: 0,
+  color: C.faint,
+};
+
+const loaderStyle: CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: '50%',
+  border: '3px solid rgba(56,189,248,0.18)',
+  borderTopColor: C.sky,
+};
+
+const emptyTextStyle: CSSProperties = {
+  padding: '1rem',
+  color: C.faint,
+  fontSize: 13,
+};
+
+const emptyBigStyle: CSSProperties = {
+  minHeight: 360,
+  display: 'grid',
+  placeItems: 'center',
+  textAlign: 'center',
+  color: C.faint,
+};
+
+const loadingPillStyle: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: 999,
+  padding: '6px 10px',
+  color: C.faint,
+  fontSize: 11,
+  fontWeight: 850,
+};
+
+const existingPillStyle: CSSProperties = {
+  border: '1px solid rgba(52,211,153,0.28)',
+  background: 'rgba(52,211,153,0.10)',
+  borderRadius: 999,
+  padding: '6px 10px',
+  color: C.green,
+  fontSize: 11,
+  fontWeight: 950,
 };
