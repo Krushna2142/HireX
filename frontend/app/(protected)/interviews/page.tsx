@@ -1,138 +1,354 @@
 'use client';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // frontend/app/(protected)/interviews/page.tsx
-//
-// Candidate-facing interview lifecycle page.
-//
-// Shows the full journey:
-//   Applied → Shortlisted → Scheduled → In Progress → Result
-//
-// Key sections:
-//   1. Stats row — pending / upcoming / completed
-//   2. Upcoming interviews banner (next scheduled round with join button)
-//   3. All interviews list with expandable detail
-//   4. Feedback viewer (once recruiter submits)
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
-import { interviewApi, feedbackApi } from '@/lib/axios';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
+import api from '@/lib/axios';
+
+type InterviewStage =
+  | 'APPLIED'
+  | 'UNDER_REVIEW'
+  | 'SHORTLISTED'
+  | 'INTERVIEW_SCHEDULED'
+  | 'INTERVIEW_IN_PROGRESS'
+  | 'INTERVIEW_PASSED'
+  | 'INTERVIEW_FAILED'
+  | 'FINAL_REVIEW'
+  | 'OFFERED'
+  | 'HIRED'
+  | 'REJECTED'
+  | 'ON_HOLD'
+  | 'WITHDRAWN'
+  | string;
 
 interface InterviewItem {
-  id:            string;
-  current_stage: string;
-  status_code:   number;
-  final_status:  string | null;
-  created_at:    string;
-  updated_at:    string;
-  job_title?:    string;
-  company?:      string;
+  id: string;
+  current_stage?: InterviewStage | null;
+  currentStage?: InterviewStage | null;
+  status_code?: number | null;
+  statusCode?: number | null;
+  final_status?: string | null;
+  finalStatus?: string | null;
+  created_at?: string | null;
+  createdAt?: string | null;
+  updated_at?: string | null;
+  updatedAt?: string | null;
+  job_title?: string | null;
+  jobTitle?: string | null;
+  company?: string | null;
+  company_name?: string | null;
+  companyName?: string | null;
 }
 
 interface Round {
-  id:               string;
-  round_number:     number;
-  round_type:       string;
-  scheduled_at:     string | null;
-  duration_mins:    number | null;
-  mode:             string | null;
-  meeting_join_url: string | null;
-  result:           string | null;
-  score:            number | null;
+  id: string;
+  round_number?: number | null;
+  roundNumber?: number | null;
+  round_type?: string | null;
+  roundType?: string | null;
+  scheduled_at?: string | null;
+  scheduledAt?: string | null;
+  duration_mins?: number | null;
+  durationMins?: number | null;
+  mode?: string | null;
+  meeting_join_url?: string | null;
+  meetingJoinUrl?: string | null;
+  joinUrl?: string | null;
+  result?: string | null;
+  score?: number | null;
 }
 
 interface FeedbackData {
-  id:                    string;
-  round_id:              string;
-  technical_score:       number;
-  communication_score:   number;
-  problem_solving_score: number;
-  culture_fit_score:     number;
-  overall_score:         number;
-  recommendation:        string;
-  strengths?:            string;
-  created_at:            string;
+  id: string;
+  round_id?: string | null;
+  roundId?: string | null;
+  technical_score?: number | null;
+  technicalScore?: number | null;
+  communication_score?: number | null;
+  communicationScore?: number | null;
+  problem_solving_score?: number | null;
+  problemSolvingScore?: number | null;
+  culture_fit_score?: number | null;
+  cultureFitScore?: number | null;
+  overall_score?: number | null;
+  overallScore?: number | null;
+  recommendation?: string | null;
+  strengths?: string | null;
+  created_at?: string | null;
+  createdAt?: string | null;
 }
 
 interface InterviewEvent {
   id: string;
-  event_type: string;
+  event_type?: string | null;
+  eventType?: string | null;
   from_stage?: string | null;
+  fromStage?: string | null;
   to_stage?: string | null;
+  toStage?: string | null;
   metadata?: Record<string, unknown> | null;
-  created_at: string;
+  created_at?: string | null;
+  createdAt?: string | null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Stage metadata
-// ─────────────────────────────────────────────────────────────────────────────
+const C = {
+  bg: '#080C14',
+  panel: '#0D1220',
+  panel2: '#101827',
+  border: 'rgba(255,255,255,0.08)',
+  text: '#F8FAFC',
+  muted: 'rgba(226,232,240,0.68)',
+  faint: 'rgba(226,232,240,0.36)',
+  purple: '#A78BFA',
+  sky: '#38BDF8',
+  green: '#34D399',
+  yellow: '#FBBF24',
+  red: '#F87171',
+  gray: '#9CA3AF',
+};
 
-const STAGE = {
-  APPLIED:               { label: 'Application Received',  color: '#60A5FA', icon: '📋', step: 1 },
-  UNDER_REVIEW:          { label: 'Under Review',          color: '#FBBF24', icon: '🔍', step: 2 },
-  SHORTLISTED:           { label: 'Shortlisted',           color: '#38BDF8', icon: '⭐', step: 3 },
-  INTERVIEW_SCHEDULED:   { label: 'Interview Scheduled',   color: '#A78BFA', icon: '📅', step: 4 },
+const STAGE_META: Record<string, { label: string; color: string; icon: string; step: number }> = {
+  APPLIED: { label: 'Application Received', color: '#60A5FA', icon: '📋', step: 1 },
+  UNDER_REVIEW: { label: 'Under Review', color: '#FBBF24', icon: '🔍', step: 2 },
+  SHORTLISTED: { label: 'Shortlisted', color: '#38BDF8', icon: '⭐', step: 3 },
+  INTERVIEW_SCHEDULED: { label: 'Interview Scheduled', color: '#A78BFA', icon: '📅', step: 4 },
   INTERVIEW_IN_PROGRESS: { label: 'Interview In Progress', color: '#FB923C', icon: '🎥', step: 5 },
-  INTERVIEW_PASSED:      { label: 'Passed',                color: '#34D399', icon: '✅', step: 6 },
-  INTERVIEW_FAILED:      { label: 'Not Selected',          color: '#9CA3AF', icon: '📋', step: 6 },
-  FINAL_REVIEW:          { label: 'Final Review',          color: '#C084FC', icon: '🎯', step: 7 },
-  OFFERED:               { label: 'Offer Extended',        color: '#4ADE80', icon: '💌', step: 8 },
-  HIRED:                 { label: 'Hired! 🎉',             color: '#10B981', icon: '🎉', step: 9 },
-  REJECTED:              { label: 'Not Selected',          color: '#6B7280', icon: '📋', step: 0 },
-  ON_HOLD:               { label: 'On Hold',               color: '#D97706', icon: '⏸', step: 0 },
-  WITHDRAWN:             { label: 'Withdrawn',             color: '#6B7280', icon: '↩', step: 0 },
-} as const;
+  INTERVIEW_PASSED: { label: 'Passed', color: '#34D399', icon: '✅', step: 6 },
+  INTERVIEW_FAILED: { label: 'Not Selected', color: '#9CA3AF', icon: '📋', step: 6 },
+  FINAL_REVIEW: { label: 'Final Review', color: '#C084FC', icon: '🎯', step: 7 },
+  OFFERED: { label: 'Offer Extended', color: '#4ADE80', icon: '💌', step: 8 },
+  HIRED: { label: 'Hired', color: '#10B981', icon: '🎉', step: 9 },
+  REJECTED: { label: 'Not Selected', color: '#6B7280', icon: '📋', step: 0 },
+  ON_HOLD: { label: 'On Hold', color: '#D97706', icon: '⏸', step: 0 },
+  WITHDRAWN: { label: 'Withdrawn', color: '#6B7280', icon: '↩', step: 0 },
+};
 
-// Candidate-visible progress steps
 const PROGRESS_STEPS = [
-  { key: 'applied',     label: 'Applied'    },
-  { key: 'review',      label: 'Review'     },
-  { key: 'shortlist',   label: 'Shortlisted'},
-  { key: 'scheduled',   label: 'Interview'  },
-  { key: 'evaluation',  label: 'Evaluation' },
-  { key: 'decision',    label: 'Decision'   },
+  { key: 'applied', label: 'Applied' },
+  { key: 'review', label: 'Review' },
+  { key: 'shortlist', label: 'Shortlisted' },
+  { key: 'scheduled', label: 'Interview' },
+  { key: 'evaluation', label: 'Evaluation' },
+  { key: 'decision', label: 'Decision' },
 ];
 
-function getProgressStep(stage: string): number {
-  const meta = STAGE[stage as keyof typeof STAGE];
-  return meta?.step ?? 0;
+function safeString(value: unknown, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ProgressBar
-// ─────────────────────────────────────────────────────────────────────────────
+function safeNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toArray<T>(raw: unknown, key?: string): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw !== 'object') return [];
+
+  const obj = raw as Record<string, unknown>;
+  const keys = ['data', 'items', 'results', 'interviews', 'rounds', 'feedback', 'events', key].filter(
+    Boolean,
+  ) as string[];
+
+  for (const candidate of keys) {
+    const value = obj[candidate];
+
+    if (Array.isArray(value)) return value as T[];
+
+    if (value && typeof value === 'object') {
+      const nested = value as Record<string, unknown>;
+
+      if (Array.isArray(nested.data)) return nested.data as T[];
+      if (Array.isArray(nested.items)) return nested.items as T[];
+      if (Array.isArray(nested.results)) return nested.results as T[];
+      if (Array.isArray(nested.interviews)) return nested.interviews as T[];
+      if (Array.isArray(nested.rounds)) return nested.rounds as T[];
+      if (Array.isArray(nested.feedback)) return nested.feedback as T[];
+      if (Array.isArray(nested.events)) return nested.events as T[];
+    }
+  }
+
+  return [];
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  const anyError = error as any;
+
+  return safeString(
+    anyError?.response?.data?.detail ??
+      anyError?.response?.data?.message ??
+      anyError?.response?.data?.error ??
+      anyError?.message,
+    fallback,
+  );
+}
+
+function normalizeStage(stage?: string | null) {
+  return safeString(stage, 'APPLIED')
+    .replace(/\s+/g, '_')
+    .toUpperCase();
+}
+
+function getStage(item: InterviewItem) {
+  return normalizeStage(item.current_stage ?? item.currentStage ?? item.final_status ?? item.finalStatus);
+}
+
+function getStageMeta(stage: string) {
+  return STAGE_META[stage] ?? STAGE_META.APPLIED;
+}
+
+function getCreatedAt(item: InterviewItem) {
+  return item.created_at ?? item.createdAt ?? null;
+}
+
+function getUpdatedAt(item: InterviewItem) {
+  return item.updated_at ?? item.updatedAt ?? null;
+}
+
+function getJobTitle(item: InterviewItem) {
+  return safeString(item.job_title ?? item.jobTitle, 'Position');
+}
+
+function getCompany(item: InterviewItem) {
+  return safeString(item.companyName ?? item.company_name ?? item.company, 'Company');
+}
+
+function getRoundNumber(round: Round) {
+  return safeNumber(round.round_number ?? round.roundNumber, 1);
+}
+
+function getRoundType(round: Round) {
+  return safeString(round.round_type ?? round.roundType, 'technical');
+}
+
+function getRoundScheduledAt(round: Round) {
+  return round.scheduled_at ?? round.scheduledAt ?? null;
+}
+
+function getRoundDuration(round: Round) {
+  return safeNumber(round.duration_mins ?? round.durationMins, 45);
+}
+
+function getJoinUrl(round: Round) {
+  return safeString(round.meeting_join_url ?? round.meetingJoinUrl ?? round.joinUrl, '');
+}
+
+function getSafeRoomPath(interviewId: string, round: Round) {
+  const rawJoinUrl = getJoinUrl(round);
+
+  if (rawJoinUrl && !rawJoinUrl.includes('localhost')) {
+    try {
+      const parsed = new URL(rawJoinUrl);
+      return `${parsed.pathname}${parsed.search}`;
+    } catch {
+      if (rawJoinUrl.startsWith('/')) return rawJoinUrl;
+    }
+  }
+
+  return `/interviews/room/jc-${interviewId}-r${getRoundNumber(round)}`;
+}
+
+function getUpcomingRound(rounds: Round[]) {
+  const now = Date.now() - 60 * 60 * 1000;
+
+  return rounds
+    .filter((round) => {
+      const scheduledAt = getRoundScheduledAt(round);
+      if (!scheduledAt) return false;
+
+      const date = new Date(scheduledAt);
+      if (Number.isNaN(date.getTime())) return false;
+
+      return date.getTime() >= now && !safeString(round.result).toLowerCase().includes('complete');
+    })
+    .sort((a, b) => {
+      const aTime = new Date(getRoundScheduledAt(a) ?? '').getTime();
+      const bTime = new Date(getRoundScheduledAt(b) ?? '').getTime();
+      return aTime - bTime;
+    })[0];
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return 'Not scheduled';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not scheduled';
+
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getFeedbackRoundId(feedback: FeedbackData) {
+  return safeString(feedback.round_id ?? feedback.roundId, '');
+}
+
+function getFeedbackScore(feedback: FeedbackData, key: keyof FeedbackData, alt: keyof FeedbackData) {
+  return safeNumber(feedback[key] ?? feedback[alt], 0);
+}
+
+function getFeedbackCreatedAt(feedback: FeedbackData) {
+  return feedback.created_at ?? feedback.createdAt ?? null;
+}
 
 function ProgressBar({ stage }: { stage: string }) {
-  const step = getProgressStep(stage);
+  const meta = getStageMeta(stage);
+  const step = meta.step;
   const isTerminal = ['REJECTED', 'WITHDRAWN'].includes(stage);
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginTop: 10 }}>
-      {PROGRESS_STEPS.map((s, i) => {
-        const done = step > i + 1;
-        const active = step === i + 1;
-        const color = isTerminal ? '#6B7280' : done || active ? '#A78BFA' : 'rgba(255,255,255,0.1)';
+    <div style={progressWrapStyle}>
+      {PROGRESS_STEPS.map((item, index) => {
+        const done = step > index + 1;
+        const active = step === index + 1;
+        const color = isTerminal ? C.gray : done || active ? C.purple : 'rgba(255,255,255,0.12)';
+
         return (
-          <div key={s.key} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-            <div style={{ textAlign: 'center', flex: '0 0 auto' }}>
-              <div style={{
-                width: 24, height: 24, borderRadius: '50%', margin: '0 auto 4px',
-                background: done ? '#A78BFA' : active ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
-                border: `2px solid ${color}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, color,
-              }}>
-                {done ? '✓' : i + 1}
+          <div key={item.key} style={progressItemStyle}>
+            <div style={progressDotWrapStyle}>
+              <div
+                style={{
+                  ...progressDotStyle,
+                  background: done ? C.purple : active ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
+                  borderColor: color,
+                  color,
+                }}
+              >
+                {done ? '✓' : index + 1}
               </div>
-              <span style={{ fontSize: 9, color: active ? '#A78BFA' : 'rgba(255,255,255,0.25)', whiteSpace: 'nowrap' }}>
-                {s.label}
-              </span>
+              <span style={{ ...progressLabelStyle, color: active ? C.purple : C.faint }}>{item.label}</span>
             </div>
-            {i < PROGRESS_STEPS.length - 1 && (
-              <div style={{ flex: 1, height: 2, background: done ? '#A78BFA' : 'rgba(255,255,255,0.08)', margin: '0 2px 14px' }} />
+
+            {index < PROGRESS_STEPS.length - 1 && (
+              <div style={{ ...progressLineStyle, background: done ? C.purple : 'rgba(255,255,255,0.08)' }} />
             )}
           </div>
         );
@@ -141,59 +357,49 @@ function ProgressBar({ stage }: { stage: string }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FeedbackCard (candidate view — sanitized)
-// ─────────────────────────────────────────────────────────────────────────────
-
 function FeedbackCard({ feedback }: { feedback: FeedbackData }) {
-  const dim = (score: number) => {
-    const pct = (score / 5) * 100;
-    const color = score >= 4 ? '#34D399' : score >= 3 ? '#FBBF24' : '#F87171';
-    return { pct, color };
-  };
+  const technical = getFeedbackScore(feedback, 'technical_score', 'technicalScore');
+  const communication = getFeedbackScore(feedback, 'communication_score', 'communicationScore');
+  const problem = getFeedbackScore(feedback, 'problem_solving_score', 'problemSolvingScore');
+  const culture = getFeedbackScore(feedback, 'culture_fit_score', 'cultureFitScore');
+  const overall = getFeedbackScore(feedback, 'overall_score', 'overallScore');
 
-  const dims = [
-    { label: 'Technical', score: feedback.technical_score, icon: '💻' },
-    { label: 'Communication', score: feedback.communication_score, icon: '🗣️' },
-    { label: 'Problem Solving', score: feedback.problem_solving_score, icon: '🧠' },
-    { label: 'Culture Fit', score: feedback.culture_fit_score, icon: '🤝' },
+  const rows = [
+    { label: 'Technical', score: technical },
+    { label: 'Communication', score: communication },
+    { label: 'Problem Solving', score: problem },
+    { label: 'Culture Fit', score: culture },
   ];
 
-  const recColor = feedback.recommendation === 'HIRE' ? '#10B981' : feedback.recommendation === 'REJECT' ? '#F87171' : '#FBBF24';
-
   return (
-    <div style={{
-      padding: '1rem 1.25rem', borderRadius: 10,
-      border: '1px solid rgba(167,139,250,0.2)',
-      background: 'rgba(124,58,237,0.04)',
-      marginTop: 10,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+    <div style={feedbackBoxStyle}>
+      <div style={feedbackHeaderStyle}>
         <div>
-          <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#A78BFA' }}>Interview Feedback</p>
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
-            {new Date(feedback.created_at).toLocaleDateString()}
-          </p>
+          <p style={feedbackTitleStyle}>Interview Feedback</p>
+          <p style={tinyTextStyle}>{formatDate(getFeedbackCreatedAt(feedback))}</p>
         </div>
+
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: recColor === '#10B981' ? '#34D399' : recColor === '#F87171' ? '#F87171' : '#FBBF24', fontFamily: 'monospace' }}>
-            {feedback.overall_score.toFixed(0)}
-          </div>
-          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>/ 100</div>
+          <strong style={{ color: overall >= 70 ? C.green : overall >= 50 ? C.yellow : C.red, fontSize: 22 }}>
+            {Math.round(overall)}
+          </strong>
+          <p style={tinyTextStyle}>/100</p>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
-        {dims.map(d => {
-          const { pct, color } = dim(d.score);
+      <div style={feedbackGridStyle}>
+        {rows.map((row) => {
+          const percent = Math.max(0, Math.min(100, (row.score / 5) * 100));
+          const color = row.score >= 4 ? C.green : row.score >= 3 ? C.yellow : C.red;
+
           return (
-            <div key={d.label}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>{d.icon} {d.label}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color, fontFamily: 'monospace' }}>{d.score}/5</span>
+            <div key={row.label}>
+              <div style={scoreLabelStyle}>
+                <span>{row.label}</span>
+                <strong style={{ color }}>{row.score}/5</strong>
               </div>
-              <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)' }}>
-                <div style={{ height: '100%', borderRadius: 2, width: `${pct}%`, background: color, transition: 'width 0.6s ease' }} />
+              <div style={scoreTrackStyle}>
+                <div style={{ ...scoreFillStyle, width: `${percent}%`, background: color }} />
               </div>
             </div>
           );
@@ -201,445 +407,713 @@ function FeedbackCard({ feedback }: { feedback: FeedbackData }) {
       </div>
 
       {feedback.strengths && (
-        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.15)', marginBottom: 8 }}>
-          <p style={{ margin: '0 0 3px', fontSize: 10, fontWeight: 700, color: '#34D399', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Strengths</p>
-          <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{feedback.strengths}</p>
+        <div style={strengthBoxStyle}>
+          <strong>Strengths</strong>
+          <p>{feedback.strengths}</p>
         </div>
       )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// InterviewCard
-// ─────────────────────────────────────────────────────────────────────────────
-
 function InterviewCard({ item }: { item: InterviewItem }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
-  const [rounds,   setRounds]   = useState<Round[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
   const [feedback, setFeedback] = useState<FeedbackData[]>([]);
-  const [events,   setEvents]   = useState<InterviewEvent[]>([]);
-  const [loading,  setLoading]  = useState(false);
+  const [events, setEvents] = useState<InterviewEvent[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const meta = STAGE[item.current_stage as keyof typeof STAGE] ?? STAGE.APPLIED;
-  const isTerminal = ['HIRED', 'REJECTED', 'WITHDRAWN'].includes(item.current_stage);
-  const isPositive = ['HIRED', 'OFFERED', 'INTERVIEW_PASSED', 'FINAL_REVIEW', 'SHORTLISTED'].includes(item.current_stage);
+  const stage = getStage(item);
+  const meta = getStageMeta(stage);
+  const isTerminal = ['HIRED', 'REJECTED', 'WITHDRAWN'].includes(stage);
+  const upcomingRound = useMemo(() => getUpcomingRound(rounds), [rounds]);
 
-  const loadDetail = async () => {
-    if (rounds.length > 0) return; // already loaded
+  const loadDetails = useCallback(async () => {
+    if (rounds.length > 0 || loading) return;
+
     setLoading(true);
+
     try {
       const [detailRes, feedbackRes] = await Promise.allSettled([
-        interviewApi.getCandidateInterview(item.id),
-        feedbackApi.getByInterview(item.id),
+        api.get(`/candidate/interviews/${item.id}`),
+        api.get(`/feedback/interviews/${item.id}`),
       ]);
+
       if (detailRes.status === 'fulfilled') {
-        setRounds((detailRes.value.data?.rounds ?? []) as Round[]);
-        setEvents((detailRes.value.data?.events ?? []) as InterviewEvent[]);
+        const payload = detailRes.value.data;
+        setRounds(toArray<Round>(payload, 'rounds'));
+        setEvents(toArray<InterviewEvent>(payload, 'events'));
       }
+
       if (feedbackRes.status === 'fulfilled') {
-        const data = feedbackRes.value.data;
-        setFeedback(Array.isArray(data) ? data : []);
+        setFeedback(toArray<FeedbackData>(feedbackRes.value.data, 'feedback'));
       }
     } finally {
       setLoading(false);
     }
-  };
-
-  const nextRound = useMemo(() => {
-    const now = Date.now();
-    return rounds
-      .filter(r => r.scheduled_at && new Date(r.scheduled_at).getTime() >= now)
-      .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())[0];
-  }, [rounds]);
+  }, [item.id, loading, rounds.length]);
 
   const handleExpand = () => {
-    if (!expanded) void loadDetail();
-    setExpanded(p => !p);
+    if (!expanded) void loadDetails();
+    setExpanded((current) => !current);
+  };
+
+  const handleJoin = (round: Round) => {
+    router.push(getSafeRoomPath(item.id, round));
   };
 
   return (
-    <div style={{
-      borderRadius: 12,
-      border: `1px solid ${isPositive ? `${meta.color}25` : 'rgba(255,255,255,0.08)'}`,
-      background: isPositive ? `${meta.color}05` : '#0D1220',
-      overflow: 'hidden', transition: 'all 0.2s',
-    }}>
-      {/* Header */}
-      <div
-        onClick={handleExpand}
-        style={{ padding: '1rem 1.25rem', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 14 }}
-      >
-        {/* Company initial */}
-        <div style={{
-          width: 44, height: 44, borderRadius: 10, flexShrink: 0,
-          background: `${meta.color}18`, border: `1px solid ${meta.color}30`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18,
-        }}>
+    <article style={{ ...cardStyle, borderColor: `${meta.color}28`, background: `${meta.color}06` }}>
+      <button type="button" onClick={handleExpand} style={cardButtonStyle}>
+        <div style={{ ...iconBoxStyle, background: `${meta.color}18`, borderColor: `${meta.color}30` }}>
           {meta.icon}
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>
-              {item.job_title ?? 'Position'}
-            </h3>
-            <span style={{
-              fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20,
-              color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}30`,
-            }}>
+          <div style={cardTitleRowStyle}>
+            <h3 style={cardTitleStyle}>{getJobTitle(item)}</h3>
+            <span style={{ ...pillStyle, color: meta.color, borderColor: `${meta.color}35`, background: `${meta.color}12` }}>
               {meta.label}
             </span>
           </div>
-          <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-            {item.company ?? 'Company'} · Applied {new Date(item.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+
+          <p style={mutedTextStyle}>
+            {getCompany(item)} · Applied {formatDate(getCreatedAt(item))}
           </p>
 
-          {/* Progress bar */}
-          {!isTerminal && <ProgressBar stage={item.current_stage} />}
+          {!isTerminal && <ProgressBar stage={stage} />}
 
-          {/* Hired/Rejected banner */}
-          {item.current_stage === 'HIRED' && (
-            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 18 }}>🎉</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#10B981' }}>Congratulations! You&apos;ve been hired!</span>
+          {stage === 'HIRED' && (
+            <div style={successBannerStyle}>
+              <span>🎉</span>
+              <strong>Congratulations! You have been hired.</strong>
             </div>
           )}
-          {item.current_stage === 'REJECTED' && (
-            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(107,114,128,0.1)', border: '1px solid rgba(107,114,128,0.2)' }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>
-                Thank you for your interest. Keep applying — the right opportunity is out there.
-              </p>
+
+          {stage === 'REJECTED' && (
+            <div style={neutralBannerStyle}>
+              Thank you for applying. Keep improving — the right opportunity is ahead.
             </div>
           )}
         </div>
 
-        <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14, flexShrink: 0, marginTop: 2 }}>
-          {expanded ? '▲' : '▼'}
-        </span>
-      </div>
+        <span style={expandIconStyle}>{expanded ? '▲' : '▼'}</span>
+      </button>
 
-      {/* Expanded detail */}
       {expanded && (
-        <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={expandedStyle}>
           {loading ? (
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', padding: '12px 0' }}>Loading details…</p>
+            <p style={mutedTextStyle}>Loading interview details...</p>
           ) : (
             <>
-              {/* Next round join button */}
-              {nextRound && (
-                <div style={{
-                  margin: '12px 0', padding: '12px 14px', borderRadius: 10,
-                  background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.2)',
-                }}>
-                  <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: '#38BDF8' }}>
-                    📅 Upcoming Interview
+              {upcomingRound && (
+                <section style={upcomingBoxStyle}>
+                  <p style={upcomingTitleStyle}>Upcoming Interview</p>
+                  <p style={mutedTextStyle}>
+                    {getRoundType(upcomingRound).toUpperCase()} · Round {getRoundNumber(upcomingRound)} ·{' '}
+                    {formatDateTime(getRoundScheduledAt(upcomingRound))} · {getRoundDuration(upcomingRound)} min ·{' '}
+                    {safeString(upcomingRound.mode, 'video')}
                   </p>
-                  <p style={{ margin: '0 0 10px', fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>
-                    {nextRound.round_type.toUpperCase()} · Round {nextRound.round_number} ·{' '}
-                    {new Date(nextRound.scheduled_at!).toLocaleString()} ·{' '}
-                    {nextRound.duration_mins}min · {nextRound.mode ?? 'video'}
-                  </p>
-                  <button
-                    onClick={() => {
-                      const roomId = `jc-${item.id}-r${nextRound.round_number}`;
-                      router.push(`/interviews/room/${roomId}`);
-                    }}
-                    style={{
-                      padding: '9px 20px', borderRadius: 8, border: 'none',
-                      background: '#38BDF8', color: '#001018',
-                      fontSize: 13, fontWeight: 800, cursor: 'pointer',
-                    }}
-                  >
-                    🎥 Join Interview Room
+
+                  <button type="button" onClick={() => handleJoin(upcomingRound)} style={joinButtonStyle}>
+                    Join Interview Room
                   </button>
-                </div>
+                </section>
               )}
 
-              {/* All rounds */}
-              {rounds.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                    Interview Rounds
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {rounds.map(r => {
-                      const roundFeedback = feedback.find(f => f.round_id === r.id);
+              {rounds.length > 0 ? (
+                <section style={{ marginTop: 14 }}>
+                  <p style={sectionTinyTitleStyle}>Interview Rounds</p>
+
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {rounds.map((round) => {
+                      const roundFeedback = feedback.find((item) => getFeedbackRoundId(item) === round.id);
+                      const scheduledAt = getRoundScheduledAt(round);
+
                       return (
-                        <div key={r.id}>
-                          <div style={{
-                            padding: '10px 12px', borderRadius: 8,
-                            border: '1px solid rgba(255,255,255,0.07)',
-                            background: 'rgba(255,255,255,0.02)',
-                          }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: '#F1F5F9' }}>
-                                  Round {r.round_number}: {r.round_type.toUpperCase()}
-                                </span>
-                                <span style={{ marginLeft: 8, fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
-                                  {r.scheduled_at ? new Date(r.scheduled_at).toLocaleDateString() : 'Not scheduled'}
-                                </span>
-                              </div>
-                              <span style={{
-                                fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 20,
-                                color:      r.result === 'pass' ? '#34D399' : r.result === 'fail' ? '#F87171' : '#FBBF24',
-                                background: r.result === 'pass' ? 'rgba(52,211,153,0.1)' : r.result === 'fail' ? 'rgba(248,113,113,0.1)' : 'rgba(251,191,36,0.1)',
-                              }}>
-                                {r.result ?? 'Scheduled'}
-                              </span>
+                        <div key={round.id}>
+                          <div style={roundRowStyle}>
+                            <div>
+                              <strong>
+                                Round {getRoundNumber(round)}: {getRoundType(round).toUpperCase()}
+                              </strong>
+                              <p style={tinyTextStyle}>{scheduledAt ? formatDateTime(scheduledAt) : 'Not scheduled'}</p>
                             </div>
+
+                            <span style={smallPillStyle}>{safeString(round.result, 'Scheduled')}</span>
                           </div>
+
                           {roundFeedback && <FeedbackCard feedback={roundFeedback} />}
                         </div>
                       );
                     })}
                   </div>
-                </div>
-              )}
-
-              {rounds.length === 0 && (
-                <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', paddingTop: 12, margin: 0 }}>
-                  No rounds scheduled yet. You&apos;ll receive an email when the recruiter schedules your interview.
+                </section>
+              ) : (
+                <p style={mutedTextStyle}>
+                  No rounds scheduled yet. You will receive an alert when the recruiter schedules your interview.
                 </p>
               )}
 
               {events.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                    Timeline
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <section style={{ marginTop: 14 }}>
+                  <p style={sectionTinyTitleStyle}>Timeline</p>
+
+                  <div style={{ display: 'grid', gap: 8 }}>
                     {events.slice(0, 8).map((event) => (
-                      <div key={event.id} style={{
-                        padding: '10px 12px',
-                        borderRadius: 8,
-                        border: '1px solid rgba(255,255,255,0.07)',
-                        background: 'rgba(255,255,255,0.02)',
-                      }}>
-                        <p style={{ margin: 0, fontSize: 12, color: '#F1F5F9' }}>
-                          {formatEvent(event)}
-                        </p>
-                        <p style={{ margin: '4px 0 0', fontSize: 11, color: 'rgba(255,255,255,0.28)' }}>
-                          {new Date(event.created_at).toLocaleString()}
-                        </p>
+                      <div key={event.id} style={eventRowStyle}>
+                        <p>{formatEvent(event)}</p>
+                        <span>{formatDateTime(event.created_at ?? event.createdAt)}</span>
                       </div>
                     ))}
                   </div>
-                </div>
+                </section>
               )}
             </>
           )}
         </div>
       )}
-    </div>
+    </article>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Page
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function CandidateInterviewsPage() {
   const [interviews, setInterviews] = useState<InterviewItem[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState('');
-  const [filter,     setFilter]     = useState<'active' | 'all'>('active');
+  const [filter, setFilter] = useState<'active' | 'all'>('active');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        const res = await interviewApi.listCandidateInterviews({ limit: 100 });
-        setInterviews((res.data ?? []) as InterviewItem[]);
-        setError('');
-      } catch (error: unknown) {
-        setError(getErrorMessage(error, 'Failed to load interviews'));
-      } finally {
-        setLoading(false);
-      }
-    };
-    void load();
-    const iv = setInterval(load, 30_000);
-    return () => clearInterval(iv);
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const res = await api.get('/candidate/interviews', {
+        params: { limit: 100 },
+      });
+
+      setInterviews(toArray<InterviewItem>(res.data, 'interviews'));
+      setError('');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load interviews.'));
+      setInterviews([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    void load();
+
+    const interval = window.setInterval(() => {
+      void load();
+    }, 30_000);
+
+    return () => window.clearInterval(interval);
+  }, [load]);
+
   const displayed = useMemo(() => {
-    if (filter === 'active') {
-      return interviews.filter(i => !['REJECTED', 'WITHDRAWN', 'HIRED'].includes(i.current_stage));
-    }
-    return interviews;
-  }, [interviews, filter]);
+    if (filter === 'all') return interviews;
 
-  const upcoming = useMemo(() =>
-    interviews.filter(i =>
-      ['INTERVIEW_SCHEDULED', 'INTERVIEW_IN_PROGRESS'].includes(i.current_stage)
-    ),
-  [interviews]);
+    return interviews.filter((item) => !['REJECTED', 'WITHDRAWN', 'HIRED'].includes(getStage(item)));
+  }, [filter, interviews]);
 
-  const stats = useMemo(() => ({
-    total:     interviews.length,
-    active:    interviews.filter(i => !['REJECTED', 'WITHDRAWN', 'HIRED'].includes(i.current_stage)).length,
-    upcoming:  upcoming.length,
-    hired:     interviews.filter(i => i.current_stage === 'HIRED').length,
-  }), [interviews, upcoming]);
+  const stats = useMemo(() => {
+    const active = interviews.filter((item) => !['REJECTED', 'WITHDRAWN', 'HIRED'].includes(getStage(item))).length;
+    const upcoming = interviews.filter((item) =>
+      ['INTERVIEW_SCHEDULED', 'INTERVIEW_IN_PROGRESS'].includes(getStage(item)),
+    ).length;
+    const hired = interviews.filter((item) => getStage(item) === 'HIRED').length;
+
+    return {
+      total: interviews.length,
+      active,
+      upcoming,
+      hired,
+    };
+  }, [interviews]);
 
   return (
-    <div style={{ minHeight: '100vh', background: '#080C14', fontFamily: "'Sora', sans-serif", color: '#E2E8F0' }}>
-      <style>{`@keyframes ifFade { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }`}</style>
+    <main style={pageStyle}>
+      <header style={headerStyle}>
+        <h1 style={titleStyle}>My Interviews</h1>
+        <p style={subtitleStyle}>Track every application through the hiring process.</p>
+      </header>
 
-      {/* Header */}
-      <div style={{ background: '#0D1220', borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '1.25rem 2rem' }}>
-        <h1 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, color: '#F1F5F9' }}>
-          My Interviews
-        </h1>
-        <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
-          Track every application through the hiring process
-        </p>
-      </div>
+      <section style={statsGridStyle}>
+        <StatCard label="Total Applied" value={stats.total} color={C.purple} icon="📋" />
+        <StatCard label="Active" value={stats.active} color={C.sky} icon="⚡" />
+        <StatCard label="Upcoming" value={stats.upcoming} color={C.yellow} icon="📅" />
+        <StatCard label="Hired" value={stats.hired} color={C.green} icon="🎉" />
+      </section>
 
-      <div style={{ maxWidth: 860, margin: '0 auto', padding: '1.5rem 1.5rem 4rem' }}>
+      <section style={filterRowStyle}>
+        <button
+          type="button"
+          onClick={() => setFilter('active')}
+          style={{ ...filterButtonStyle, ...(filter === 'active' ? activeFilterStyle : {}) }}
+        >
+          Active ({stats.active})
+        </button>
 
-        {/* Stats row */}
-        {!loading && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: '1.5rem', animation: 'ifFade 0.3s ease' }}>
-            {[
-              { label: 'Total Applied',    value: stats.total,    color: '#A78BFA', icon: '📋' },
-              { label: 'Active',           value: stats.active,   color: '#38BDF8', icon: '⚡' },
-              { label: 'Upcoming Rounds',  value: stats.upcoming, color: '#FBBF24', icon: '📅' },
-              { label: 'Hired',            value: stats.hired,    color: '#10B981', icon: '🎉' },
-            ].map(s => (
-              <div key={s.label} style={{
-                padding: '1rem', borderRadius: 12, background: '#0D1220',
-                border: `1px solid ${s.color}18`,
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}>
-                <span style={{ fontSize: 22 }}>{s.icon}</span>
-                <div>
-                  <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: s.color, fontFamily: 'monospace', lineHeight: 1 }}>{s.value}</p>
-                  <p style={{ margin: '2px 0 0', fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{s.label}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => setFilter('all')}
+          style={{ ...filterButtonStyle, ...(filter === 'all' ? activeFilterStyle : {}) }}
+        >
+          All ({stats.total})
+        </button>
 
-        {/* Filter tabs */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: '1.25rem' }}>
-          {([{ k: 'active', label: `Active (${stats.active})` }, { k: 'all', label: `All (${stats.total})` }] as const).map(t => (
-            <button key={t.k} onClick={() => setFilter(t.k)} style={{
-              padding: '7px 16px', borderRadius: 8, cursor: 'pointer',
-              background: filter === t.k ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.03)',
-              border: filter === t.k ? '1px solid rgba(124,58,237,0.4)' : '1px solid rgba(255,255,255,0.08)',
-              color: filter === t.k ? '#A78BFA' : 'rgba(255,255,255,0.45)',
-              fontSize: 12, fontWeight: filter === t.k ? 700 : 400,
-              fontFamily: 'Sora, sans-serif',
-            }}>
-              {t.label}
-            </button>
+        <button type="button" onClick={() => void load()} style={refreshButtonStyle}>
+          Refresh
+        </button>
+      </section>
+
+      {error && <div style={errorBoxStyle}>{error}</div>}
+
+      {loading ? (
+        <section style={listStyle}>
+          {[1, 2, 3].map((item) => (
+            <div key={item} style={skeletonStyle} />
           ))}
-        </div>
+        </section>
+      ) : displayed.length > 0 ? (
+        <section style={listStyle}>
+          {displayed.map((item) => (
+            <InterviewCard key={item.id} item={item} />
+          ))}
+        </section>
+      ) : (
+        <section style={emptyStyle}>
+          <div>📋</div>
+          <strong>{filter === 'active' ? 'No active interviews' : 'No interviews yet'}</strong>
+          <p>
+            {filter === 'active'
+              ? 'Check All to see your full interview history.'
+              : 'Apply to jobs to start your interview journey.'}
+          </p>
+        </section>
+      )}
+    </main>
+  );
+}
 
-        {/* Error state */}
-        {error && <p style={{ color: '#F87171', fontSize: 13 }}>{error}</p>}
-
-        {/* Loading skeleton */}
-        {loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {[1,2,3].map(i => (
-              <div key={i} style={{ height: 100, borderRadius: 12, background: 'rgba(255,255,255,0.04)', animation: 'ifFade 1.4s ease infinite' }} />
-            ))}
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!loading && displayed.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '5rem 2rem', animation: 'ifFade 0.3s ease' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
-            <p style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.4)', margin: '0 0 8px' }}>
-              {filter === 'active' ? 'No active interviews' : 'No interviews yet'}
-            </p>
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)', margin: 0 }}>
-              {filter === 'active'
-                ? 'Check "All" to see your complete history'
-                : 'Apply to jobs to start your interview journey'}
-            </p>
-          </div>
-        )}
-
-        {/* Interview list */}
-        {!loading && displayed.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, animation: 'ifFade 0.3s ease' }}>
-            {displayed.map(item => (
-              <InterviewCard key={item.id} item={item} />
-            ))}
-          </div>
-        )}
+function StatCard({
+  label,
+  value,
+  color,
+  icon,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  icon: string;
+}) {
+  return (
+    <div style={{ ...statCardStyle, borderColor: `${color}22` }}>
+      <span style={{ fontSize: 22 }}>{icon}</span>
+      <div>
+        <strong style={{ color }}>{value}</strong>
+        <p>{label}</p>
       </div>
     </div>
   );
 }
 
-function formatEvent(event: InterviewEvent): string {
-  if (event.event_type === 'stage_changed' || event.event_type === 'STATUS_CHANGED') {
-    return `Status moved from ${event.from_stage ?? 'unknown'} to ${event.to_stage ?? 'unknown'}`;
+function formatEvent(event: InterviewEvent) {
+  const type = safeString(event.event_type ?? event.eventType);
+  const fromStage = safeString(event.from_stage ?? event.fromStage, 'unknown');
+  const toStage = safeString(event.to_stage ?? event.toStage, 'unknown');
+
+  if (type === 'stage_changed' || type === 'STATUS_CHANGED') {
+    return `Status moved from ${fromStage} to ${toStage}`;
   }
 
-  if (event.event_type === 'round_scheduled') {
-    const roundNumber = getNumber(event.metadata, 'round_number');
-    return roundNumber ? `Round ${roundNumber} was scheduled` : 'A new interview round was scheduled';
-  }
+  if (type === 'round_scheduled') return 'A new interview round was scheduled.';
+  if (type === 'ROUND_COMPLETED' || type === 'round_result_submitted') return 'A round result was submitted.';
+  if (type === 'room_started') return 'Interview room was started.';
+  if (type === 'room_ended') return 'Interview room was ended.';
 
-  if (event.event_type === 'ROUND_COMPLETED' || event.event_type === 'round_result_submitted') {
-    const result = getString(event.metadata, 'result');
-    if (result) {
-      return `A round was marked ${result.replaceAll('_', ' ')}`;
-    }
-  }
-
-  const labels: Record<string, string> = {
-    round_scheduled: 'A new interview round was scheduled',
-    round_result_submitted: 'A round result was submitted',
-    room_started: 'The interview room was started',
-    room_ended: 'The interview room was ended',
-    STATUS_CHANGED: 'Interview status changed',
-    ROUND_COMPLETED: 'Interview round completed',
-  };
-
-  return labels[event.event_type] ?? event.event_type.replaceAll('_', ' ');
+  return type.replaceAll('_', ' ') || 'Interview updated.';
 }
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'response' in error &&
-    typeof error.response === 'object' &&
-    error.response !== null &&
-    'data' in error.response &&
-    typeof error.response.data === 'object' &&
-    error.response.data !== null &&
-    'message' in error.response.data &&
-    typeof error.response.data.message === 'string'
-  ) {
-    return error.response.data.message;
-  }
+const pageStyle: CSSProperties = {
+  minHeight: '100vh',
+  background: C.bg,
+  color: C.text,
+  fontFamily: "'Sora', sans-serif",
+};
 
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
+const headerStyle: CSSProperties = {
+  background: C.panel,
+  borderBottom: `1px solid ${C.border}`,
+  padding: '1.25rem 2rem',
+};
 
-  return fallback;
-}
+const titleStyle: CSSProperties = {
+  margin: '0 0 4px',
+  fontSize: 22,
+  fontWeight: 950,
+  letterSpacing: '-0.04em',
+};
 
-function getNumber(metadata: InterviewEvent['metadata'], key: string): number | null {
-  const value = metadata?.[key];
-  return typeof value === 'number' ? value : null;
-}
+const subtitleStyle: CSSProperties = {
+  margin: 0,
+  color: C.faint,
+  fontSize: 13,
+};
 
-function getString(metadata: InterviewEvent['metadata'], key: string): string | null {
-  const value = metadata?.[key];
-  return typeof value === 'string' ? value : null;
-}
+const statsGridStyle: CSSProperties = {
+  maxWidth: 980,
+  margin: '1.5rem auto',
+  padding: '0 1.5rem',
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+  gap: 12,
+};
+
+const statCardStyle: CSSProperties = {
+  padding: '1rem',
+  borderRadius: 14,
+  background: C.panel,
+  border: `1px solid ${C.border}`,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+};
+
+const filterRowStyle: CSSProperties = {
+  maxWidth: 980,
+  margin: '0 auto 1rem',
+  padding: '0 1.5rem',
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+
+const filterButtonStyle: CSSProperties = {
+  padding: '8px 16px',
+  borderRadius: 10,
+  border: `1px solid ${C.border}`,
+  background: 'rgba(255,255,255,0.03)',
+  color: C.muted,
+  cursor: 'pointer',
+  fontWeight: 800,
+  fontFamily: "'Sora', sans-serif",
+};
+
+const activeFilterStyle: CSSProperties = {
+  background: 'rgba(124,58,237,0.16)',
+  borderColor: 'rgba(124,58,237,0.40)',
+  color: C.purple,
+};
+
+const refreshButtonStyle: CSSProperties = {
+  ...filterButtonStyle,
+  marginLeft: 'auto',
+};
+
+const listStyle: CSSProperties = {
+  maxWidth: 980,
+  margin: '0 auto',
+  padding: '0 1.5rem 4rem',
+  display: 'grid',
+  gap: 12,
+};
+
+const cardStyle: CSSProperties = {
+  borderRadius: 16,
+  border: `1px solid ${C.border}`,
+  background: C.panel,
+  overflow: 'hidden',
+};
+
+const cardButtonStyle: CSSProperties = {
+  width: '100%',
+  padding: '1rem 1.25rem',
+  border: 'none',
+  background: 'transparent',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 14,
+  textAlign: 'left',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const iconBoxStyle: CSSProperties = {
+  width: 46,
+  height: 46,
+  borderRadius: 12,
+  border: `1px solid ${C.border}`,
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 20,
+  flexShrink: 0,
+};
+
+const cardTitleRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+
+const cardTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 15,
+  fontWeight: 900,
+  color: C.text,
+};
+
+const pillStyle: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 900,
+  padding: '4px 8px',
+  borderRadius: 999,
+  border: `1px solid ${C.border}`,
+};
+
+const mutedTextStyle: CSSProperties = {
+  margin: '5px 0 0',
+  color: C.faint,
+  fontSize: 12,
+};
+
+const tinyTextStyle: CSSProperties = {
+  margin: 0,
+  color: C.faint,
+  fontSize: 11,
+};
+
+const expandIconStyle: CSSProperties = {
+  color: C.faint,
+  fontSize: 13,
+  marginTop: 2,
+};
+
+const progressWrapStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 0,
+  marginTop: 12,
+};
+
+const progressItemStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  flex: 1,
+  minWidth: 0,
+};
+
+const progressDotWrapStyle: CSSProperties = {
+  textAlign: 'center',
+  flex: '0 0 auto',
+};
+
+const progressDotStyle: CSSProperties = {
+  width: 24,
+  height: 24,
+  borderRadius: '50%',
+  border: '2px solid',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 10,
+  fontWeight: 900,
+};
+
+const progressLabelStyle: CSSProperties = {
+  display: 'block',
+  fontSize: 9,
+  whiteSpace: 'nowrap',
+  marginTop: 4,
+};
+
+const progressLineStyle: CSSProperties = {
+  flex: 1,
+  height: 2,
+  margin: '0 2px 14px',
+};
+
+const successBannerStyle: CSSProperties = {
+  marginTop: 10,
+  padding: '8px 12px',
+  borderRadius: 10,
+  background: 'rgba(16,185,129,0.12)',
+  border: '1px solid rgba(16,185,129,0.30)',
+  color: C.green,
+  display: 'flex',
+  gap: 8,
+  alignItems: 'center',
+  fontSize: 12,
+};
+
+const neutralBannerStyle: CSSProperties = {
+  marginTop: 10,
+  padding: '8px 12px',
+  borderRadius: 10,
+  background: 'rgba(107,114,128,0.10)',
+  border: '1px solid rgba(107,114,128,0.20)',
+  color: C.gray,
+  fontSize: 12,
+};
+
+const expandedStyle: CSSProperties = {
+  padding: '0 1.25rem 1.25rem',
+  borderTop: `1px solid ${C.border}`,
+};
+
+const upcomingBoxStyle: CSSProperties = {
+  margin: '12px 0',
+  padding: '12px 14px',
+  borderRadius: 12,
+  background: 'rgba(56,189,248,0.08)',
+  border: '1px solid rgba(56,189,248,0.20)',
+};
+
+const upcomingTitleStyle: CSSProperties = {
+  margin: '0 0 4px',
+  fontSize: 11,
+  fontWeight: 900,
+  color: C.sky,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const joinButtonStyle: CSSProperties = {
+  marginTop: 10,
+  padding: '10px 18px',
+  borderRadius: 10,
+  border: 'none',
+  background: C.sky,
+  color: '#001018',
+  fontSize: 13,
+  fontWeight: 950,
+  cursor: 'pointer',
+  fontFamily: "'Sora', sans-serif",
+};
+
+const sectionTinyTitleStyle: CSSProperties = {
+  margin: '0 0 8px',
+  color: C.faint,
+  fontSize: 11,
+  fontWeight: 900,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const roundRowStyle: CSSProperties = {
+  padding: '11px 12px',
+  borderRadius: 10,
+  border: `1px solid ${C.border}`,
+  background: 'rgba(255,255,255,0.025)',
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 12,
+  alignItems: 'center',
+  color: C.text,
+  fontSize: 12,
+};
+
+const smallPillStyle: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 900,
+  padding: '4px 8px',
+  borderRadius: 999,
+  color: C.yellow,
+  background: 'rgba(251,191,36,0.10)',
+};
+
+const feedbackBoxStyle: CSSProperties = {
+  padding: '1rem',
+  borderRadius: 12,
+  border: '1px solid rgba(167,139,250,0.20)',
+  background: 'rgba(124,58,237,0.05)',
+  marginTop: 8,
+};
+
+const feedbackHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 12,
+  marginBottom: 12,
+};
+
+const feedbackTitleStyle: CSSProperties = {
+  margin: 0,
+  color: C.purple,
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const feedbackGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gap: 8,
+};
+
+const scoreLabelStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 8,
+  fontSize: 11,
+  color: C.faint,
+  marginBottom: 4,
+};
+
+const scoreTrackStyle: CSSProperties = {
+  height: 5,
+  borderRadius: 999,
+  background: 'rgba(255,255,255,0.07)',
+  overflow: 'hidden',
+};
+
+const scoreFillStyle: CSSProperties = {
+  height: '100%',
+  borderRadius: 999,
+};
+
+const strengthBoxStyle: CSSProperties = {
+  marginTop: 10,
+  padding: '8px 10px',
+  borderRadius: 10,
+  background: 'rgba(52,211,153,0.07)',
+  border: '1px solid rgba(52,211,153,0.18)',
+  color: C.green,
+  fontSize: 12,
+};
+
+const eventRowStyle: CSSProperties = {
+  padding: '10px 12px',
+  borderRadius: 10,
+  border: `1px solid ${C.border}`,
+  background: 'rgba(255,255,255,0.025)',
+  color: C.text,
+  fontSize: 12,
+};
+
+const errorBoxStyle: CSSProperties = {
+  maxWidth: 980,
+  margin: '0 auto 1rem',
+  padding: '12px 14px',
+  borderRadius: 12,
+  border: '1px solid rgba(248,113,113,0.25)',
+  background: 'rgba(248,113,113,0.07)',
+  color: '#FCA5A5',
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+const skeletonStyle: CSSProperties = {
+  height: 110,
+  borderRadius: 16,
+  background: 'rgba(255,255,255,0.045)',
+};
+
+const emptyStyle: CSSProperties = {
+  maxWidth: 980,
+  margin: '0 auto',
+  padding: '5rem 1.5rem',
+  textAlign: 'center',
+  color: C.faint,
+};
