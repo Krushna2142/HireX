@@ -177,7 +177,7 @@ export  function Sidebar() {
     <aside style={sidebarStyle}>
       <div style={brandStyle}>
         <span style={logoMarkStyle}>⌬</span>
-        <strong>JobCrawler</strong>
+        <strong>HireX</strong>
       </div>
 
       <nav style={navStyle}>

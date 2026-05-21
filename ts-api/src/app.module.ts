@@ -17,7 +17,6 @@ import { AlertsModule } from './alerts/alerts.module';
 import { CandidatesModule } from './candidates/candidates.module';
 import { RecruitersModule } from './recruiters/recruiters.module';
 import { InterviewsModule } from './interviews/interviews.module';
-import { LivekitModule } from './livekit/livekit.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { AdminModule } from './admin/admin.module';
@@ -46,7 +45,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     FeedbackModule,
     AdminModule,
     RecommendationsModule,
-    LivekitModule,
+  
   ],
 
   providers: [
