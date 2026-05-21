@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
-type VideoTileProps = {
+export type VideoTileProps = {
   stream: MediaStream | null;
   name: string;
   label?: string;
@@ -36,7 +36,7 @@ function hasEnabledVideo(stream: MediaStream | null, camOn?: boolean) {
   );
 }
 
-export default function VideoTile({
+function VideoTile({
   stream,
   name,
   label,
@@ -221,3 +221,6 @@ const iconBadgeStyle: CSSProperties = {
   color: '#F8FAFC',
   backdropFilter: 'blur(12px)',
 };
+
+export { VideoTile };
+export default VideoTile;
