@@ -10,7 +10,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
 }
 
 // -----------------------------
@@ -181,6 +180,11 @@ model User {
   recruiterNotes        RecruiterInterviewNote[] @relation("RecruiterNoteAuthor")
 
   notifications      Notification[]
+  
+  // NEW RELATIONS
+  atsBatches            AtsBulkBatch[] @relation("AtsBulkBatchRecruiter")
+  mockSessions          MockInterviewSession[] @relation("MockInterviewCandidate")
+  feedbackCreated       RecruiterInterviewFeedback[] @relation("FeedbackRecruiter")
 
   @@index([role], map: "idx_users_role")
   @@index([emailVerified], map: "idx_users_email_verified")
@@ -552,6 +556,7 @@ model Job {
   recruiter       User       @relation("RecruiterJobs", fields: [recruiterUserId], references: [id], onDelete: Cascade)
   applications    JobApplication[]
   interviews      Interview[]
+  atsBatches      AtsBulkBatch[] // NEW RELATION
 
   @@index([recruiterUserId], map: "idx_jobs_recruiter_user_id")
   @@index([status, createdAt], map: "idx_jobs_status_created_at")
@@ -576,13 +581,24 @@ model JobApplication {
   legacySourceId       String?           @map("legacy_source_id")
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  atsStatus            String?           @default("NOT_QUEUED") @map("ats_status")
+  atsScore             Float?            @map("ats_score")
+  atsRecommendation    String?           @map("ats_recommendation")
+  atsMatchedSkills     String[]          @default([]) @map("ats_matched_skills")
+  atsMissingSkills     String[]          @default([]) @map("ats_missing_skills")
+  atsReason            String?           @map("ats_reason")
+  atsBreakdown         Json?             @map("ats_breakdown")
+  atsError             String?           @map("ats_error")
+  atsQueueJobId        String?           @map("ats_queue_job_id")
+  atsQueuedAt          DateTime?         @map("ats_queued_at") @db.Timestamptz(6)
+  atsCheckedAt         DateTime?         @map("ats_checked_at") @db.Timestamptz(6)
 
   job                 Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
   candidate           User              @relation("CandidateApplications", fields: [candidateUserId], references: [id], onDelete: Cascade)
   resume              Resume?           @relation(fields: [resumeId], references: [id], onDelete: SetNull)
   statusEvents        CandidateStatusEvent[]
   interviews          Interview[]
-
+  
   @@unique([jobId, candidateUserId], map: "uq_job_applications_job_candidate")
   @@index([candidateUserId], map: "idx_job_applications_candidate_user_id")
   @@index([jobId], map: "idx_job_applications_job_id")
@@ -651,7 +667,7 @@ model Interview {
   eventLogs         InterviewEventLog[]
   recordings        InterviewRecording[]
   aiAssessments     InterviewAiAssessment[]
-  mockAnswers       MockInterviewAnswer[]
+  feedbacks         RecruiterInterviewFeedback[] // NEW RELATION
 
   @@index([candidateUserId], map: "idx_interviews_candidate_user_id")
   @@index([recruiterUserId], map: "idx_interviews_recruiter_user_id")
@@ -705,6 +721,7 @@ model RecruiterInterviewRound {
   interview       Interview            @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   meetingRoom     InterviewRoom?       @relation(fields: [meetingRoomId], references: [id], onDelete: SetNull)
   notes           RecruiterInterviewNote[]
+  interviewFeedback RecruiterInterviewFeedback? // FIXED: Renamed to avoid collision with `feedback String?`
 
   @@unique([interviewId, roundNumber], map: "uq_recruiter_round_interview_number")
   @@index([scheduledAt], map: "idx_recruiter_rounds_scheduled")
@@ -914,9 +931,10 @@ model RecruiterInterviewNote {
   @@map("recruiter_interview_notes")
 }
 
+// UPDATED: MockInterviewAnswer now correctly uses session_id
 model MockInterviewAnswer {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  interviewId     String   @map("interview_id") @db.Uuid
+  sessionId       String   @map("session_id") @db.Uuid // FIXED: was interview_id
   questionNumber  Int      @map("question_number")
   question        String
   userAnswer      String   @map("user_answer")
@@ -924,10 +942,10 @@ model MockInterviewAnswer {
   answerScore     Float?   @map("answer_score")
   submittedAt     DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
 
-  interview       Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  session         MockInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade) // FIXED relation
 
-  @@unique([interviewId, questionNumber], map: "uq_mock_answer_question")
-  @@index([interviewId], map: "idx_mock_answers_interview")
+  @@unique([sessionId, questionNumber], map: "uq_mock_answer_session_question")
+  @@index([sessionId], map: "idx_mock_answers_session_id")
   @@map("mock_interview_answers")
 }
 
@@ -952,4 +970,83 @@ model Notification {
   @@index([userId, createdAt], map: "idx_notifications_user_created_at")
   @@index([userId, readAt], map: "idx_notifications_user_read")
   @@map("notifications")
+}
+
+// -----------------------------
+// NEW: ATS Bulk Batches (Required by ats.service.ts)
+// -----------------------------
+model AtsBulkBatch {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId            String    @map("job_id") @db.Uuid
+  recruiterUserId  String    @map("recruiter_user_id") @db.Uuid
+  status           String    @default("QUEUED")
+  totalCount       Int       @default(0) @map("total_count")
+  queuedCount      Int       @default(0) @map("queued_count")
+  processedCount   Int       @default(0) @map("processed_count")
+  failedCount      Int       @default(0) @map("failed_count")
+  shortlistTarget  Int       @default(0) @map("shortlist_target")
+  metadata         Json?
+  error            String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt        DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  job              Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  recruiter        User      @relation("AtsBulkBatchRecruiter", fields: [recruiterUserId], references: [id], onDelete: Cascade)
+
+  @@index([jobId], map: "idx_ats_bulk_batches_job_id")
+  @@index([recruiterUserId], map: "idx_ats_bulk_batches_recruiter_user_id")
+  @@map("ats_bulk_batches")
+}
+
+// -----------------------------
+// NEW: Mock Interview Sessions (Required by mock-interview.service.ts)
+// -----------------------------
+model MockInterviewSession {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  candidateId        String    @map("candidate_id") @db.Uuid
+  jobTitle           String    @map("job_title")
+  topic              String
+  difficulty         String
+  status             String    @default("active")
+  totalQuestions     Int       @default(5) @map("total_questions")
+  completedQuestions Int       @default(0) @map("completed_questions")
+  overallScore       Float?    @map("overall_score")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  candidate          User      @relation("MockInterviewCandidate", fields: [candidateId], references: [id], onDelete: Cascade)
+  answers            MockInterviewAnswer[]
+
+  @@index([candidateId], map: "idx_mock_interview_sessions_candidate_id")
+  @@map("mock_interview_sessions")
+}
+
+// -----------------------------
+// NEW: Recruiter Interview Feedback (Required by feedback.service.ts)
+// -----------------------------
+model RecruiterInterviewFeedback {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  interviewId          String   @map("interview_id") @db.Uuid
+  roundId              String   @unique @map("round_id") @db.Uuid
+  recruiterId          String   @map("recruiter_id") @db.Uuid
+  technicalScore       Decimal  @map("technical_score") @db.Decimal(4, 2)
+  communicationScore   Decimal  @map("communication_score") @db.Decimal(4, 2)
+  problemSolvingScore  Decimal  @map("problem_solving_score") @db.Decimal(4, 2)
+  cultureFitScore      Decimal  @default(3) @map("culture_fit_score") @db.Decimal(4, 2)
+  overallScore         Decimal  @map("overall_score") @db.Decimal(5, 2)
+  recommendation       String
+  strengths            String?
+  improvements         String?
+  notes                String?
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  interview            Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  round                RecruiterInterviewRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  recruiter            User      @relation("FeedbackRecruiter", fields: [recruiterId], references: [id], onDelete: Cascade)
+
+  @@index([interviewId, createdAt], map: "idx_rif_interview_created")
+  @@index([recruiterId], map: "idx_rif_recruiter")
+  @@map("recruiter_interview_feedback")
 }

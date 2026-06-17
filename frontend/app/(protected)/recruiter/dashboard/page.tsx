@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import api from '@/lib/axios';
+import api, { atsApi, type AtsBatchResponse } from '@/lib/axios';
 import CandidateDetailsDrawer from '@/components/recruiter/CandidateDetailsDrawer';
 
 type TabKey =
@@ -52,17 +52,15 @@ type ApplicationRow = {
   createdAt?: string;
   match_score?: number | null;
 
+  ats_status?: string | null;
   ats_score?: number | null;
   ats_recommendation?: string | null;
   ats_matched_skills?: string[] | null;
   ats_missing_skills?: string[] | null;
   ats_reason?: string | null;
+  ats_breakdown?: any;
+  ats_error?: string | null;
   ats_checked_at?: string | null;
-
-  resumeUrl?: string | null;
-  resume_url?: string | null;
-  resumeFileUrl?: string | null;
-  resume_file_url?: string | null;
 
   candidate?: {
     id?: string;
@@ -70,35 +68,43 @@ type ApplicationRow = {
     fullName?: string;
     full_name?: string;
     email?: string;
-    phone?: string;
-    resumeUrl?: string | null;
-    resume_url?: string | null;
-    resumeFileUrl?: string | null;
-    resume_file_url?: string | null;
-    resume?: {
-      url?: string | null;
-      fileUrl?: string | null;
-      file_url?: string | null;
-      publicUrl?: string | null;
-      public_url?: string | null;
-      fileName?: string | null;
-      file_name?: string | null;
-    };
-    skills?: string[];
+    phone?: string | null;
+    location?: string | null;
+    headline?: string | null;
+    topSkills?: string[];
+    experienceYears?: number | null;
+    experienceLevel?: string | null;
     linkedin?: string | null;
     github?: string | null;
     portfolio?: string | null;
-  };
+    avatarUrl?: string | null;
+  } | null;
 
   resume?: {
+    id?: string;
+    fileName?: string;
+    file_name?: string;
+    storageBucket?: string;
+    storagePath?: string;
+    storage_path?: string;
+    mimeType?: string;
+    analysisStatus?: string;
+    analyzedAt?: string | null;
+    extractedText?: string | null;
+    analysisJson?: any;
+    resumeAnalysis?: any;
     url?: string | null;
     fileUrl?: string | null;
-    file_url?: string | null;
     publicUrl?: string | null;
-    public_url?: string | null;
-    fileName?: string | null;
-    file_name?: string | null;
-  };
+  } | null;
+
+  job?: {
+    id?: string;
+    title?: string;
+    companyName?: string;
+    company_name?: string;
+    requiredSkills?: string[] | string | null;
+  } | null;
 
   jobs?: {
     title?: string;
@@ -106,11 +112,7 @@ type ApplicationRow = {
     company_name?: string;
   };
 
-  job?: {
-    title?: string;
-    companyName?: string;
-    company_name?: string;
-  };
+  events?: any[];
 };
 
 type ScheduleResult = {
@@ -133,7 +135,6 @@ const C = {
   bg: '#080C14',
   panel: '#0D1220',
   panel2: '#101827',
-  panel3: '#111C2F',
   border: 'rgba(255,255,255,0.08)',
   borderStrong: 'rgba(167,139,250,0.28)',
   text: '#F8FAFC',
@@ -147,6 +148,27 @@ const C = {
   red: '#F87171',
   orange: '#FB923C',
 };
+
+const FLOW_STAGES = [
+  'Applied',
+  'ATS Checked',
+  'Shortlisted',
+  'Scheduled',
+  'Interview',
+  'Feedback',
+  'Hired',
+];
+
+const ATS_FILTERS = [
+  { key: 'all', label: 'All Candidates' },
+  { key: 'unchecked', label: 'ATS Pending' },
+  { key: 'queued', label: 'Queued / Processing' },
+  { key: 'shortlist', label: 'Shortlist Recommended' },
+  { key: 'review', label: 'Review Needed' },
+  { key: 'rejected', label: 'Rejected' },
+] as const;
+
+type AtsFilter = (typeof ATS_FILTERS)[number]['key'];
 
 const IT_SKILL_GROUPS = [
   {
@@ -224,33 +246,6 @@ const IT_SKILL_GROUPS = [
     ],
   },
   {
-    label: 'Testing / Quality',
-    skills: [
-      'unit testing',
-      'integration testing',
-      'e2e testing',
-      'jest',
-      'playwright',
-      'cypress',
-      'postman',
-      'api testing',
-      'debugging',
-      'performance testing',
-    ],
-  },
-  {
-    label: 'Mobile / Cross Platform',
-    skills: [
-      'react native',
-      'flutter',
-      'dart',
-      'android',
-      'kotlin',
-      'swift',
-      'mobile app development',
-    ],
-  },
-  {
     label: 'AI / Data',
     skills: [
       'machine learning',
@@ -274,16 +269,18 @@ const IT_SKILL_GROUPS = [
     ],
   },
   {
-    label: 'Security',
+    label: 'Testing / Quality',
     skills: [
-      'cybersecurity',
-      'owasp',
-      'secure coding',
-      'penetration testing',
-      'vulnerability assessment',
-      'encryption',
-      'network security',
-      'access control',
+      'unit testing',
+      'integration testing',
+      'e2e testing',
+      'jest',
+      'playwright',
+      'cypress',
+      'postman',
+      'api testing',
+      'debugging',
+      'performance testing',
     ],
   },
   {
@@ -302,26 +299,6 @@ const IT_SKILL_GROUPS = [
     ],
   },
 ] as const;
-
-const FLOW_STAGES = [
-  'Applied',
-  'ATS Checked',
-  'Shortlisted',
-  'Scheduled',
-  'Interview',
-  'Feedback',
-  'Hired',
-];
-
-const ATS_FILTERS = [
-  { key: 'all', label: 'All Candidates' },
-  { key: 'unchecked', label: 'ATS Pending' },
-  { key: 'shortlist', label: 'Shortlist Recommended' },
-  { key: 'review', label: 'Review Needed' },
-  { key: 'rejected', label: 'Rejected' },
-] as const;
-
-type AtsFilter = (typeof ATS_FILTERS)[number]['key'];
 
 function toArray<T>(raw: unknown, key?: string): T[] {
   if (!raw) return [];
@@ -398,7 +375,11 @@ function isErrorMessage(message: string | null) {
 }
 
 function normalizeStatus(status?: string | null) {
-  return safeString(status, 'applied').replace(/_/g, ' ').toLowerCase();
+  return safeString(status, 'APPLIED').replace(/_/g, ' ').toLowerCase();
+}
+
+function normalizeBackendStatus(status?: string | null) {
+  return safeString(status, 'APPLIED').toUpperCase().replace(/\s+/g, '_');
 }
 
 function formatDate(value?: string | null) {
@@ -423,10 +404,6 @@ function getCompany(job?: JobRow | null) {
 
 function getWorkMode(job?: JobRow | null) {
   return safeString(job?.workMode ?? job?.work_mode, 'onsite');
-}
-
-function getEmploymentType(job?: JobRow | null) {
-  return safeString(job?.employmentType ?? job?.employment_type, 'full_time');
 }
 
 function getRequiredSkills(job?: JobRow | null) {
@@ -478,8 +455,21 @@ function getAtsScore(app: ApplicationRow) {
   return Number.isFinite(score) ? Math.round(score) : 0;
 }
 
+function getAtsStatus(app: ApplicationRow) {
+  return safeUpper(app.ats_status, 'NOT_QUEUED');
+}
+
 function hasAts(app: ApplicationRow) {
-  return app.ats_score !== null && app.ats_score !== undefined;
+  return (
+    app.ats_score !== null &&
+    app.ats_score !== undefined &&
+    getAtsStatus(app) === 'COMPLETED'
+  );
+}
+
+function isAtsQueuedOrProcessing(app: ApplicationRow) {
+  const status = getAtsStatus(app);
+  return status === 'QUEUED' || status === 'PROCESSING';
 }
 
 function getAtsRecommendation(app: ApplicationRow) {
@@ -491,8 +481,10 @@ function getAtsRecommendation(app: ApplicationRow) {
 
   const score = getAtsScore(app);
 
-  if (score >= 75) return 'SHORTLIST';
+  if (score >= 85) return 'STRONG_SHORTLIST';
+  if (score >= 70) return 'SHORTLIST';
   if (score >= 55) return 'REVIEW';
+  if (score >= 40) return 'WEAK_MATCH';
   return 'REJECT';
 }
 
@@ -560,8 +552,9 @@ function getFlowColor(app: ApplicationRow) {
   if (status.includes('reject') || recommendation === 'REJECT') return C.red;
   if (status.includes('hired') || status.includes('offer')) return C.green;
   if (status.includes('interview') || status.includes('scheduled')) return C.purple;
-  if (status.includes('shortlist') || recommendation === 'SHORTLIST') return C.yellow;
+  if (status.includes('shortlist') || recommendation.includes('SHORTLIST')) return C.yellow;
   if (hasAts(app)) return C.sky;
+  if (isAtsQueuedOrProcessing(app)) return C.orange;
 
   return C.faint;
 }
@@ -593,20 +586,6 @@ function getCandidateRankLabel(index: number) {
   if (index === 0) return 'Top candidate';
   if (index < 5) return `Top ${index + 1}`;
   return `Rank ${index + 1}`;
-}
-
-async function runInBatches<T>(
-  items: T[],
-  batchSize: number,
-  task: (item: T, index: number) => Promise<void>,
-) {
-  for (let index = 0; index < items.length; index += batchSize) {
-    const batch = items.slice(index, index + batchSize);
-
-    await Promise.all(
-      batch.map((item, batchIndex) => task(item, index + batchIndex)),
-    );
-  }
 }
 
 function CandidateFlow({ app }: { app: ApplicationRow }) {
@@ -656,6 +635,7 @@ function StatusPill({ status }: { status?: string | null }) {
   if (s.includes('interview') || s.includes('scheduled')) color = C.purple;
   if (s.includes('offer') || s.includes('hired')) color = C.green;
   if (s.includes('reject') || s.includes('fail')) color = C.red;
+  if (s.includes('hold')) color = C.orange;
 
   return (
     <span
@@ -671,14 +651,38 @@ function StatusPill({ status }: { status?: string | null }) {
   );
 }
 
+function AtsStatusPill({ app }: { app: ApplicationRow }) {
+  const status = getAtsStatus(app);
+  let color = C.faint;
+
+  if (status === 'QUEUED') color = C.orange;
+  if (status === 'PROCESSING') color = C.yellow;
+  if (status === 'COMPLETED') color = C.green;
+  if (status === 'FAILED') color = C.red;
+
+  return (
+    <span
+      style={{
+        ...statusPillStyle,
+        color,
+        borderColor: `${color}55`,
+        background: `${color}14`,
+      }}
+    >
+      ATS {status.replace(/_/g, ' ').toLowerCase()}
+    </span>
+  );
+}
+
 function AtsRecommendationPill({ app }: { app: ApplicationRow }) {
   const recommendation = getAtsRecommendation(app);
   let color = C.faint;
 
+  if (recommendation === 'STRONG_SHORTLIST') color = C.green;
   if (recommendation === 'SHORTLIST') color = C.green;
   if (recommendation === 'REVIEW') color = C.yellow;
+  if (recommendation === 'WEAK_MATCH') color = C.orange;
   if (recommendation === 'REJECT') color = C.red;
-  if (recommendation === 'NOT_CHECKED') color = C.faint;
 
   return (
     <span
@@ -786,8 +790,8 @@ function PostJobModal({
               Create a new job posting
             </h2>
             <p style={{ margin: '6px 0 0', color: C.faint, fontSize: 13 }}>
-              This job will be tracked by jobId, applications, ATS checks,
-              interviews, feedback, and final result.
+              This job will be tracked by jobId, applicationId, resumeId, ATS queue,
+              interview rounds, feedback, and final result.
             </p>
           </div>
 
@@ -802,7 +806,7 @@ function PostJobModal({
             <input
               value={form.title}
               onChange={(event) => update('title', event.target.value)}
-              placeholder="Frontend Developer"
+              placeholder="Full Stack Developer"
               style={inputStyle}
             />
           </label>
@@ -940,21 +944,14 @@ function PostJobModal({
                 Add
               </button>
             </div>
-
-            <input
-              value={form.requiredSkills}
-              onChange={(event) => update('requiredSkills', event.target.value)}
-              placeholder="Final skills: react, next.js, typescript"
-              style={inputStyle}
-            />
           </div>
 
           <label style={fieldWrapStyle}>
-            <span style={labelStyle}>Description *</span>
+            <span style={labelStyle}>Description / JD *</span>
             <textarea
               value={form.description}
               onChange={(event) => update('description', event.target.value)}
-              placeholder="Write responsibilities, requirements, interview expectations..."
+              placeholder="Write responsibilities, must-have skills, good-to-have skills, interview expectations..."
               rows={7}
               style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.65 }}
             />
@@ -1014,6 +1011,9 @@ export default function RecruiterRecruitmentDashboardPage() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [shortlistingId, setShortlistingId] = useState<string | null>(null);
 
+  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
+  const [batchStatus, setBatchStatus] = useState<AtsBatchResponse | null>(null);
+
   const [scheduleApplicationId, setScheduleApplicationId] = useState('');
   const [scheduleAt, setScheduleAt] = useState('');
   const [roundType, setRoundType] = useState('technical');
@@ -1039,13 +1039,22 @@ export default function RecruiterRecruitmentDashboardPage() {
 
   const sortedApplications = useMemo(() => {
     return [...applications].sort((a, b) => {
+      const aStatusRank = isAtsQueuedOrProcessing(a) ? 1 : 0;
+      const bStatusRank = isAtsQueuedOrProcessing(b) ? 1 : 0;
+
+      if (aStatusRank !== bStatusRank) return bStatusRank - aStatusRank;
+
       const bScore = getAtsScore(b);
       const aScore = getAtsScore(a);
 
       if (bScore !== aScore) return bScore - aScore;
 
-      const bTime = new Date(b.applied_at ?? b.appliedAt ?? b.created_at ?? b.createdAt ?? '').getTime();
-      const aTime = new Date(a.applied_at ?? a.appliedAt ?? a.created_at ?? a.createdAt ?? '').getTime();
+      const bTime = new Date(
+        b.applied_at ?? b.appliedAt ?? b.created_at ?? b.createdAt ?? '',
+      ).getTime();
+      const aTime = new Date(
+        a.applied_at ?? a.appliedAt ?? a.created_at ?? a.createdAt ?? '',
+      ).getTime();
 
       return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
     });
@@ -1055,15 +1064,23 @@ export default function RecruiterRecruitmentDashboardPage() {
     if (atsFilter === 'all') return sortedApplications;
 
     if (atsFilter === 'unchecked') {
-      return sortedApplications.filter((app) => !hasAts(app));
+      return sortedApplications.filter((app) => !hasAts(app) && !isAtsQueuedOrProcessing(app));
+    }
+
+    if (atsFilter === 'queued') {
+      return sortedApplications.filter(isAtsQueuedOrProcessing);
     }
 
     if (atsFilter === 'shortlist') {
-      return sortedApplications.filter((app) => getAtsRecommendation(app) === 'SHORTLIST');
+      return sortedApplications.filter((app) =>
+        ['STRONG_SHORTLIST', 'SHORTLIST'].includes(getAtsRecommendation(app)),
+      );
     }
 
     if (atsFilter === 'review') {
-      return sortedApplications.filter((app) => getAtsRecommendation(app) === 'REVIEW');
+      return sortedApplications.filter((app) =>
+        ['REVIEW', 'WEAK_MATCH'].includes(getAtsRecommendation(app)),
+      );
     }
 
     if (atsFilter === 'rejected') {
@@ -1086,12 +1103,6 @@ export default function RecruiterRecruitmentDashboardPage() {
     [applications.length, selectedVacancies],
   );
 
-  const topRecommendedCandidates = useMemo(() => {
-    return sortedApplications
-      .filter((app) => hasAts(app) && !isRejected(app) && !isHired(app))
-      .slice(0, recommendedShortlistCount);
-  }, [recommendedShortlistCount, sortedApplications]);
-
   const scoreDistribution = useMemo(() => {
     const checked = applications.filter(hasAts);
 
@@ -1111,6 +1122,7 @@ export default function RecruiterRecruitmentDashboardPage() {
         ['active', 'published', 'PUBLISHED', 'ACTIVE'].includes(safeString(job.status)),
       ).length,
       totalApplications: applications.length,
+      atsQueued: applications.filter(isAtsQueuedOrProcessing).length,
       atsChecked: applications.filter(hasAts).length,
       shortlisted: applications.filter(isShortlistedPipeline).length,
       scheduled: applications.filter(isScheduled).length,
@@ -1123,6 +1135,7 @@ export default function RecruiterRecruitmentDashboardPage() {
   const funnelSteps = useMemo(
     () => [
       { label: 'Applications', value: stats.totalApplications, color: C.sky },
+      { label: 'ATS Queued', value: stats.atsQueued, color: C.orange },
       { label: 'ATS Checked', value: stats.atsChecked, color: C.yellow },
       { label: 'Shortlisted', value: stats.shortlisted, color: C.purple },
       { label: 'Scheduled', value: stats.scheduled, color: C.pink },
@@ -1171,7 +1184,7 @@ export default function RecruiterRecruitmentDashboardPage() {
     setAppsLoading(true);
 
     try {
-      const { data } = await api.get(`/jobs/${jobId}/applicants`);
+      const { data } = await atsApi.listApplications(jobId);
       const rows = toArray<ApplicationRow>(data, 'applicants').filter(
         (app) => app && typeof app === 'object' && app.id,
       );
@@ -1186,7 +1199,7 @@ export default function RecruiterRecruitmentDashboardPage() {
       });
     } catch (error) {
       setApplications([]);
-      setMessage(getErrorMessage(error, 'Unable to load applicants.'));
+      setMessage(getErrorMessage(error, 'Unable to load ATS applications.'));
     } finally {
       setAppsLoading(false);
     }
@@ -1261,6 +1274,54 @@ export default function RecruiterRecruitmentDashboardPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!currentBatchId) return;
+
+    let cancelled = false;
+
+    async function pollBatch() {
+      try {
+        const { data } = await atsApi.getBatch(currentBatchId as string);
+
+        if (cancelled) return;
+
+        setBatchStatus(data);
+
+        if (data.status === 'COMPLETED' || data.status === 'FAILED') {
+          setBulkAtsLoading(false);
+          await loadApplicants(selectedJobId);
+
+          if (data.status === 'COMPLETED') {
+            setMessage(
+              `Bulk ATS completed: ${data.processed}/${data.total} processed, ${data.failed} failed.`,
+            );
+          } else {
+            setMessage(data.error ?? 'Bulk ATS failed.');
+          }
+
+          setCurrentBatchId(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBulkAtsLoading(false);
+          setMessage(getErrorMessage(error, 'Unable to fetch ATS batch status.'));
+          setCurrentBatchId(null);
+        }
+      }
+    }
+
+    void pollBatch();
+
+    const timer = window.setInterval(() => {
+      void pollBatch();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [currentBatchId, loadApplicants, selectedJobId]);
+
   function updateVacancies(jobId: string | null, value: number) {
     if (!jobId) return;
 
@@ -1299,6 +1360,7 @@ export default function RecruiterRecruitmentDashboardPage() {
       await api.post('/jobs', {
         title: form.title.trim(),
         company: form.company.trim(),
+        companyName: form.company.trim(),
         location: form.location.trim() || undefined,
         workMode: form.workMode,
         employmentType: form.employmentType,
@@ -1325,13 +1387,15 @@ export default function RecruiterRecruitmentDashboardPage() {
     setAtsLoadingId(app.id);
 
     try {
-      const { data } = await api.post(`/jobs/applications/${app.id}/ats-check`);
-      const score = data?.ats?.atsScore ?? data?.application?.ats_score ?? 'done';
+      const { data } = await atsApi.runSingle(app.id);
 
-      setMessage(`ATS check completed for ${getCandidateName(app)}. Score: ${score}%`);
+      setMessage(
+        `ATS queued for ${getCandidateName(app)}. Queue job: ${data.queueJobId}. Refresh after processing.`,
+      );
+
       await loadApplicants(selectedJobId);
     } catch (error) {
-      setMessage(getErrorMessage(error, 'ATS check failed.'));
+      setMessage(getErrorMessage(error, 'ATS queue failed.'));
     } finally {
       setAtsLoadingId(null);
     }
@@ -1340,27 +1404,43 @@ export default function RecruiterRecruitmentDashboardPage() {
   async function runAtsForAllCandidates() {
     setMessage(null);
 
-    const target = applications.filter((app) => !isRejected(app) && !isHired(app));
+    if (!selectedJobId) {
+      setMessage('Select a job first.');
+      return;
+    }
 
-    if (!target.length) {
-      setMessage('No active applications found for ATS check.');
+    if (!applications.length) {
+      setMessage('No applications found for this job.');
       return;
     }
 
     setBulkAtsLoading(true);
+    setBatchStatus(null);
 
     try {
-      await runInBatches(target, 4, async (app, index) => {
-        setMessage(`Running ATS ${index + 1}/${target.length}: ${getCandidateName(app)}`);
-        await api.post(`/jobs/applications/${app.id}/ats-check`);
+      const { data } = await atsApi.runBulk(selectedJobId, selectedVacancies);
+
+      setCurrentBatchId(data.batchId);
+      setBatchStatus({
+        id: data.batchId,
+        jobId: data.jobId,
+        status: 'QUEUED',
+        total: data.total,
+        queued: data.queued,
+        processed: 0,
+        failed: 0,
+        shortlistTarget: data.shortlistTarget,
+        progress: 0,
       });
 
-      setMessage(`ATS completed for ${target.length} candidate application(s).`);
+      setMessage(
+        `Bulk ATS queued: ${data.queued}/${data.total} candidates. Shortlist target: ${data.shortlistTarget}.`,
+      );
+
       await loadApplicants(selectedJobId);
     } catch (error) {
-      setMessage(getErrorMessage(error, 'Bulk ATS check failed.'));
-    } finally {
       setBulkAtsLoading(false);
+      setMessage(getErrorMessage(error, 'Bulk ATS queue failed.'));
     }
   }
 
@@ -1370,7 +1450,7 @@ export default function RecruiterRecruitmentDashboardPage() {
 
     try {
       await api.patch(`/jobs/applications/${app.id}/status`, {
-        status: 'shortlisted',
+        status: 'SHORTLISTED',
       });
 
       setMessage(`${getCandidateName(app)} shortlisted and moved to Shortlisted tracking.`);
@@ -1385,24 +1465,18 @@ export default function RecruiterRecruitmentDashboardPage() {
   async function autoShortlistTopCandidates() {
     setMessage(null);
 
-    const target = topRecommendedCandidates.filter((app) => !isShortlistedPipeline(app));
-
-    if (!target.length) {
-      setMessage('No ATS-ranked candidates available for auto shortlist.');
+    if (!selectedJobId) {
+      setMessage('Select a job first.');
       return;
     }
 
     setAutoShortlistLoading(true);
 
     try {
-      await runInBatches(target, 6, async (app) => {
-        await api.patch(`/jobs/applications/${app.id}/status`, {
-          status: 'shortlisted',
-        });
-      });
+      const { data } = await atsApi.autoShortlist(selectedJobId, selectedVacancies);
 
       setMessage(
-        `Auto-shortlisted ${target.length} candidate(s) based on vacancies and ATS rank.`,
+        `Auto-shortlisted ${data.shortlisted} candidates. Backup pool: ${data.backup}. Target: ${data.shortlistTarget}.`,
       );
 
       await Promise.all([loadApplicants(selectedJobId), loadDashboard(selectedJobId)]);
@@ -1420,7 +1494,7 @@ export default function RecruiterRecruitmentDashboardPage() {
 
     try {
       await api.patch(`/jobs/applications/${app.id}/status`, {
-        status: 'rejected',
+        status: 'REJECTED',
       });
 
       setMessage(`${getCandidateName(app)} marked as rejected.`);
@@ -1499,8 +1573,8 @@ export default function RecruiterRecruitmentDashboardPage() {
         <div>
           <h1 style={titleStyle}>HireX Recruitment Center</h1>
           <p style={subtitleStyle}>
-            Track every job, candidate application, ATS decision, shortlist, interview,
-            feedback, and final hiring result transparently.
+            Mass hiring cockpit: job-wise ATS queue, JD-specific ranking, shortlist,
+            interview scheduling, candidate timeline, and transparent decision tracking.
           </p>
         </div>
 
@@ -1576,13 +1650,38 @@ export default function RecruiterRecruitmentDashboardPage() {
                 <StatCard label="Total Jobs" value={stats.totalJobs} color={C.purple} />
                 <StatCard label="Active Jobs" value={stats.activeJobs} color={C.green} />
                 <StatCard label="Applications" value={stats.totalApplications} color={C.sky} />
+                <StatCard label="ATS Queued" value={stats.atsQueued} color={C.orange} />
                 <StatCard label="ATS Checked" value={stats.atsChecked} color={C.yellow} />
                 <StatCard label="Shortlisted" value={stats.shortlisted} color={C.purple} />
                 <StatCard label="Scheduled" value={stats.scheduled} color={C.pink} />
-                <StatCard label="Feedback" value={stats.feedback} color={C.orange} />
                 <StatCard label="Hired" value={stats.hired} color={C.green} />
                 <StatCard label="Rejected" value={stats.rejected} color={C.red} />
               </section>
+
+              {batchStatus && (
+                <section style={batchPanelStyle}>
+                  <div>
+                    <p style={sectionTitleStyle}>Live Bulk ATS Batch</p>
+                    <p style={sectionSubStyle}>
+                      Batch {batchStatus.id} · {batchStatus.status}
+                    </p>
+                  </div>
+
+                  <div style={{ flex: 1 }}>
+                    <AnalyticsBar
+                      label={`${batchStatus.processed + batchStatus.failed}/${batchStatus.total} completed`}
+                      value={batchStatus.processed + batchStatus.failed}
+                      total={Math.max(batchStatus.total, 1)}
+                      color={C.orange}
+                    />
+                  </div>
+
+                  <div style={targetBoxStyle}>
+                    <span>Target</span>
+                    <strong>{batchStatus.shortlistTarget}</strong>
+                  </div>
+                </section>
+              )}
 
               <section style={analyticsGridStyle}>
                 <div style={panelStyle}>
@@ -1617,7 +1716,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                 <div style={panelStyle}>
                   <p style={sectionTitleStyle}>ATS Score Distribution</p>
                   <p style={sectionSubStyle}>
-                    Helps recruiter understand candidate quality before shortlisting.
+                    JD-specific quality distribution for selected job.
                   </p>
 
                   <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
@@ -1654,7 +1753,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <div>
                     <p style={sectionTitleStyle}>Job-wise Hiring Target</p>
                     <p style={sectionSubStyle}>
-                      Use vacancies to estimate shortlist pool and final hiring target.
+                      Vacancy-based shortlist target for mass hiring.
                     </p>
                   </div>
                 </div>
@@ -1663,7 +1762,9 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <div>
                     <strong style={{ color: C.text }}>{selectedJob?.title ?? 'No job selected'}</strong>
                     <p style={smallMutedStyle}>
-                      {selectedJob ? `${getCompany(selectedJob)} · ${selectedJob.location ?? 'Location not set'}` : 'Select job first'}
+                      {selectedJob
+                        ? `${getCompany(selectedJob)} · ${selectedJob.location ?? 'Location not set'}`
+                        : 'Select job first'}
                     </p>
                   </div>
 
@@ -1695,7 +1796,7 @@ export default function RecruiterRecruitmentDashboardPage() {
               <section style={panelStyle}>
                 <p style={sectionTitleStyle}>Candidate Flow Tracking</p>
                 <p style={sectionSubStyle}>
-                  Each candidate application has separate phase tracking: Applied → ATS Checked → Shortlisted → Scheduled → Interview → Feedback → Hired.
+                  Every candidate application is tracked separately using applicationId.
                 </p>
 
                 <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
@@ -1706,10 +1807,13 @@ export default function RecruiterRecruitmentDashboardPage() {
                           <div>
                             <strong>{getCandidateName(app)}</strong>
                             <p style={smallMutedStyle}>{getCandidateEmail(app)}</p>
-                            <p style={tinyMutedStyle}>{getCandidateRankLabel(index)} · ATS {getAtsScore(app)}%</p>
+                            <p style={tinyMutedStyle}>
+                              {getCandidateRankLabel(index)} · ATS {getAtsScore(app)}%
+                            </p>
                           </div>
 
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <AtsStatusPill app={app} />
                             <AtsRecommendationPill app={app} />
                             <StatusPill status={app.status} />
                             <button
@@ -1802,7 +1906,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                 <div>
                   <p style={sectionTitleStyle}>Applications Center</p>
                   <p style={sectionSubStyle}>
-                    Track every applied candidate separately. Run ATS, rank, shortlist, reject, and move selected candidates into scheduling.
+                    Job-wise bulk ATS queue. Each resume is scored only against this selected job’s JD.
                   </p>
                 </div>
 
@@ -1812,6 +1916,26 @@ export default function RecruiterRecruitmentDashboardPage() {
                   onChange={setSelectedJobId}
                 />
               </div>
+
+              {batchStatus && (
+                <div style={batchPanelStyle}>
+                  <div>
+                    <p style={sectionTitleStyle}>Bulk ATS Progress</p>
+                    <p style={sectionSubStyle}>
+                      {batchStatus.status} · {batchStatus.processed} processed · {batchStatus.failed} failed
+                    </p>
+                  </div>
+
+                  <div style={{ flex: 1 }}>
+                    <AnalyticsBar
+                      label={`${batchStatus.progress}%`}
+                      value={batchStatus.processed + batchStatus.failed}
+                      total={Math.max(batchStatus.total, 1)}
+                      color={C.orange}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div style={applicationControlGridStyle}>
                 <div style={controlCardStyle}>
@@ -1833,12 +1957,17 @@ export default function RecruiterRecruitmentDashboardPage() {
                 </div>
 
                 <div style={controlCardStyle}>
+                  <span style={labelStyle}>ATS Queued</span>
+                  <strong>{stats.atsQueued}</strong>
+                </div>
+
+                <div style={controlCardStyle}>
                   <span style={labelStyle}>ATS Checked</span>
                   <strong>{stats.atsChecked}</strong>
                 </div>
 
                 <div style={controlCardStyle}>
-                  <span style={labelStyle}>Recommended Shortlist</span>
+                  <span style={labelStyle}>Shortlist Target</span>
                   <strong>{recommendedShortlistCount}</strong>
                 </div>
               </div>
@@ -1847,27 +1976,35 @@ export default function RecruiterRecruitmentDashboardPage() {
                 <button
                   type="button"
                   onClick={() => void runAtsForAllCandidates()}
-                  disabled={bulkAtsLoading || !applications.length}
+                  disabled={bulkAtsLoading || !applications.length || !selectedJobId}
                   style={{
                     ...secondaryButtonStyle,
-                    opacity: bulkAtsLoading || !applications.length ? 0.65 : 1,
-                    cursor: bulkAtsLoading || !applications.length ? 'not-allowed' : 'pointer',
+                    opacity: bulkAtsLoading || !applications.length || !selectedJobId ? 0.65 : 1,
+                    cursor: bulkAtsLoading || !applications.length || !selectedJobId ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {bulkAtsLoading ? 'Running ATS...' : 'Run ATS for All'}
+                  {bulkAtsLoading ? 'Running Bulk ATS...' : 'Run BullMQ ATS for All'}
                 </button>
 
                 <button
                   type="button"
                   onClick={() => void autoShortlistTopCandidates()}
-                  disabled={autoShortlistLoading || !topRecommendedCandidates.length}
+                  disabled={autoShortlistLoading || !applications.some(hasAts)}
                   style={{
                     ...primaryButtonStyle,
-                    opacity: autoShortlistLoading || !topRecommendedCandidates.length ? 0.65 : 1,
-                    cursor: autoShortlistLoading || !topRecommendedCandidates.length ? 'not-allowed' : 'pointer',
+                    opacity: autoShortlistLoading || !applications.some(hasAts) ? 0.65 : 1,
+                    cursor: autoShortlistLoading || !applications.some(hasAts) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {autoShortlistLoading ? 'Shortlisting...' : `Auto Shortlist Top ${recommendedShortlistCount}`}
+                  {autoShortlistLoading ? 'Shortlisting...' : `Auto Shortlist by Vacancies`}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void loadApplicants(selectedJobId)}
+                  style={secondaryButtonStyle}
+                >
+                  Refresh Applications
                 </button>
 
                 <button
@@ -1923,9 +2060,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                   ))}
                 </div>
               ) : (
-                <p style={emptyTextStyle}>
-                  No applications found for this filter.
-                </p>
+                <p style={emptyTextStyle}>No applications found for this filter.</p>
               )}
             </section>
           )}
@@ -1975,7 +2110,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                 <div style={emptyPanelStyle}>
                   <strong>No shortlisted candidates yet.</strong>
                   <p>
-                    Run ATS in Applications Center, then shortlist top candidates based on vacancy target.
+                    Run bulk ATS, then auto-shortlist based on vacancy target.
                   </p>
                   <button
                     type="button"
@@ -1993,7 +2128,7 @@ export default function RecruiterRecruitmentDashboardPage() {
             <section style={panelStyle}>
               <p style={sectionTitleStyle}>Schedule Interview</p>
               <p style={sectionSubStyle}>
-                Schedule only shortlisted/reviewed candidates. Candidate will receive alert and interview entry.
+                Schedule only shortlisted candidates. Candidate gets alert and interview entry.
               </p>
 
               <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
@@ -2007,7 +2142,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                     <option value="">Select shortlisted candidate</option>
                     {scheduleCandidates.map((app) => (
                       <option key={app.id} value={app.id}>
-                        {getCandidateName(app)} · ATS {getAtsScore(app)}% · {normalizeStatus(app.status)}
+                        {getCandidateName(app)} · ATS {getAtsScore(app)}% · {normalizeBackendStatus(app.status)}
                       </option>
                     ))}
                   </select>
@@ -2017,7 +2152,9 @@ export default function RecruiterRecruitmentDashboardPage() {
                   <div style={miniInfoStyle}>
                     <strong>{getCandidateName(selectedApplication)}</strong>
                     <span>{getCandidateEmail(selectedApplication)}</span>
-                    <span>ATS: {getAtsScore(selectedApplication)}% · {getAtsRecommendation(selectedApplication)}</span>
+                    <span>
+                      ATS: {getAtsScore(selectedApplication)}% · {getAtsRecommendation(selectedApplication)}
+                    </span>
 
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                       <button
@@ -2035,7 +2172,7 @@ export default function RecruiterRecruitmentDashboardPage() {
 
                 {!selectedApplication && (
                   <p style={emptyTextStyle}>
-                    No candidate selected. Go to Shortlisted tab and choose a candidate to schedule.
+                    No candidate selected. Go to Shortlisted tab and choose candidate.
                   </p>
                 )}
 
@@ -2135,6 +2272,7 @@ export default function RecruiterRecruitmentDashboardPage() {
                       </div>
 
                       <div style={{ display: 'grid', gap: 8, justifyItems: 'end' }}>
+                        <AtsStatusPill app={app} />
                         <AtsRecommendationPill app={app} />
                         <StatusPill status={app.status} />
                         <button
@@ -2283,6 +2421,8 @@ function ApplicationCard({
   const rejected = isRejected(app);
   const hired = isHired(app);
   const shortlisted = isShortlistedPipeline(app);
+  const queued = isAtsQueuedOrProcessing(app);
+  const failed = getAtsStatus(app) === 'FAILED';
   const canShortlist = checked && !rejected && !hired;
   const canSchedule = canScheduleApplication(app);
 
@@ -2303,6 +2443,7 @@ function ApplicationCard({
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <AtsStatusPill app={app} />
             <AtsRecommendationPill app={app} />
             <StatusPill status={app.status} />
           </div>
@@ -2313,17 +2454,29 @@ function ApplicationCard({
         <div style={atsBoxStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <p style={atsTitleStyle}>ATS Resume Check</p>
+              <p style={atsTitleStyle}>Job-specific ATS Resume Check</p>
               {checked ? (
                 <p style={smallMutedStyle}>
-                  Score: <strong style={{ color: atsScore >= 75 ? C.green : atsScore >= 55 ? C.yellow : C.red }}>{atsScore}%</strong> · Recommendation:{' '}
-                  <strong style={{ color: atsRecommendation === 'REJECT' ? C.red : atsRecommendation === 'SHORTLIST' ? C.green : C.yellow }}>
+                  Score:{' '}
+                  <strong style={{ color: atsScore >= 75 ? C.green : atsScore >= 55 ? C.yellow : C.red }}>
+                    {atsScore}%
+                  </strong>{' '}
+                  · Recommendation:{' '}
+                  <strong style={{ color: atsRecommendation.includes('SHORTLIST') ? C.green : atsRecommendation === 'REJECT' ? C.red : C.yellow }}>
                     {atsRecommendation}
                   </strong>
                 </p>
+              ) : queued ? (
+                <p style={smallMutedStyle}>
+                  ATS is queued/processing through BullMQ Redis worker.
+                </p>
+              ) : failed ? (
+                <p style={{ ...smallMutedStyle, color: C.red }}>
+                  ATS failed: {app.ats_error ?? 'Unknown error'}
+                </p>
               ) : (
                 <p style={smallMutedStyle}>
-                  Not checked yet. Run Python ATS before shortlisting.
+                  Not checked yet. Queue this resume against selected job JD.
                 </p>
               )}
             </div>
@@ -2331,14 +2484,14 @@ function ApplicationCard({
             <button
               type="button"
               onClick={onRunAts}
-              disabled={atsLoading || rejected || hired}
+              disabled={atsLoading || queued || rejected || hired}
               style={{
                 ...secondaryButtonStyle,
-                opacity: atsLoading || rejected || hired ? 0.65 : 1,
-                cursor: atsLoading || rejected || hired ? 'not-allowed' : 'pointer',
+                opacity: atsLoading || queued || rejected || hired ? 0.65 : 1,
+                cursor: atsLoading || queued || rejected || hired ? 'not-allowed' : 'pointer',
               }}
             >
-              {atsLoading ? 'Checking...' : checked ? 'Re-check ATS' : 'Run ATS Check'}
+              {atsLoading ? 'Queuing...' : checked ? 'Re-run ATS' : queued ? 'Queued' : 'Queue ATS'}
             </button>
           </div>
 
@@ -2516,9 +2669,14 @@ function ShortlistedCandidateCard({
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Styles
+───────────────────────────────────────────────────────────────────────────── */
+
 const pageStyle: CSSProperties = {
   minHeight: '100vh',
-  background: C.bg,
+  background:
+    'radial-gradient(circle at 8% 8%, rgba(56,189,248,0.12), transparent 28%), radial-gradient(circle at 90% 0%, rgba(167,139,250,0.15), transparent 30%), #080C14',
   color: C.text,
   padding: '2rem',
   fontFamily: "'Sora', sans-serif",
@@ -2543,6 +2701,8 @@ const subtitleStyle: CSSProperties = {
   margin: '6px 0 0',
   color: C.faint,
   fontSize: 13,
+  maxWidth: 860,
+  lineHeight: 1.65,
 };
 
 const tabBarStyle: CSSProperties = {
@@ -2553,7 +2713,8 @@ const tabBarStyle: CSSProperties = {
   padding: 8,
   borderRadius: 18,
   border: `1px solid ${C.border}`,
-  background: C.panel,
+  background: 'rgba(13,18,32,0.82)',
+  backdropFilter: 'blur(18px)',
 };
 
 const tabButtonStyle: CSSProperties = {
@@ -2575,9 +2736,11 @@ const activeTabButtonStyle: CSSProperties = {
 
 const panelStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
-  background: C.panel,
+  background: 'rgba(13,18,32,0.86)',
   borderRadius: 20,
   padding: '1.25rem',
+  backdropFilter: 'blur(18px)',
+  boxShadow: '0 24px 80px rgba(0,0,0,0.20)',
 };
 
 const gridStyle: CSSProperties = {
@@ -2594,7 +2757,7 @@ const analyticsGridStyle: CSSProperties = {
 
 const statCardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
-  background: C.panel,
+  background: 'linear-gradient(135deg, rgba(16,24,39,0.92), rgba(2,6,23,0.45))',
   borderRadius: 18,
   padding: '1.1rem',
   display: 'grid',
@@ -2607,6 +2770,7 @@ const sectionHeadStyle: CSSProperties = {
   justifyContent: 'space-between',
   gap: 14,
   marginBottom: 18,
+  flexWrap: 'wrap',
 };
 
 const sectionTitleStyle: CSSProperties = {
@@ -2622,6 +2786,7 @@ const sectionSubStyle: CSSProperties = {
   margin: '6px 0 0',
   color: C.faint,
   fontSize: 12,
+  lineHeight: 1.5,
 };
 
 const emptyTextStyle: CSSProperties = {
@@ -2903,7 +3068,7 @@ const statusPillStyle: CSSProperties = {
 
 const applicationCardStyle: CSSProperties = {
   border: `1px solid ${C.border}`,
-  background: C.panel2,
+  background: 'linear-gradient(135deg, rgba(16,24,39,0.92), rgba(2,6,23,0.45))',
   borderRadius: 18,
   padding: '1rem',
   display: 'grid',
@@ -2915,6 +3080,7 @@ const applicationHeaderStyle: CSSProperties = {
   alignItems: 'flex-start',
   justifyContent: 'space-between',
   gap: 14,
+  flexWrap: 'wrap',
 };
 
 const applicationActionStyle: CSSProperties = {
@@ -3054,6 +3220,7 @@ const resultRowStyle: CSSProperties = {
   justifyContent: 'space-between',
   gap: 14,
   alignItems: 'center',
+  flexWrap: 'wrap',
 };
 
 const debugStyle: CSSProperties = {
@@ -3213,6 +3380,7 @@ const shortlistedHeaderStyle: CSSProperties = {
   justifyContent: 'space-between',
   alignItems: 'flex-start',
   gap: 14,
+  flexWrap: 'wrap',
 };
 
 const candidateNameStyle: CSSProperties = {
@@ -3235,4 +3403,16 @@ const miniMetricStyle: CSSProperties = {
   background: 'rgba(2,6,23,0.30)',
   display: 'grid',
   gap: 5,
+};
+
+const batchPanelStyle: CSSProperties = {
+  border: '1px solid rgba(251,191,36,0.25)',
+  background:
+    'linear-gradient(135deg, rgba(251,191,36,0.10), rgba(15,23,42,0.78))',
+  borderRadius: 18,
+  padding: '1rem',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 16,
+  flexWrap: 'wrap',
 };

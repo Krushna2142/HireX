@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { FcGoogle } from 'react-icons/fc';
@@ -24,7 +24,7 @@ const ROLES: Record<PublicAuthRole, RoleMeta> = {
   candidate: {
     label: 'Job Seeker',
     icon: '🎯',
-    description: 'Upload resume, get AI-matched to jobs, track applications',
+    description: 'Upload resume, match with jobs, track applications',
     accent: '#38BDF8',
     bg: 'rgba(56,189,248,0.12)',
     border: 'rgba(56,189,248,0.40)',
@@ -33,7 +33,7 @@ const ROLES: Record<PublicAuthRole, RoleMeta> = {
   recruiter: {
     label: 'Recruiter',
     icon: '🏢',
-    description: 'Post roles, search candidates, manage hiring pipeline',
+    description: 'Post roles, shortlist candidates, manage hiring',
     accent: '#F472B6',
     bg: 'rgba(244,114,182,0.12)',
     border: 'rgba(244,114,182,0.40)',
@@ -68,6 +68,7 @@ export default function CredentialsModal({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const API_BASE =
@@ -88,6 +89,7 @@ export default function CredentialsModal({
       setName('');
       setEmail('');
       setPassword('');
+      setShowPassword(false);
       setPanel('login');
       setRole('candidate');
     }
@@ -185,6 +187,7 @@ export default function CredentialsModal({
   const switchPanel = (nextPanel: 'login' | 'register') => {
     setPanel(nextPanel);
     setPassword('');
+    setShowPassword(false);
   };
 
   return (
@@ -192,18 +195,7 @@ export default function CredentialsModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="credentials-modal-title"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 18,
-        background:
-          'radial-gradient(circle at top, rgba(14,165,233,0.16), rgba(2,6,23,0.88) 45%, rgba(2,6,23,0.96))',
-        backdropFilter: 'blur(14px)',
-      }}
+      style={overlayStyle}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           closeModal();
@@ -212,51 +204,21 @@ export default function CredentialsModal({
     >
       <div
         style={{
-          width: '100%',
-          maxWidth: 480,
-          borderRadius: 24,
-          border: '1px solid rgba(148,163,184,0.22)',
-          background:
-            'linear-gradient(145deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98))',
-          boxShadow:
-            '0 24px 90px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06)',
-          color: '#E5E7EB',
-          overflow: 'hidden',
+          ...modalStyle,
+          maxWidth: panel === 'register' ? 440 : 420,
+          maxHeight: '92vh',
+          overflowY: 'auto',
         }}
       >
-        <div
-          style={{
-            padding: '22px 24px 16px',
-            borderBottom: '1px solid rgba(148,163,184,0.16)',
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 16,
-          }}
-        >
+        <div style={headerStyle}>
           <div>
-            <h2
-              id="credentials-modal-title"
-              style={{
-                margin: 0,
-                fontSize: 24,
-                lineHeight: 1.1,
-                fontWeight: 800,
-                letterSpacing: '-0.04em',
-              }}
-            >
-              {panel === 'login' ? 'Welcome back' : 'Create your account'}
+            <h2 id="credentials-modal-title" style={titleStyle}>
+              {panel === 'login' ? 'Welcome back' : 'Create account'}
             </h2>
-            <p
-              style={{
-                margin: '8px 0 0',
-                color: '#94A3B8',
-                fontSize: 14,
-              }}
-            >
+            <p style={subtitleStyle}>
               {panel === 'login'
-                ? 'Sign in to continue your JobCrawler journey.'
-                : 'Choose your role and start building your profile.'}
+                ? 'Sign in to continue your HireX journey.'
+                : 'Choose role and create your HireX profile.'}
             </p>
           </div>
 
@@ -265,49 +227,20 @@ export default function CredentialsModal({
             onClick={closeModal}
             disabled={loading}
             aria-label="Close"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 999,
-              border: '1px solid rgba(148,163,184,0.22)',
-              background: 'rgba(15,23,42,0.8)',
-              color: '#CBD5E1',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: 20,
-              lineHeight: '32px',
-            }}
+            style={closeButtonStyle}
           >
             ×
           </button>
         </div>
 
-        <div style={{ padding: 24 }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 10,
-              padding: 4,
-              borderRadius: 16,
-              background: 'rgba(15,23,42,0.75)',
-              border: '1px solid rgba(148,163,184,0.14)',
-              marginBottom: 18,
-            }}
-          >
+        <div style={bodyStyle}>
+          <div style={switchStyle}>
             <button
               type="button"
               onClick={() => switchPanel('login')}
               style={{
-                padding: '11px 12px',
-                borderRadius: 12,
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 700,
-                color: panel === 'login' ? '#020617' : '#CBD5E1',
-                background:
-                  panel === 'login'
-                    ? 'linear-gradient(135deg,#38BDF8,#A78BFA)'
-                    : 'transparent',
+                ...switchButtonStyle,
+                ...(panel === 'login' ? activeSwitchButtonStyle : {}),
               }}
             >
               Sign In
@@ -317,16 +250,8 @@ export default function CredentialsModal({
               type="button"
               onClick={() => switchPanel('register')}
               style={{
-                padding: '11px 12px',
-                borderRadius: 12,
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 700,
-                color: panel === 'register' ? '#020617' : '#CBD5E1',
-                background:
-                  panel === 'register'
-                    ? 'linear-gradient(135deg,#38BDF8,#A78BFA)'
-                    : 'transparent',
+                ...switchButtonStyle,
+                ...(panel === 'register' ? activeSwitchButtonStyle : {}),
               }}
             >
               Register
@@ -334,26 +259,10 @@ export default function CredentialsModal({
           </div>
 
           {panel === 'register' && (
-            <div style={{ marginBottom: 18 }}>
-              <label
-                style={{
-                  display: 'block',
-                  marginBottom: 10,
-                  color: '#CBD5E1',
-                  fontSize: 13,
-                  fontWeight: 700,
-                }}
-              >
-                Select role
-              </label>
+            <div style={{ marginBottom: 12 }}>
+              <label style={labelStyle}>Select role</label>
 
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 10,
-                }}
-              >
+              <div style={roleGridStyle}>
                 {ROLE_OPTIONS.map(([key, item]) => {
                   const active = role === key;
 
@@ -363,37 +272,18 @@ export default function CredentialsModal({
                       type="button"
                       onClick={() => setRole(key)}
                       style={{
-                        textAlign: 'left',
-                        padding: 14,
-                        borderRadius: 16,
+                        ...roleButtonStyle,
                         border: `1px solid ${
                           active ? item.border : 'rgba(148,163,184,0.16)'
                         }`,
                         background: active ? item.bg : 'rgba(15,23,42,0.55)',
-                        color: '#E5E7EB',
-                        cursor: 'pointer',
                       }}
                     >
-                      <div style={{ fontSize: 22, marginBottom: 8 }}>
-                        {item.icon}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 800,
-                          marginBottom: 4,
-                        }}
-                      >
-                        {item.label}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: '#94A3B8',
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {item.description}
+                      <div style={{ fontSize: 18 }}>{item.icon}</div>
+
+                      <div>
+                        <div style={roleTitleStyle}>{item.label}</div>
+                        <div style={roleDescStyle}>{item.description}</div>
                       </div>
                     </button>
                   );
@@ -402,19 +292,10 @@ export default function CredentialsModal({
             </div>
           )}
 
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'grid', gap: panel === 'register' ? 9 : 11 }}>
             {panel === 'register' && (
               <div>
-                <label
-                  htmlFor="auth-name"
-                  style={{
-                    display: 'block',
-                    marginBottom: 7,
-                    color: '#CBD5E1',
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
-                >
+                <label htmlFor="auth-name" style={labelStyle}>
                   Full name
                 </label>
                 <input
@@ -429,16 +310,7 @@ export default function CredentialsModal({
             )}
 
             <div>
-              <label
-                htmlFor="auth-email"
-                style={{
-                  display: 'block',
-                  marginBottom: 7,
-                  color: '#CBD5E1',
-                  fontSize: 13,
-                  fontWeight: 700,
-                }}
-              >
+              <label htmlFor="auth-email" style={labelStyle}>
                 Email
               </label>
               <input
@@ -453,45 +325,58 @@ export default function CredentialsModal({
             </div>
 
             <div>
-              <label
-                htmlFor="auth-password"
-                style={{
-                  display: 'block',
-                  marginBottom: 7,
-                  color: '#CBD5E1',
-                  fontSize: 13,
-                  fontWeight: 700,
-                }}
-              >
+              <label htmlFor="auth-password" style={labelStyle}>
                 Password
               </label>
-              <input
-                id="auth-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter your password"
-                autoComplete={
-                  panel === 'login' ? 'current-password' : 'new-password'
-                }
-                type="password"
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    void handleSubmit();
+
+              <div style={passwordWrapStyle}>
+                <input
+                  id="auth-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Enter your password"
+                  autoComplete={
+                    panel === 'login' ? 'current-password' : 'new-password'
                   }
-                }}
-                style={inputStyle}
-              />
+                  type={showPassword ? 'text' : 'password'}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      void handleSubmit();
+                    }
+                  }}
+                  style={{
+                    ...inputStyle,
+                    paddingRight: 82,
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  style={showButtonStyle}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+
+              {panel === 'login' && (
+                <div style={{ textAlign: 'right', marginTop: 7 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      router.push('/auth/forgot-password');
+                    }}
+                    style={forgotButtonStyle}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
 
               {panel === 'register' && strengthMeta && (
-                <div style={{ marginTop: 10 }}>
-                  <div
-                    style={{
-                      height: 7,
-                      borderRadius: 999,
-                      background: 'rgba(148,163,184,0.18)',
-                      overflow: 'hidden',
-                    }}
-                  >
+                <div style={{ marginTop: 8 }}>
+                  <div style={strengthTrackStyle}>
                     <div
                       style={{
                         width: `${((passwordStrength?.score ?? 0) + 1) * 20}%`,
@@ -505,10 +390,10 @@ export default function CredentialsModal({
 
                   <div
                     style={{
-                      marginTop: 6,
+                      marginTop: 5,
                       color: strengthMeta.color,
-                      fontSize: 12,
-                      fontWeight: 700,
+                      fontSize: 11,
+                      fontWeight: 800,
                     }}
                   >
                     {strengthMeta.label}
@@ -523,18 +408,10 @@ export default function CredentialsModal({
             onClick={() => void handleSubmit()}
             disabled={loading}
             style={{
-              width: '100%',
-              marginTop: 18,
-              padding: '13px 16px',
-              borderRadius: 16,
-              border: 'none',
-              background: loading
-                ? 'linear-gradient(135deg,#475569,#64748B)'
-                : 'linear-gradient(135deg,#38BDF8,#A78BFA,#F472B6)',
-              color: '#020617',
-              fontWeight: 900,
+              ...submitButtonStyle,
+              marginTop: panel === 'register' ? 13 : 16,
+              opacity: loading ? 0.7 : 1,
               cursor: loading ? 'not-allowed' : 'pointer',
-              boxShadow: '0 16px 36px rgba(56,189,248,0.18)',
             }}
           >
             {loading
@@ -546,22 +423,13 @@ export default function CredentialsModal({
                 : 'Create Account'}
           </button>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              margin: '18px 0',
-              color: '#64748B',
-              fontSize: 12,
-            }}
-          >
-            <div style={{ flex: 1, height: 1, background: '#1E293B' }} />
-            or continue with
-            <div style={{ flex: 1, height: 1, background: '#1E293B' }} />
+          <div style={dividerStyle}>
+            <div style={lineStyle} />
+            <span>or continue with</span>
+            <div style={lineStyle} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div style={oauthGridStyle}>
             <button
               type="button"
               onClick={() => handleOAuth('google')}
@@ -581,14 +449,7 @@ export default function CredentialsModal({
             </button>
           </div>
 
-          <p
-            style={{
-              margin: '18px 0 0',
-              textAlign: 'center',
-              color: '#94A3B8',
-              fontSize: 13,
-            }}
-          >
+          <p style={bottomTextStyle}>
             {panel === 'login'
               ? "Don't have an account?"
               : 'Already have an account?'}{' '}
@@ -597,13 +458,7 @@ export default function CredentialsModal({
               onClick={() =>
                 switchPanel(panel === 'login' ? 'register' : 'login')
               }
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: '#38BDF8',
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
+              style={linkButtonStyle}
             >
               {panel === 'login' ? 'Register' : 'Sign in'}
             </button>
@@ -614,10 +469,137 @@ export default function CredentialsModal({
   );
 }
 
-const inputStyle: React.CSSProperties = {
+const overlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 1000,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 14,
+  background:
+    'radial-gradient(circle at top, rgba(14,165,233,0.16), rgba(2,6,23,0.88) 45%, rgba(2,6,23,0.96))',
+  backdropFilter: 'blur(14px)',
+};
+
+const modalStyle: CSSProperties = {
   width: '100%',
-  padding: '13px 14px',
+  borderRadius: 22,
+  border: '1px solid rgba(148,163,184,0.22)',
+  background:
+    'linear-gradient(145deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98))',
+  boxShadow:
+    '0 24px 90px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06)',
+  color: '#E5E7EB',
+};
+
+const headerStyle: CSSProperties = {
+  padding: '18px 20px 13px',
+  borderBottom: '1px solid rgba(148,163,184,0.16)',
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 14,
+};
+
+const titleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 22,
+  lineHeight: 1.1,
+  fontWeight: 900,
+  letterSpacing: '-0.04em',
+};
+
+const subtitleStyle: CSSProperties = {
+  margin: '7px 0 0',
+  color: '#94A3B8',
+  fontSize: 13,
+};
+
+const closeButtonStyle: CSSProperties = {
+  width: 34,
+  height: 34,
+  borderRadius: 999,
+  border: '1px solid rgba(148,163,184,0.22)',
+  background: 'rgba(15,23,42,0.8)',
+  color: '#CBD5E1',
+  cursor: 'pointer',
+  fontSize: 20,
+  lineHeight: '30px',
+};
+
+const bodyStyle: CSSProperties = {
+  padding: 18,
+};
+
+const switchStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+  padding: 4,
+  borderRadius: 15,
+  background: 'rgba(15,23,42,0.75)',
+  border: '1px solid rgba(148,163,184,0.14)',
+  marginBottom: 14,
+};
+
+const switchButtonStyle: CSSProperties = {
+  padding: '10px 12px',
+  borderRadius: 11,
+  border: 'none',
+  cursor: 'pointer',
+  fontWeight: 800,
+  color: '#CBD5E1',
+  background: 'transparent',
+};
+
+const activeSwitchButtonStyle: CSSProperties = {
+  color: '#020617',
+  background: 'linear-gradient(135deg,#38BDF8,#A78BFA)',
+};
+
+const labelStyle: CSSProperties = {
+  display: 'block',
+  marginBottom: 6,
+  color: '#CBD5E1',
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const roleGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+};
+
+const roleButtonStyle: CSSProperties = {
+  textAlign: 'left',
+  padding: 10,
   borderRadius: 14,
+  color: '#E5E7EB',
+  cursor: 'pointer',
+  display: 'grid',
+  gridTemplateColumns: '24px 1fr',
+  gap: 7,
+  alignItems: 'start',
+};
+
+const roleTitleStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 900,
+  marginBottom: 2,
+};
+
+const roleDescStyle: CSSProperties = {
+  fontSize: 10,
+  color: '#94A3B8',
+  lineHeight: 1.3,
+};
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  padding: '12px 13px',
+  borderRadius: 13,
   border: '1px solid rgba(148,163,184,0.22)',
   outline: 'none',
   background: 'rgba(15,23,42,0.72)',
@@ -625,16 +607,98 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
-const oauthButtonStyle: React.CSSProperties = {
+const passwordWrapStyle: CSSProperties = {
+  position: 'relative',
+};
+
+const showButtonStyle: CSSProperties = {
+  position: 'absolute',
+  top: '50%',
+  right: 8,
+  transform: 'translateY(-50%)',
+  border: '1px solid rgba(148,163,184,0.18)',
+  background: 'rgba(2,6,23,0.7)',
+  color: '#93C5FD',
+  borderRadius: 10,
+  padding: '6px 10px',
+  fontSize: 11,
+  fontWeight: 900,
+  cursor: 'pointer',
+};
+
+const forgotButtonStyle: CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#38BDF8',
+  fontWeight: 850,
+  cursor: 'pointer',
+  fontSize: 12,
+};
+
+const strengthTrackStyle: CSSProperties = {
+  height: 6,
+  borderRadius: 999,
+  background: 'rgba(148,163,184,0.18)',
+  overflow: 'hidden',
+};
+
+const submitButtonStyle: CSSProperties = {
+  width: '100%',
+  padding: '12px 16px',
+  borderRadius: 15,
+  border: 'none',
+  background: 'linear-gradient(135deg,#38BDF8,#A78BFA,#F472B6)',
+  color: '#020617',
+  fontWeight: 950,
+  boxShadow: '0 16px 36px rgba(56,189,248,0.18)',
+};
+
+const dividerStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  margin: '15px 0',
+  color: '#64748B',
+  fontSize: 12,
+};
+
+const lineStyle: CSSProperties = {
+  flex: 1,
+  height: 1,
+  background: '#1E293B',
+};
+
+const oauthGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 8,
+};
+
+const oauthButtonStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   gap: 8,
-  padding: '12px 14px',
-  borderRadius: 14,
+  padding: '11px 12px',
+  borderRadius: 13,
   border: '1px solid rgba(148,163,184,0.18)',
   background: 'rgba(15,23,42,0.65)',
   color: '#E5E7EB',
-  fontWeight: 800,
+  fontWeight: 850,
+  cursor: 'pointer',
+};
+
+const bottomTextStyle: CSSProperties = {
+  margin: '15px 0 0',
+  textAlign: 'center',
+  color: '#94A3B8',
+  fontSize: 13,
+};
+
+const linkButtonStyle: CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: '#38BDF8',
+  fontWeight: 900,
   cursor: 'pointer',
 };

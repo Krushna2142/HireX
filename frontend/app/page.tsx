@@ -54,29 +54,7 @@ export default function LandingPage() {
         .hero-sub    { animation: fadeUp 0.6s 0.1s ease both; }
         .hero-ctas   { animation: fadeUp 0.6s 0.2s ease both; }
         .hero-pills  { animation: fadeUp 0.6s 0.35s ease both; }
-
-        /* Skip link — visible only on keyboard focus */
-        .skip-link {
-          position: absolute;
-          top: -100%;
-          left: 0;
-          padding: 0.75rem 1.5rem;
-          background: #0EA5E9;
-          color: #fff;
-          font-weight: 700;
-          font-size: 14px;
-          border-radius: 0 0 8px 0;
-          z-index: 9999;
-          transition: top 0.15s;
-          text-decoration: none;
-        }
-        .skip-link:focus { top: 0; outline: 3px solid #38BDF8; }
       `}</style>
-
-      {/* ✅ Skip link — keyboard accessibility companion to <main> */}
-      <a href="#main-content" className="skip-link">
-        Skip to main content
-      </a>
 
       <Suspense fallback={null}>
         <SearchParamsHandler onAuthParam={() => setModalOpen(true)} />
@@ -89,7 +67,6 @@ export default function LandingPage() {
         color: '#E2E8F0',
         overflow: 'hidden',
       }}>
-
         {/* ── Ambient background glows ── */}
         <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
           <div style={{
@@ -115,9 +92,8 @@ export default function LandingPage() {
             fontSize: '14px', fontWeight: 700, color: '#38BDF8',
             letterSpacing: '0.12em', textTransform: 'uppercase',
           }}>
-            ⬡ JobCrawler
+            ⬡ HireX
           </span>
-
           {/* ✅ nav landmark with accessible label */}
           <nav aria-label="Main navigation">
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -141,7 +117,6 @@ export default function LandingPage() {
               >
                 Sign In
               </button>
-
               <button
                 onClick={() => setModalOpen(true)}
                 aria-haspopup="dialog"
@@ -164,7 +139,7 @@ export default function LandingPage() {
         {/* ✅ <main> with id for skip link target — ALWAYS in DOM */}
         <main
           id="main-content"
-          tabIndex={-1}           // allows skip link to focus it
+          tabIndex={-1}
           style={{
             position: 'relative', zIndex: 10,
             display: 'flex', flexDirection: 'column',
@@ -205,7 +180,7 @@ export default function LandingPage() {
                   background: '#38BDF8', display: 'inline-block',
                   animation: 'pulse 2s infinite',
                 }} aria-hidden="true" />
-                AI-Powered Job Matching Platform
+                AI-Powered Career Platform
               </div>
 
               {/* Headline */}
@@ -215,14 +190,14 @@ export default function LandingPage() {
                 letterSpacing: '-0.03em', color: '#F1F5F9',
                 marginBottom: '1.25rem', maxWidth: '900px',
               }}>
-                Land Your Dream Job
+                Land Your Next Opportunity
                 <br />
                 <span style={{
                   background: 'linear-gradient(135deg, #38BDF8, #818CF8)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                 }}>
-                  With AI Precision
+                  Faster with AI
                 </span>
               </h1>
 
@@ -232,8 +207,7 @@ export default function LandingPage() {
                 color: 'rgba(255,255,255,0.45)',
                 lineHeight: 1.7, maxWidth: '580px', marginBottom: '2.5rem',
               }}>
-                Upload your resume, get AI-matched to thousands of jobs,
-                and track every application — all in one intelligent platform.
+                AI-powered resume analysis, ATS scoring, personalized job recommendations, and smarter job search.
               </p>
 
               {/* CTAs */}
@@ -261,9 +235,8 @@ export default function LandingPage() {
                     e.currentTarget.style.boxShadow = '0 4px 24px rgba(56,189,248,0.25)';
                   }}
                 >
-                  Start for Free →
+                  Analyze Resume
                 </button>
-
                 <button
                   onClick={() => setModalOpen(true)}
                   aria-haspopup="dialog"
@@ -284,12 +257,12 @@ export default function LandingPage() {
                     e.currentTarget.style.color = 'rgba(255,255,255,0.7)';
                   }}
                 >
-                  I&apos;m a Recruiter
+                  Find Jobs
                 </button>
               </div>
 
               <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.2)', marginTop: '1.25rem' }}>
-                No credit card required · Free to get started
+                Free to get started · No credit card required
               </p>
 
               {/* Feature pills */}
@@ -299,8 +272,8 @@ export default function LandingPage() {
               }}>
                 {[
                   { icon: '🤖', label: 'AI Resume Analysis' },
-                  { icon: '🎯', label: 'Smart Job Matching' },
-                  { icon: '⚡', label: 'Real-Time Alerts' },
+                  { icon: '🎯', label: 'ATS Scoring' },
+                  { icon: '⚡', label: 'Smart Job Matching' },
                   { icon: '🎤', label: 'Mock Interviews' },
                   { icon: '📊', label: 'Application Tracking' },
                   { icon: '🏢', label: 'Recruiter Dashboard' },
@@ -340,7 +313,7 @@ export default function LandingPage() {
           borderTop: '1px solid rgba(255,255,255,0.05)',
           fontSize: '12px', color: 'rgba(255,255,255,0.2)',
         }}>
-          © {new Date().getFullYear()} JobCrawler · Built with AI
+          © {new Date().getFullYear()} HireX · Built with AI
         </footer>
       </div>
 
@@ -351,18 +324,3 @@ export default function LandingPage() {
     </>
   );
 }
-/*
-
----
-
-## What Changed and Why
-
-The core architectural shift is **separating structural HTML from conditional content**:
-```
-BEFORE                          AFTER
-──────────────────────────      ──────────────────────────────────
-loading=true → return null      loading=true → <main> with skeleton
-loading=false → render page     loading=false → <main> with content
-
-Lighthouse sees: empty DOM      Lighthouse sees: <main> always present
-Result: no landmark found       Result: landmark audit passes ✅ */

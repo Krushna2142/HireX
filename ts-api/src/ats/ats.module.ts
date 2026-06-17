@@ -1,18 +1,22 @@
 /* eslint-disable prettier/prettier */
-// src/ats/ats.module.ts
+// ts-api/src/ats/ats.module.ts
 
 import { Module } from '@nestjs/common';
-import { HttpModule } from '@nestjs/axios';
+import { BullModule } from '@nestjs/bullmq';
+
+import { ATS_QUEUE } from './ats.types';
+import { AtsController } from './ats.controller';
 import { AtsService } from './ats.service';
+import { AtsProcessor } from './ats.processor';
 
 @Module({
   imports: [
-    HttpModule.register({
-      timeout: 15000,
-      maxRedirects: 3,
+    BullModule.registerQueue({
+      name: ATS_QUEUE,
     }),
   ],
-  providers: [AtsService],
+  controllers: [AtsController],
+  providers: [AtsService, AtsProcessor],
   exports: [AtsService],
 })
 export class AtsModule {}

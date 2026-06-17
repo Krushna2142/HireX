@@ -49,6 +49,14 @@ export interface RefreshResponse {
   refreshExpiresAt?: string | Date;
 }
 
+export type ResetPasswordPayload = {
+  token?: string;
+  email?: string;
+  code?: string;
+  password?: string;
+  new_password?: string;
+};
+
 export function normalizeRole(role: UserRole | string): NormalizedUserRole {
   switch (role) {
     case 'JOBSEEKER':
@@ -124,6 +132,7 @@ export function getToken(): string | null {
 
 export function getRefreshToken(): string | null {
   if (typeof window === 'undefined') return null;
+
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
@@ -138,6 +147,7 @@ function setAuthCookie(name: string, value: string): void {
 
 function clearAuthCookie(name: string): void {
   if (typeof document === 'undefined') return;
+
   document.cookie = `${name}=;path=/;max-age=0`;
 }
 
@@ -167,22 +177,17 @@ export function removeToken(): void {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
-
-    localStorage.removeItem('token');
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('jobcrawler_token');
-    localStorage.removeItem('user');
   }
 
   clearAuthCookie(TOKEN_KEY);
   clearAuthCookie(LEGACY_TOKEN_KEY);
+  clearAuthCookie(REFRESH_TOKEN_KEY);
 }
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function parseError(res: Response, fallback: string): Promise<Error> {
   const body = await res.json().catch(() => ({}));
-  return new Error(body?.message || fallback);
+
+  return new Error(body?.message || body?.error || fallback);
 }
 
 // ── Auth API Functions ──────────────────────────────────────────────────────
@@ -195,10 +200,12 @@ export async function register(
 ): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       full_name,
-      email,
+      email: email.trim().toLowerCase(),
       password,
       role,
     }),
@@ -209,6 +216,7 @@ export async function register(
   }
 
   const data = normalizeAuthResponse(await res.json());
+
   setTokens(data.accessToken, data.refreshToken);
 
   return data;
@@ -220,9 +228,11 @@ export async function login(
 ): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
-      email,
+      email: email.trim().toLowerCase(),
       password,
     }),
   });
@@ -232,6 +242,7 @@ export async function login(
   }
 
   const data = normalizeAuthResponse(await res.json());
+
   setTokens(data.accessToken, data.refreshToken);
 
   return data;
@@ -267,8 +278,12 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
 
   const res = await fetch(`${API_URL}/auth/refresh`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      refreshToken,
+    }),
   });
 
   if (!res.ok) {
@@ -334,13 +349,19 @@ export async function getMe(): Promise<User | null> {
   return normalizeUser(raw.user ?? raw);
 }
 
+// ── Password Reset ──────────────────────────────────────────────────────────
+
 export async function forgotPassword(
   email: string,
 ): Promise<{ message: string }> {
   const res = await fetch(`${API_URL}/auth/forgot-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+    }),
   });
 
   if (!res.ok) {
@@ -350,16 +371,61 @@ export async function forgotPassword(
   return res.json();
 }
 
+/**
+ * Supports all current frontend calls:
+ *
+ * resetPassword(token, password)
+ * resetPassword({ token, password })
+ * resetPassword({ token, new_password })
+ * resetPassword({ email, code, password })
+ *
+ * Sends both old/new fields to backend:
+ * - token
+ * - email
+ * - code
+ * - password
+ * - new_password
+ */
 export async function resetPassword(
-  token: string,
-  new_password: string,
+  tokenOrPayload: string | ResetPasswordPayload,
+  passwordArg?: string,
 ): Promise<{ message: string }> {
+  const payload =
+    typeof tokenOrPayload === 'string'
+      ? {
+          token: tokenOrPayload,
+          password: passwordArg,
+        }
+      : tokenOrPayload;
+
+  const token = payload.token?.trim();
+  const email = payload.email?.trim().toLowerCase();
+  const code = payload.code?.trim();
+  const newPassword = payload.new_password ?? payload.password;
+
+  if (!token && !email) {
+    throw new Error('Email is required when using reset code.');
+  }
+
+  if (!token && !code) {
+    throw new Error('Reset code is required.');
+  }
+
+  if (!newPassword || newPassword.length < 8) {
+    throw new Error('Password must be at least 8 characters.');
+  }
+
   const res = await fetch(`${API_URL}/auth/reset-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       token,
-      new_password,
+      email,
+      code,
+      password: newPassword,
+      new_password: newPassword,
     }),
   });
 

@@ -321,6 +321,9 @@ export class ResumesService {
       throw new Error('PYTHON_API_URL is not configured');
     }
 
+    this.logger.log(`[python] Calling ${baseUrl}/resume/analyze-file`);
+    this.logger.log(`[python] API Key present: ${apiKey ? 'yes' : 'no'}`);
+
     const form = new FormData();
 
     form.append('resumeId', params.resumeId);
@@ -338,27 +341,33 @@ export class ResumesService {
       headers['x-api-key'] = apiKey;
     }
 
-    const response = await fetch(`${baseUrl}/resume/analyze-file`, {
-      method: 'POST',
-      headers,
-      body: form,
-    });
+    try {
+      const response = await fetch(`${baseUrl}/resume/analyze-file`, {
+        method: 'POST',
+        headers,
+        body: form,
+      });
 
-    const text = await response.text();
+      const text = await response.text();
 
-    if (!response.ok) {
-      throw new Error(
-        `Python AI service returned ${response.status}: ${text.slice(0, 500)}`,
-      );
+      if (!response.ok) {
+        this.logger.error(`[python] Error response: ${text}`);
+        throw new Error(
+          `Python AI service returned ${response.status}: ${text.slice(0, 500)}`,
+        );
+      }
+
+      const json = JSON.parse(text) as PythonResumeAnalysis;
+
+      if (json.status === 'FAILED') {
+        throw new Error('Python AI service marked analysis as FAILED');
+      }
+
+      return json;
+    } catch (error: any) {
+      this.logger.error(`[python] Fetch failed: ${error.message}`);
+      throw error;
     }
-
-    const json = JSON.parse(text) as PythonResumeAnalysis;
-
-    if (json.status === 'FAILED') {
-      throw new Error('Python AI service marked analysis as FAILED');
-    }
-
-    return json;
   }
 
   private async savePythonAnalysis(

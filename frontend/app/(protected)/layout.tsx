@@ -1,7 +1,4 @@
 'use client';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { ReactNode, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -21,7 +18,7 @@ function LayoutSkeleton() {
         fontFamily: "'Sora', sans-serif",
       }}
     >
-      Loading HireX workspace...
+      <div className="w-12 h-12 border-4 border-[#0EA5E9] border-t-transparent rounded-full animate-spin" />
     </div>
   );
 }
@@ -30,21 +27,25 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, loading } = useAuth();
-
+  
   useJobStream();
 
   useEffect(() => {
+    // Strict auth check: if not loading and no user, redirect to login immediately
     if (!loading && !user) {
       router.replace('/?auth=login');
     }
   }, [user, loading, router]);
 
+  // Show skeleton while checking auth
   if (loading) return <LayoutSkeleton />;
+  
+  // If no user after loading, render nothing (redirect will happen)
   if (!user) return null;
 
   const isInterviewRoom =
     pathname?.includes('/interviews/room/') ||
-    pathname?.includes('/recruiter/interviews/') && pathname?.includes('/live');
+    (pathname?.includes('/recruiter/interviews/') && pathname?.includes('/live'));
 
   if (isInterviewRoom) {
     return (
@@ -75,7 +76,6 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
         }}
       >
         <Sidebar />
-
         <div
           style={{
             flex: 1,
