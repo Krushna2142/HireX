@@ -9,3 +9,4 @@ python-docx
 PyMuPDF
 spacy
 numpy
+scikit-learn
