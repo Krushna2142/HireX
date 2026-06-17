@@ -1,7 +1,7 @@
 fastapi
 uvicorn[standard]
 pydantic
-pydantic-settings   <--- MAKE SURE THIS IS HERE
+pydantic-settings
 python-multipart
 requests
 pdfplumber
