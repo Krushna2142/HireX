@@ -1,309 +1,90 @@
-# python-service/app/ats/service.py
-
+# python-ai-service/app/ats/service.py
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+from app.ats.jd_profile import deterministic_jd_profile, get_jd_profile_cached
+from app.resume.skills import SKILL_ALIASES
+
+STOP = {"the", "and", "for", "with", "our", "you", "at", "in", "of", "a", "an",
+        "is", "to", "or", "on", "we", "us", "be", "as", "by", "job", "role"}
 
 
-SKILL_SYNONYMS: Dict[str, List[str]] = {
-    "python": ["python"],
-    "machine learning": ["machine learning", "ml", "supervised learning", "classification", "regression"],
-    "deep learning": ["deep learning", "neural network", "neural networks", "cnn", "rnn", "transformer"],
-    "nlp": ["nlp", "natural language processing", "text classification", "entity extraction"],
-    "rag": ["rag", "retrieval augmented generation", "retrieval-augmented generation"],
-    "llm": ["llm", "large language model", "large language models", "generative ai"],
-    "vector database": ["vector database", "vector db", "vector search", "semantic search", "faiss", "pinecone", "chroma"],
-    "embeddings": ["embedding", "embeddings", "sentence transformer", "semantic embedding"],
-    "prompt engineering": ["prompt engineering", "prompting", "prompts"],
-    "scikit-learn": ["scikit-learn", "sklearn", "scikit learn"],
-    "tensorflow": ["tensorflow", "tf"],
-    "pytorch": ["pytorch", "torch"],
-    "numpy": ["numpy"],
-    "pandas": ["pandas"],
-    "spacy": ["spacy"],
-    "huggingface": ["huggingface", "hugging face", "transformers"],
-    "opencv": ["opencv", "computer vision", "cv"],
-    "fastapi": ["fastapi", "fast api"],
-    "langchain": ["langchain"],
-    "langgraph": ["langgraph"],
-    "react": ["react", "react.js", "reactjs"],
-    "next.js": ["next.js", "nextjs", "next js"],
-    "node.js": ["node.js", "nodejs", "node js", "node"],
-    "typescript": ["typescript", "ts"],
-    "javascript": ["javascript", "js"],
-    "html": ["html"],
-    "css": ["css"],
-    "tailwind": ["tailwind", "tailwind css"],
-    "material ui": ["material ui", "mui", "material-ui"],
-    "shadcn ui": ["shadcn ui", "shadcn", "shadcn/ui"],
-    "framer motion": ["framer motion", "framer-motion"],
-    "postgresql": ["postgresql", "postgres"],
-    "mongodb": ["mongodb", "mongo db", "mongo"],
-    "redis": ["redis"],
-    "docker": ["docker"],
-    "kubernetes": ["kubernetes", "k8s"],
-    "aws": ["aws", "amazon web services"],
-    "java": ["java"],
-    "spring boot": ["spring boot", "springboot"],
-    "sql": ["sql", "mysql", "postgresql", "database query"],
-    "data analysis": ["data analysis", "eda", "exploratory data analysis"],
-    "statistics": ["statistics", "statistical analysis"],
-    "etl": ["etl", "data pipeline", "data engineering"],
-    "power bi": ["power bi", "powerbi"],
-}
-
-ROLE_KEYWORDS: Dict[str, List[str]] = {
-    "ai": [
-        "python",
-        "machine learning",
-        "deep learning",
-        "nlp",
-        "rag",
-        "llm",
-        "vector database",
-        "embeddings",
-        "prompt engineering",
-        "scikit-learn",
-        "tensorflow",
-        "pytorch",
-        "numpy",
-        "pandas",
-        "spacy",
-    ],
-    "fullstack": [
-        "react",
-        "next.js",
-        "node.js",
-        "typescript",
-        "javascript",
-        "api",
-        "database",
-        "postgresql",
-        "mongodb",
-    ],
-    "frontend": [
-        "react",
-        "next.js",
-        "typescript",
-        "javascript",
-        "html",
-        "css",
-        "tailwind",
-        "material ui",
-        "shadcn ui",
-        "framer motion",
-    ],
-    "backend": [
-        "node.js",
-        "java",
-        "spring boot",
-        "fastapi",
-        "api",
-        "sql",
-        "postgresql",
-        "redis",
-    ],
-    "devops": [
-        "docker",
-        "kubernetes",
-        "aws",
-        "linux",
-        "ci/cd",
-        "monitoring",
-    ],
-    "data": [
-        "python",
-        "sql",
-        "pandas",
-        "numpy",
-        "etl",
-        "data analysis",
-        "statistics",
-        "power bi",
-    ],
-    "software": [
-        "software",
-        "api",
-        "database",
-        "testing",
-        "git",
-    ],
-}
+def clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").lower()).strip()
 
 
-def normalize_text(value: Any) -> str:
-    text = str(value or "").lower()
-    text = text.replace("_", " ").replace("/", " ").replace("|", " ")
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+def clamp(value: float, low: int = 0, high: int = 100) -> int:
+    return max(low, min(high, int(round(value))))
 
 
-def normalize_skill(value: Any) -> str:
-    skill = normalize_text(value)
-
-    aliases = {
-        "sklearn": "scikit-learn",
-        "scikit learn": "scikit-learn",
-        "node": "node.js",
-        "nodejs": "node.js",
-        "node js": "node.js",
-        "nextjs": "next.js",
-        "next js": "next.js",
-        "reactjs": "react",
-        "mongo": "mongodb",
-        "postgres": "postgresql",
-        "tf": "tensorflow",
-        "mui": "material ui",
-        "shadcn": "shadcn ui",
-    }
-
-    return aliases.get(skill, skill)
+def _norm_skill(s: str) -> str:
+    return re.sub(r"\s+", " ", str(s or "").lower().replace("_", " ").strip())
 
 
-def unique(items: List[str]) -> List[str]:
-    seen = set()
-    output: List[str] = []
-
-    for item in items:
-        clean = normalize_skill(item)
-        if clean and clean not in seen:
-            seen.add(clean)
-            output.append(clean)
-
-    return output
+def _has(hay: str, needle: str) -> bool:
+    n = _norm_skill(needle)
+    if not n or not hay:
+        return False
+    esc = re.escape(n)
+    return re.search(rf"(^|[^a-z0-9+#]){esc}([^a-z0-9+#]|$)", hay) is not None
 
 
-def flatten_text(value: Any) -> str:
+def _flat(value: Any) -> str:
     if value is None:
         return ""
-
-    if isinstance(value, (str, int, float, bool)):
-        return str(value)
-
-    if isinstance(value, list):
-        return " ".join(flatten_text(item) for item in value)
-
-    if isinstance(value, dict):
-        return " ".join(flatten_text(v) for v in value.values())
-
-    return str(value)
-
-
-def to_string_list(value: Any) -> List[str]:
-    if value is None:
-        return []
-
-    if isinstance(value, list):
-        output: List[str] = []
-        for item in value:
-            output.extend(to_string_list(item))
-        return output
-
-    if isinstance(value, dict):
-        for key in ["name", "skill", "title", "label", "value"]:
-            if value.get(key):
-                return [str(value[key])]
-        return []
-
     if isinstance(value, str):
-        if "," in value:
-            return [x.strip() for x in value.split(",") if x.strip()]
-        return [value.strip()] if value.strip() else []
-
-    return [str(value)]
-
-
-def keyword_exists(corpus: str, keyword: str) -> bool:
-    corpus = normalize_text(corpus)
-    keyword = normalize_skill(keyword)
-
-    if not corpus or not keyword:
-        return False
-
-    if keyword in corpus:
-        return True
-
-    compact_corpus = re.sub(r"[^a-z0-9+#]", "", corpus)
-    compact_keyword = re.sub(r"[^a-z0-9+#]", "", keyword)
-
-    if len(compact_keyword) >= 3 and compact_keyword in compact_corpus:
-        return True
-
-    pattern = r"(^|[^a-z0-9+#])" + re.escape(keyword) + r"([^a-z0-9+#]|$)"
-    return re.search(pattern, corpus) is not None
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        return " ".join(_flat(v) for v in value)
+    if isinstance(value, dict):
+        return " ".join(_flat(v) for v in value.values())
+    return ""
 
 
-def skill_exists(skill: str, corpus: str, resume_skills: List[str]) -> bool:
-    skill = normalize_skill(skill)
-    synonyms = SKILL_SYNONYMS.get(skill, [skill])
-    normalized_resume_skills = [normalize_skill(x) for x in resume_skills]
-
-    for synonym in synonyms:
-        synonym = normalize_skill(synonym)
-
-        if synonym in normalized_resume_skills:
-            return True
-
-        if keyword_exists(corpus, synonym):
-            return True
-
-    return False
+_SKILL_HEADING = re.compile(
+    r"\b(skills?|technical skills|technologies|tech stack|core competencies|tools)\b"
+)
+_EVIDENCE_HEADING = re.compile(
+    r"\b(experience|work history|employment|projects?|education|certifications?|summary|achievements)\b"
+)
 
 
-def extract_known_skills(text: str) -> List[str]:
-    corpus = normalize_text(text)
-    found: List[str] = []
-
-    for skill, synonyms in SKILL_SYNONYMS.items():
-        if any(keyword_exists(corpus, synonym) for synonym in synonyms):
-            found.append(skill)
-
-    return unique(found)
-
-
-def detect_role_family(jd_text: str) -> str:
-    text = normalize_text(jd_text)
-
-    if re.search(
-        r"\b(ai|artificial intelligence|machine learning|ml engineer|deep learning|nlp|llm|rag|vector database|embedding|tensorflow|pytorch|scikit)\b",
-        text,
-    ):
-        return "ai"
-
-    if re.search(r"\b(full stack|fullstack|mern|react.*node|node.*react)\b", text):
-        return "fullstack"
-
-    if re.search(r"\b(frontend|front end|react|next\.js|ui developer)\b", text):
-        return "frontend"
-
-    if re.search(r"\b(backend|back end|api|nestjs|spring boot|fastapi|django)\b", text):
-        return "backend"
-
-    if re.search(r"\b(devops|cloud|kubernetes|docker|aws|azure|ci/cd)\b", text):
-        return "devops"
-
-    if re.search(r"\b(data analyst|data engineer|etl|power bi|sql analyst)\b", text):
-        return "data"
-
-    return "software"
+def split_sections(text: str) -> Dict[str, str]:
+    m = _SKILL_HEADING.search(text)
+    if not m:
+        return {"skills": "", "evidence": text, "all": text}
+    start = m.start()
+    rest = text[start + 6:]
+    em = _EVIDENCE_HEADING.search(rest)
+    end = start + 6 + em.start() if em else min(len(text), start + 800)
+    return {
+        "skills": text[start:end],
+        "evidence": text[:start] + " " + text[end:],
+        "all": text,
+    }
 
 
-def calculate_experience_score(candidate_years: float, min_years: float) -> int:
-    if min_years <= 0:
-        return 80 if candidate_years > 0 else 65
+def _tfidf_pct(a: str, b: str) -> int:
+    if not a.strip() or not b.strip():
+        return 0
+    try:
+        v = TfidfVectorizer(stop_words="english", max_features=5000)
+        m = v.fit_transform([a, b])
+        return clamp(float(cosine_similarity(m[0:1], m[1:2])[0][0]) * 100)
+    except ValueError:
+        return 0
+    except Exception:
+        return 0
 
-    if candidate_years >= min_years:
-        return 90
 
-    return max(25, round((candidate_years / max(min_years, 1)) * 75))
-
-
-def clamp_score(value: float) -> int:
-    return max(0, min(100, round(value)))
-
-
-def recommendation_from_score(score: int) -> str:
+def _recommend(score: int) -> str:
     if score >= 85:
         return "STRONG_SHORTLIST"
     if score >= 70:
@@ -315,309 +96,272 @@ def recommendation_from_score(score: int) -> str:
     return "REJECT"
 
 
-def legacy_recommendation(recommendation: str) -> str:
-    if recommendation in ["STRONG_SHORTLIST", "SHORTLIST"]:
-        return "SHORTLIST"
-
-    if recommendation in ["REVIEW", "WEAK_MATCH"]:
-        return "REVIEW"
-
-    return "REJECT"
-
-
-def extract_experience_years(payload: Dict[str, Any], resume_text: str) -> float:
-    candidate = payload.get("candidate") or {}
-    resume = payload.get("resume") or {}
-    resume_analysis = payload.get("resumeAnalysis") or {}
-
-    direct_values = [
-        candidate.get("experienceYears"),
-        candidate.get("experience_years"),
-        resume.get("experienceYears"),
-        resume.get("experience_years"),
-        resume_analysis.get("experienceYears"),
-        resume_analysis.get("experience_years"),
-        resume_analysis.get("totalExperience"),
-    ]
-
-    for value in direct_values:
-        try:
-            num = float(value)
-            if num > 0:
-                return num
-        except Exception:
-            pass
-
-    match = re.search(r"(\d+(?:\.\d+)?)\s*\+?\s*(years|year|yrs|yr)", resume_text, re.I)
-    if match:
-        try:
-            return float(match.group(1))
-        except Exception:
-            return 0
-
-    return 0
-
-
-def build_resume_corpus(payload: Dict[str, Any]) -> Tuple[str, List[str]]:
-    candidate = payload.get("candidate") or {}
-    resume = payload.get("resume") or {}
-    resume_analysis = payload.get("resumeAnalysis") or {}
-
-    raw_parts = [
-        resume.get("text"),
-        resume.get("rawText"),
-        resume.get("extractedText"),
-        resume_analysis.get("rawText"),
-        resume_analysis.get("rawTextPreview"),
-        flatten_text(resume.get("analysisJson")),
-        flatten_text(resume_analysis),
-        flatten_text(resume.get("projects")),
-        flatten_text(resume.get("experience")),
-        flatten_text(resume.get("education")),
-        flatten_text(resume.get("certifications")),
-        flatten_text(candidate),
-    ]
-
-    resume_text = normalize_text("\n".join(str(x or "") for x in raw_parts))
-
-    explicit_skills = unique(
-        to_string_list(resume.get("skills"))
-        + to_string_list(resume.get("topSkills"))
-        + to_string_list(candidate.get("profileSkills"))
-        + to_string_list(candidate.get("topSkills"))
-        + to_string_list(resume_analysis.get("skills"))
-        + to_string_list(resume_analysis.get("topSkills"))
-        + to_string_list(resume_analysis.get("technicalSkills"))
-    )
-
-    extracted_skills = extract_known_skills(resume_text)
-
-    return resume_text, unique(explicit_skills + extracted_skills)
-
-
-def build_jd_skills(payload: Dict[str, Any]) -> Tuple[str, List[str], str]:
+def _job_fields(payload: Dict[str, Any]):
     job = payload.get("job") or {}
+    title = str(job.get("title") or payload.get("jobTitle") or "")
+    desc = str(job.get("description") or payload.get("jobDescription") or "")
+    skills = job.get("requiredSkills") or payload.get("requiredSkills") or payload.get("required_skills") or []
+    if isinstance(skills, str):
+        skills = [s.strip() for s in skills.split(",")]
+    skills = [s for s in skills if isinstance(s, str) and s.strip()]
+    exp_min = float(job.get("experienceMin") or payload.get("experienceMin") or 0)
+    industry = str(job.get("industry") or "")
+    return title, desc, skills, exp_min, industry
 
-    job_title = (
-        job.get("title")
-        or payload.get("jobTitle")
-        or payload.get("job_title")
-        or ""
+
+def _resume_fields(payload: Dict[str, Any]):
+    resume = payload.get("resume") or {}
+    ra = payload.get("resumeAnalysis") or {}
+    text = str(
+        resume.get("text") or resume.get("rawText") or resume.get("extractedText")
+        or payload.get("resumeText") or ra.get("rawText") or ra.get("rawTextPreview") or ""
+    )
+    skills = resume.get("skills") or ra.get("topSkills") or ra.get("skills") or []
+    if not isinstance(skills, list):
+        skills = []
+    projects = resume.get("projects") or ra.get("projects") or []
+    experience = resume.get("experience") or ra.get("workExperience") or []
+    exp_years = float((payload.get("candidate") or {}).get("experienceYears") or ra.get("experienceYears") or 0)
+    return text, [str(s) for s in skills], projects, experience, exp_years
+
+
+def _empty_result(reason: str) -> Dict[str, Any]:
+    return {
+        "score": 0, "atsScore": 0,
+        "recommendation": "REJECT", "atsRecommendation": "REJECT",
+        "matchedSkills": [], "matched_skills": [],
+        "missingSkills": [], "missing_skills": [],
+        "reason": reason,
+        "breakdown": {
+            "requiredSkillMatch": 0, "semanticMatch": 0, "projectRelevance": 0,
+            "experienceRelevance": 0, "roleTitleRelevance": 0,
+            "sectionCompleteness": 0, "keywordPlacement": 0,
+            "formattingReadability": 0, "evidence": [], "warnings": [reason],
+        },
+    }
+
+
+def _score_skills(skills: List[Dict[str, Any]], sections: Dict[str, str], resume_text: str):
+    matched: List[str] = []
+    missing: List[str] = []
+    evidence: List[str] = []
+    got = 0.0
+    total = 0.0
+    evidenced = 0
+    
+    # ✅ FIX: Strip stop phrases from skills so "basic understanding of authentication" becomes "authentication"
+    stop_phrases = ["basic understanding of", "knowledge of", "experience with", "proficiency in", "ability to"]
+    
+    for sk in skills:
+        weight = float(sk.get("weight", 3))
+        total += weight
+        
+        # Clean the skill name
+        clean_name = sk["name"].lower()
+        for phrase in stop_phrases:
+            clean_name = clean_name.replace(phrase, "").strip()
+            
+        terms = [clean_name] + list(sk.get("synonyms") or [])
+        in_evidence = any(_has(sections["evidence"], t) for t in terms)
+        in_skills = any(_has(sections["skills"], t) or _has(resume_text, t) for t in terms)
+        
+        if in_evidence:
+            got += weight
+            evidenced += 1
+            matched.append(clean_name)
+            evidence.append(f"Used in experience/projects: {clean_name}")
+        elif in_skills:
+            got += weight * 0.5
+            matched.append(clean_name)
+            evidence.append(f"Listed only (no usage evidence): {clean_name}")
+        else:
+            missing.append(clean_name)
+            
+    pct = clamp(100 * got / max(total, 1)) if total else 60
+    ev_pct = clamp(100 * evidenced / max(len(skills), 1))
+    return {"pct": pct, "evidencePct": ev_pct, "matched": matched, "missing": missing, "evidence": evidence}
+
+
+def score_ats_with_profile(payload: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
+    title, desc, required, exp_min, industry = _job_fields(payload)
+    text, resume_skills, projects, experience, exp_years = _resume_fields(payload)
+    integrity = payload.get("integrityReport") or {}
+
+    jd_text = clean_text(f"{title} {desc} {' '.join(required)}")
+    resume_text = clean_text(text)
+    if not jd_text or not resume_text:
+        return _empty_result("Missing JD or resume text.")
+
+    sections = split_sections(resume_text)
+    must = profile.get("mustHave") or deterministic_jd_profile(title, desc, required)["mustHave"]
+    nice = profile.get("niceToHave") or []
+
+    must_res = _score_skills(must, sections, resume_text)
+    nice_res = _score_skills(nice, sections, resume_text) if nice else {"pct": 60, "evidencePct": 60, "matched": [], "missing": [], "evidence": []}
+
+    semantic_pct = _tfidf_pct(jd_text, resume_text)
+
+    proj_text = clean_text(" ".join(_flat(p) for p in projects) + " " + " ".join(_flat(e) for e in experience))
+    if must_res["matched"]:
+        project_pct = clamp(100 * sum(1 for s in must_res["matched"] if _has(proj_text, s)) / len(must_res["matched"]))
+    else:
+        project_pct = 25 if len(resume_text) > 400 else 0
+
+    min_years = max(float(profile.get("minYears") or 0), exp_min)
+    if min_years <= 0:
+        experience_pct = 85 if exp_years > 0 else 65
+    elif exp_years >= min_years:
+        experience_pct = 90
+    else:
+        experience_pct = max(20, round(75 * exp_years / max(min_years, 1)))
+
+    title_words = [w for w in re.findall(r"[a-z]+", title.lower()) if len(w) > 2 and w not in STOP]
+    title_pct = clamp(100 * sum(1 for w in title_words if _has(resume_text, w)) / len(title_words)) if title_words else 60
+
+    signals = [
+        "summary" in resume_text,
+        "skills" in resume_text or bool(resume_skills),
+        bool(projects) or "project" in resume_text,
+        bool(experience) or "experience" in resume_text,
+        "education" in resume_text,
+        len(resume_text) > 500,
+    ]
+    section_pct = clamp(100 * sum(signals) / len(signals))
+    placement = clamp(65 + 8 * sum(1 for s in ["summary", "skills", "projects", "experience"] if s in resume_text))
+    formatting = 90 if len(resume_text) > 1200 else 75 if len(resume_text) > 600 else 55 if len(resume_text) > 250 else 25
+
+    hidden_ratio = float(integrity.get("hiddenRatio") or integrity.get("hidden_ratio") or 0)
+    if hidden_ratio > 0.15:
+        formatting = 30
+
+    policy = payload.get("scoringPolicy") or {}
+
+    def w(key: str, default: float) -> float:
+        try:
+            return float(policy.get(key, default)) / 100.0
+        except Exception:
+            return default / 100.0
+
+    score = clamp(
+        must_res["pct"] * w("requiredSkillMatch", 38)
+        + nice_res["pct"] * w("semanticMatch", 18)
+        + project_pct * w("projectRelevance", 15)
+        + experience_pct * w("experienceRelevance", 10)
+        + title_pct * w("roleTitleRelevance", 9)
+        + section_pct * w("sectionCompleteness", 6)
+        + placement * w("keywordPlacement", 2.5)
+        + formatting * w("formattingReadability", 1.5)
     )
 
-    job_description = (
-        job.get("description")
-        or payload.get("jobDescription")
-        or payload.get("job_description")
-        or ""
+    warnings: List[str] = []
+    if len(resume_text) < 150:
+        score = min(score, 25)
+        warnings.append("Very little readable resume text.")
+    if must and not must_res["matched"]:
+        score = min(score, 30)
+        warnings.append("No required JD skills found in visible resume text.")
+
+    flagged = bool(integrity.get("flagged"))
+    severity = str(integrity.get("severity") or "none")
+    if flagged:
+        warnings.append(f"Integrity flags ({severity.upper()}) detected — recruiter review required; flags do not auto-reject.")
+        for f in (integrity.get("findings") or [])[:5]:
+            warnings.append(f"integrity: {f.get('type')} — {f.get('detail')}")
+
+    recommendation = _recommend(score)
+    if flagged and recommendation in ("STRONG_SHORTLIST", "SHORTLIST"):
+        recommendation = "REVIEW"
+
+    flag_tag = f"[FLAGGED:{severity.upper()}] " if flagged else ""
+    reason = (
+        f"{flag_tag}{recommendation}: {score}% for \"{title}\" "
+        f"({profile.get('roleFamily', 'software')}, {profile.get('seniority', 'mid')}). "
+        f"Required matched {len(must_res['matched'])}/{len(must)}; "
+        f"evidenced in experience/projects {sum(1 for e in must_res['evidence'] if e.startswith('Used'))}/{len(must)}. "
+        + (f"Missing: {', '.join(must_res['missing'][:6])}." if must_res["missing"] else "")
     )
 
-    required_skills_raw = (
-        job.get("requiredSkills")
-        or job.get("required_skills")
-        or job.get("skills")
-        or payload.get("requiredSkills")
-        or payload.get("required_skills")
-        or []
-    )
+    matched_all = must_res["matched"] + nice_res["matched"]
+    missing_all = must_res["missing"] + nice_res["missing"]
+    provider = profile.get("provider") or {}
 
-    jd_text = normalize_text(
-        " ".join(
-            [
-                str(job_title),
-                str(job_description),
-                " ".join(to_string_list(required_skills_raw)),
-            ]
-        )
-    )
-
-    role_family = detect_role_family(jd_text)
-
-    required_skills = unique(
-        to_string_list(required_skills_raw)
-        + extract_known_skills(jd_text)
-        + ROLE_KEYWORDS.get(role_family, [])
-    )
-
-    return jd_text, required_skills, role_family
+    return {
+        "score": score, "atsScore": score,
+        "recommendation": recommendation, "atsRecommendation": recommendation,
+        "matchedSkills": matched_all, "matched_skills": matched_all,
+        "missingSkills": missing_all, "missing_skills": missing_all,
+        "reason": reason,
+        "breakdown": {
+            "requiredSkillMatch": must_res["pct"],
+            "semanticMatch": nice_res["pct"] if nice else semantic_pct,
+            "projectRelevance": must_res["evidencePct"],
+            "experienceRelevance": experience_pct,
+            "roleTitleRelevance": title_pct,
+            "sectionCompleteness": section_pct,
+            "keywordPlacement": placement,
+            "formattingReadability": formatting,
+            "jdRoleFamily": profile.get("roleFamily", "software"),
+            "jdSeniority": profile.get("seniority", "mid"),
+            "jdMinYears": min_years,
+            "jdProfileSource": profile.get("source", "deterministic"),
+            "jdProfileModel": provider.get("model"),
+            "requiredSkillsUsed": [m["name"] for m in must],
+            "resumeSkillsDetected": (matched_all + [_norm_skill(s) for s in resume_skills])[:30],
+            "resumeTextLength": len(resume_text),
+            "evidence": (must_res["evidence"] + nice_res["evidence"])[:15],
+            "warnings": warnings,
+            "integrity": integrity or None,
+        },
+    }
 
 
 def score_ats(payload: Dict[str, Any]) -> Dict[str, Any]:
-    job = payload.get("job") or {}
+    """Sync entry (batch/legacy): deterministic JD profile."""
+    title, desc, required, _, _ = _job_fields(payload)
+    profile = deterministic_jd_profile(title, desc, required)
+    profile["source"] = "deterministic"
+    return score_ats_with_profile(payload, profile)
 
-    jd_text, required_skills, role_family = build_jd_skills(payload)
-    resume_text, resume_skills = build_resume_corpus(payload)
 
-    matched_skills = [
-        skill for skill in required_skills if skill_exists(skill, resume_text, resume_skills)
-    ]
+async def score_ats_async(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Primary entry: NIM (Nemotron 3 Ultra) JD profile, cached per JD."""
+    title, desc, required, exp_min, _ = _job_fields(payload)
+    profile = await get_jd_profile_cached(title, desc, required, exp_min)
+    return score_ats_with_profile(payload, profile)
 
-    missing_skills = [
-        skill for skill in required_skills if skill not in matched_skills
-    ]
 
-    required_skill_pct = (
-        round((len(matched_skills) / len(required_skills)) * 100)
-        if required_skills
-        else 0
-    )
-
-    role_keywords = ROLE_KEYWORDS.get(role_family, [])
-    role_hits = [
-        skill for skill in role_keywords if skill_exists(skill, resume_text, resume_skills)
-    ]
-
-    role_pct = round((len(role_hits) / len(role_keywords)) * 100) if role_keywords else 40
-
-    project_text = normalize_text(
-        flatten_text((payload.get("resume") or {}).get("projects"))
-        + " "
-        + flatten_text((payload.get("resumeAnalysis") or {}).get("projects"))
-    )
-
-    project_hits = [skill for skill in matched_skills if keyword_exists(project_text, skill)]
-
-    if matched_skills:
-        project_pct = round((len(project_hits) / len(matched_skills)) * 100)
-    else:
-        project_pct = 20 if len(project_text) > 200 else 0
-
-    min_exp = 0
+def batch_score_ats(jd_text: str, required_skills: List[str], resumes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    jd = clean_text(jd_text or "")
+    if not jd.strip():
+        return [{"id": r.get("id"), "score": 0, "recommendation": "REJECT",
+                 "matchedSkills": [], "missingSkills": [], "reason": "Missing JD text"} for r in resumes]
+    
+    corpus = [jd] + [clean_text(f"{r.get('text', '')} {' '.join(r.get('skills') or [])}") for r in resumes]
     try:
-        min_exp = float(job.get("experienceMin") or job.get("experience_min") or 0)
+        v = TfidfVectorizer(stop_words="english", max_features=5000)
+        m = v.fit_transform(corpus)
+        sims = cosine_similarity(m[0:1], m[1:]).flatten()
+    except ValueError:
+        sims = [0.0] * len(resumes)
     except Exception:
-        min_exp = 0
-
-    candidate_years = extract_experience_years(payload, resume_text)
-    experience_pct = calculate_experience_score(candidate_years, min_exp)
-
-    section_signals = [
-        "summary" in resume_text,
-        "skills" in resume_text or len(resume_skills) > 0,
-        "project" in resume_text or len(project_text) > 50,
-        "experience" in resume_text or candidate_years > 0,
-        "education" in resume_text,
-    ]
-
-    section_pct = round((sum(1 for x in section_signals if x) / len(section_signals)) * 100)
-
-    semantic_pct = round(required_skill_pct * 0.68 + role_pct * 0.32)
-
-    keyword_placement_pct = 0
-    if matched_skills:
-        important_sections = ["summary", "skills", "projects", "experience"]
-        keyword_placement_pct = min(
-            100,
-            55 + sum(1 for section in important_sections if section in resume_text) * 10,
-        )
-
-    if len(resume_text) > 1200:
-        formatting_pct = 90
-    elif len(resume_text) > 600:
-        formatting_pct = 75
-    elif len(resume_text) > 250:
-        formatting_pct = 55
-    else:
-        formatting_pct = 25
-
-    score = (
-        required_skill_pct * 0.38
-        + semantic_pct * 0.18
-        + project_pct * 0.15
-        + experience_pct * 0.10
-        + role_pct * 0.09
-        + section_pct * 0.06
-        + keyword_placement_pct * 0.025
-        + formatting_pct * 0.015
-    )
-
-    score = clamp_score(score)
-
-    warnings: List[str] = []
-    evidence: List[str] = []
-
-    if len(resume_text) < 80:
-        score = min(score, 25)
-        warnings.append("Resume text is missing or too short. Resume parsing/extraction may have failed.")
-
-    if required_skills and not matched_skills:
-        score = min(score, 30)
-        warnings.append("No JD required skills matched in resume.")
-
-    if role_family == "ai":
-        ai_core = [
-            "python",
-            "machine learning",
-            "nlp",
-            "rag",
-            "llm",
-            "vector database",
-            "scikit-learn",
-            "tensorflow",
-            "pytorch",
-            "numpy",
-            "pandas",
-        ]
-
-        ai_hits = [skill for skill in ai_core if skill_exists(skill, resume_text, resume_skills)]
-
-        if len(ai_hits) >= 7:
-            score = max(score, 84)
-        elif len(ai_hits) >= 5:
-            score = max(score, 74)
-        elif len(ai_hits) >= 3:
-            score = max(score, 58)
-        elif len(ai_hits) <= 1:
-            score = min(score, 45)
-            warnings.append("AI Engineer JD detected but AI/ML evidence is weak.")
-
-    if role_family == "frontend":
-        frontend_core = ["react", "next.js", "typescript", "javascript", "html", "css"]
-        frontend_hits = [skill for skill in frontend_core if skill_exists(skill, resume_text, resume_skills)]
-
-        if len(frontend_hits) >= 4:
-            score = max(score, 72)
-        elif len(frontend_hits) <= 1:
-            score = min(score, 50)
-
-    for skill in matched_skills[:12]:
-        evidence.append(f"Matched JD skill: {skill}")
-
-    recommendation = recommendation_from_score(score)
-    old_recommendation = legacy_recommendation(recommendation)
-
-    title = job.get("title") or payload.get("jobTitle") or "selected job"
-
-    reason = (
-        f'{recommendation}: {score}% match for "{title}". '
-        f"Matched {len(matched_skills)}/{len(required_skills)} JD skills. "
-        f"Missing: {', '.join(missing_skills[:8]) if missing_skills else 'none'}."
-    )
-
-    return {
-        "score": score,
-        "atsScore": score,
-        "recommendation": old_recommendation,
-        "atsRecommendation": recommendation,
-        "matchedSkills": matched_skills,
-        "matched_skills": matched_skills,
-        "missingSkills": missing_skills,
-        "missing_skills": missing_skills,
-        "reason": reason,
-        "breakdown": {
-            "requiredSkillMatch": required_skill_pct,
-            "semanticMatch": semantic_pct,
-            "projectRelevance": project_pct,
-            "experienceRelevance": experience_pct,
-            "roleTitleRelevance": role_pct,
-            "sectionCompleteness": section_pct,
-            "keywordPlacement": keyword_placement_pct,
-            "formattingReadability": formatting_pct,
-            "jdRoleFamily": role_family,
-            "requiredSkillsUsed": required_skills,
-            "resumeSkillsDetected": resume_skills,
-            "resumeTextLength": len(resume_text),
-            "evidence": evidence,
-            "warnings": warnings,
-        },
-    }
+        sims = [0.0] * len(resumes)
+        
+    req = [_norm_skill(s) for s in (required_skills or []) if s and str(s).strip()]
+    results: List[Dict[str, Any]] = []
+    for i, r in enumerate(resumes):
+        rtext = corpus[i + 1]
+        matched = [s for s in req if any(_has(rtext, t) for t in ([s] + SKILL_ALIASES.get(s, [])))]
+        missing = [s for s in req if s not in matched]
+        skill_pct = clamp(100 * len(matched) / len(req)) if req else 60
+        sem_pct = clamp(float(sims[i]) * 100)
+        score = clamp(round(0.6 * sem_pct + 0.4 * skill_pct))
+        rec = _recommend(score)
+        results.append({
+            "id": r.get("id"), "score": score, "atsScore": score,
+            "recommendation": rec, "atsRecommendation": rec,
+            "matchedSkills": matched, "matched_skills": matched,
+            "missingSkills": missing, "missing_skills": missing,
+            "reason": f"TF-IDF semantic {sem_pct}% | skill overlap {skill_pct}%",
+            "breakdown": {"semanticMatch": sem_pct, "requiredSkillMatch": skill_pct},
+        })
+    return results

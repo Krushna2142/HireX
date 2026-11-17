@@ -18,7 +18,10 @@ export class InterviewRemindersService {
     await this.processReminderWindow(15, 'notify15Sent');
   }
 
-  private async processReminderWindow(minutes: number, flagColumn: 'notify30Sent' | 'notify15Sent') {
+  private async processReminderWindow(
+    minutes: number,
+    flagColumn: 'notify30Sent' | 'notify15Sent',
+  ) {
     const now = new Date();
     const until = new Date(now.getTime() + minutes * 60 * 1000);
 
@@ -42,7 +45,10 @@ export class InterviewRemindersService {
 
     for (const round of rounds) {
       const title = `Interview starts in ${minutes} minutes`;
-      const jobTitle = round.interview.job?.title ?? round.interview.jobTitle ?? 'your application';
+      const jobTitle =
+        round.interview.job?.title ??
+        round.interview.jobTitle ??
+        'your application';
       const message = `${round.roundType} interview for ${jobTitle} starts soon.`;
       const metadata = {
         roundId: round.id,
@@ -72,7 +78,9 @@ export class InterviewRemindersService {
 
       await this.alerts.createBulkAlerts(payloads);
 
-      this.logger.log(`[EMAIL:${minutes}m] to=${round.interview.candidate.email} subject="${title}"`);
+      this.logger.log(
+        `[EMAIL:${minutes}m] to=${round.interview.candidate.email} subject="${title}"`,
+      );
 
       await this.prisma.recruiterInterviewRound.update({
         where: { id: round.id },

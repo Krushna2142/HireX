@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
 // src/app.module.ts
 
@@ -7,9 +5,10 @@ import { Module, OnModuleInit, Logger } from '@nestjs/common'; // 1. Added OnMod
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 import configuration from './config/configuration';
-import { DatabaseModule } from './database/datbase.module';
+import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { ResumesModule } from './resumes/resumes.module';
 import { JobsModule } from './jobs/jobs.module';
@@ -26,6 +25,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { BullModule } from '@nestjs/bullmq';
 import { AtsModule } from './ats/ats.module';
+import { CampusModule } from './campus/campus.module';
+import { AssistantModule } from './assistant/assistant.module';
 import { getRedisConnection } from './queues/redis-connection';
 
 @Module({
@@ -36,6 +37,31 @@ import { getRedisConnection } from './queues/redis-connection';
     }),
 
     ScheduleModule.forRoot(),
+
+    // Global limits apply to EVERY route, so they must be generous for a dashboard
+    // that fires several calls per page. Strict per-endpoint limits (login, register,
+    // refresh, forgot/reset password) are set with @Throttle() in auth.controller.ts.
+    ThrottlerModule.forRootAsync({
+      useFactory: () => ({
+        throttlers: [
+          {
+            name: 'short',
+            ttl: Number(process.env.THROTTLE_SHORT_TTL ?? 60000), // 1 minute
+            limit: Number(process.env.THROTTLE_SHORT_LIMIT ?? 300),
+          },
+          {
+            name: 'medium',
+            ttl: Number(process.env.THROTTLE_MEDIUM_TTL ?? 900000), // 15 minutes
+            limit: Number(process.env.THROTTLE_MEDIUM_LIMIT ?? 3000),
+          },
+          {
+            name: 'long',
+            ttl: Number(process.env.THROTTLE_LONG_TTL ?? 3600000), // 1 hour
+            limit: Number(process.env.THROTTLE_LONG_LIMIT ?? 10000),
+          },
+        ],
+      }),
+    }),
 
     PrismaModule,
     DatabaseModule,
@@ -53,6 +79,8 @@ import { getRedisConnection } from './queues/redis-connection';
       connection: getRedisConnection(),
     }),
     AtsModule,
+    CampusModule, // Add CampusModule to the imports
+    AssistantModule,
   ],
 
   providers: [
@@ -63,6 +91,10 @@ import { getRedisConnection } from './queues/redis-connection';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })

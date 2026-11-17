@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Body,
   Controller,
@@ -9,7 +8,9 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { InterviewsService } from './interviews.service';
 import {
   AIAssistInput,
   ChatMessageInput,
@@ -31,15 +32,31 @@ type AuthenticatedRequest = {
 @Controller('interviews/room')
 @UseGuards(JwtAuthGuard)
 export class InterviewRoomsController {
-  constructor(private readonly rooms: InterviewRoomsService) {}
+  constructor(
+    private readonly rooms: InterviewRoomsService,
+    private readonly interviews: InterviewsService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /** Flat room metadata for the room UI (title, round, names, timer length). */
+  @Get(':roomId/info')
+  getInfo(@Param('roomId') roomId: string, @Req() req: AuthenticatedRequest) {
+    return this.interviews.getRoomInfo(roomId, req.user.id, req.user.role ?? '');
+  }
+
+  /** STUN/TURN servers for the browser's RTCPeerConnection. */
+  @Get('ice-servers/list')
+  getIceServers() {
+    return {
+      iceServers: this.config.get('webrtc.iceServers') ?? [
+        { urls: 'stun:stun.l.google.com:19302' },
+      ],
+    };
+  }
 
   @Get(':roomId/access')
   getAccess(@Param('roomId') roomId: string, @Req() req: AuthenticatedRequest) {
-    return this.rooms.validateRoomAccess(
-      roomId,
-      req.user.id,
-      req.user.role,
-    );
+    return this.rooms.validateRoomAccess(roomId, req.user.id, req.user.role);
   }
 
   @Get(':roomId/state')
@@ -67,10 +84,7 @@ export class InterviewRoomsController {
   }
 
   @Post(':roomId/leave')
-  leaveRoom(
-    @Param('roomId') roomId: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
+  leaveRoom(@Param('roomId') roomId: string, @Req() req: AuthenticatedRequest) {
     return this.rooms.leaveRoom(roomId, req.user.id, req.user.role);
   }
 
@@ -103,12 +117,7 @@ export class InterviewRoomsController {
     @Req() req: AuthenticatedRequest,
     @Body() body: ChatMessageInput,
   ) {
-    return this.rooms.sendChatMessage(
-      roomId,
-      req.user.id,
-      req.user.role,
-      body,
-    );
+    return this.rooms.sendChatMessage(roomId, req.user.id, req.user.role, body);
   }
 
   @Get(':roomId/scorecard')
@@ -125,12 +134,7 @@ export class InterviewRoomsController {
     @Req() req: AuthenticatedRequest,
     @Body() body: ScorecardInput,
   ) {
-    return this.rooms.saveScorecard(
-      roomId,
-      req.user.id,
-      req.user.role,
-      body,
-    );
+    return this.rooms.saveScorecard(roomId, req.user.id, req.user.role, body);
   }
 
   @Post(':roomId/ai/follow-up')

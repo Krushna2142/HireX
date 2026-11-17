@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const RAW_API_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 
 const API_URL = RAW_API_URL.replace(/\/$/, '');
 
@@ -13,14 +13,22 @@ export type NormalizedUserRole =
   | 'candidate'
   | 'recruiter'
   | 'admin'
-  | 'super_admin';
+  | 'super_admin'
+  | 'college_admin'
+  | 'tpo'
+  | 'placement_coordinator'
+  | 'interviewer';
 
 export type UserRole =
   | NormalizedUserRole
   | 'JOBSEEKER'
   | 'RECRUITER'
   | 'ADMIN'
-  | 'SUPER_ADMIN';
+  | 'SUPER_ADMIN'
+  | 'COLLEGE_ADMIN'
+  | 'TPO'
+  | 'PLACEMENT_COORDINATOR'
+  | 'INTERVIEWER';
 
 export type PublicAuthRole = 'candidate' | 'recruiter';
 
@@ -58,25 +66,17 @@ export type ResetPasswordPayload = {
 };
 
 export function normalizeRole(role: UserRole | string): NormalizedUserRole {
-  switch (role) {
-    case 'JOBSEEKER':
+  switch (String(role ?? '').toLowerCase()) {
+    case 'recruiter': return 'recruiter';
+    case 'admin': return 'admin';
+    case 'super_admin': return 'super_admin';
+    case 'college_admin': return 'college_admin';
+    case 'tpo': return 'tpo';
+    case 'placement_coordinator': return 'placement_coordinator';
+    case 'interviewer': return 'interviewer';
+    case 'jobseeker':
     case 'candidate':
-      return 'candidate';
-
-    case 'RECRUITER':
-    case 'recruiter':
-      return 'recruiter';
-
-    case 'ADMIN':
-    case 'admin':
-      return 'admin';
-
-    case 'SUPER_ADMIN':
-    case 'super_admin':
-      return 'super_admin';
-
-    default:
-      return 'candidate';
+    default: return 'candidate';
   }
 }
 
@@ -111,11 +111,13 @@ function normalizeAuthResponse(raw: any): AuthResponse {
 
 export function roleRedirectPath(role: UserRole | string): string {
   const normalized = normalizeRole(role);
-
-  if (normalized === 'admin' || normalized === 'super_admin') {
-    return '/admin/dashboard';
+  if (normalized === 'admin' || normalized === 'super_admin') return '/admin/dashboard';
+  if (normalized === 'college_admin' || normalized === 'tpo' || normalized === 'placement_coordinator') {
+    return '/placement';
   }
-
+  if (normalized === 'interviewer') {
+    return '/interviewer';
+  }
   return '/dashboard';
 }
 

@@ -15,7 +15,7 @@ import { LinkedInAdapter } from './adapters/linkedin.adapter';
 import { IndeedAdapter } from './adapters/indeed.adapter';
 
 import { AlertsModule } from '../alerts/alerts.module';
-import { DatabaseModule } from '../database/datbase.module';
+import { DatabaseModule } from '../database/database.module';
 import { OllamaModule } from '../ollama/ollama.module';
 import { AtsModule } from '../ats/ats.module';
 

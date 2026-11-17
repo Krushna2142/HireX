@@ -1,8 +1,10 @@
+// Update frontend/app/admin/dashboard/page.tsx
 'use client';
 
 import useSWR from 'swr';
 import api from '@/lib/axios';
 import { useAuth } from '@/components/providers/AuthProvider';
+import QueueMonitor from '@/components/admin/QueueMonitor';
 
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
 
@@ -58,32 +60,39 @@ export default function AdminDashboardPage() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
-          {cards.map((card) => (
-            <div key={card.key} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                {card.label}
-              </p>
-              <p className="mt-3 text-3xl font-semibold">
-                {data?.metrics?.[card.key] ?? 0}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
+        <>
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
+            {cards.map((card) => (
+              <div key={card.key} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                  {card.label}
+                </p>
+                <p className="mt-3 text-3xl font-semibold">
+                  {data?.metrics?.[card.key] ?? 0}
+                </p>
+              </div>
+            ))}
+          </div>
 
-      <div className="mt-8 grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Revenue</p>
-          <p className="mt-3 text-3xl font-semibold">{data?.metrics?.total_revenue ?? 0}</p>
-          <p className="mt-2 text-sm text-muted-foreground">Current implementation reports exact stored revenue records when available.</p>
-        </div>
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Subscriptions</p>
-          <p className="mt-3 text-3xl font-semibold">{data?.metrics?.active_subscriptions ?? 0}</p>
-          <p className="mt-2 text-sm text-muted-foreground">Single-admin controls are live through this dashboard route.</p>
-        </div>
-      </div>
+          {/* Queue Monitor Section */}
+          <div className="mt-8">
+            <QueueMonitor />
+          </div>
+
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Revenue</p>
+              <p className="mt-3 text-3xl font-semibold">{data?.metrics?.total_revenue ?? 0}</p>
+              <p className="mt-2 text-sm text-muted-foreground">Current implementation reports exact stored revenue records when available.</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Subscriptions</p>
+              <p className="mt-3 text-3xl font-semibold">{data?.metrics?.active_subscriptions ?? 0}</p>
+              <p className="mt-2 text-sm text-muted-foreground">Single-admin controls are live through this dashboard route.</p>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

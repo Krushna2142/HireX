@@ -129,7 +129,7 @@ export class JobsService {
     const limit = filters.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = [`j.status = 'PUBLISHED'`];
+       const conditions: string[] = [`j.status = 'PUBLISHED'`, `j.channel = 'GENERAL'`];
     const params: unknown[] = [];
     let idx = 1;
 
@@ -659,8 +659,8 @@ Return JSON only.`,
     resumeId: string,
     coverLetter?: string,
   ): Promise<any> {
-    const { rows: jobRows } = await this.db.query<JobRow>(
-      `SELECT id, title, recruiter_user_id, source
+       const { rows: jobRows } = await this.db.query<JobRow>(
+      `SELECT id, title, recruiter_user_id, source, channel
        FROM jobs
        WHERE id = $1
          AND status = 'PUBLISHED'`,
@@ -673,9 +673,9 @@ Return JSON only.`,
 
     const job = jobRows[0];
 
-    if (job.source !== 'internal') {
+    if ((job as { channel?: string }).channel === 'CAMPUS') {
       throw new ForbiddenException(
-        'This is an external job — please apply via the provided URL',
+        'This is a campus drive. Apply from the Campus Hiring section.',
       );
     }
 

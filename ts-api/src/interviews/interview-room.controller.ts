@@ -1,4 +1,11 @@
-import { Controller, Get, Param, Req, UseGuards, ForbiddenException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Req,
+  UseGuards,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InterviewsService } from './interviews.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -14,7 +21,8 @@ export class InterviewRoomController {
       req.user.id,
       req.user.role,
     );
-    if (!access.allowed) throw new ForbiddenException('Not allowed to join this room');
+    if (!access.allowed)
+      throw new ForbiddenException('Not allowed to join this room');
     return access;
   }
 }

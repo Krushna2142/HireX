@@ -1,7 +1,34 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   HireX · Global Stylesheet
+   ⚠️ ALL @import RULES MUST STAY AT THE TOP.
+   Tailwind expands `@import "tailwindcss"` into thousands of rules, so any
+   @import placed after it breaks Lightning CSS / Turbopack:
+   "@import rules must precede all rules aside from @charset and @layer".
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 1 ─ Fonts: Sora (app) · Bricolage Grotesque + Plus Jakarta Sans + JetBrains
+        Mono (landing page & canvas reels). MUST be the first statement. */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=JetBrains+Mono:wght@400..700&family=Plus+Jakarta+Sans:wght@400..800&family=Sora:wght@300..800&display=swap');
+
+/* 2 ─ Tailwind v4 */
 @import "tailwindcss";
 
+/* 3 ─ Class-based dark mode (next-themes uses attribute="class") */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 4 ─ Tailwind font tokens so `font-sans` / `font-display` / `font-mono`
+        utilities resolve to the real loaded families. */
+@theme {
+  --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque", "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Design tokens
+   ═══════════════════════════════════════════════════════════════════════════ */
 :root {
-  /* Light theme */
+  /* Surfaces (light) */
   --surface-0: #f7f9fc;
   --surface-1: #ffffff;
   --surface-2: #f1f5fb;
@@ -9,31 +36,266 @@
   --text-muted: #475569;
   --border-0: rgba(3, 23, 60, 0.12);
   --border-1: rgba(3, 23, 60, 0.18);
-  --primary: #0EA5E9; /* Sky Blue 500 */
-  --primary-hover: #0284C7; /* Sky Blue 600 */
-  --accent: #0EA5E9;
+
+  /* Brand */
+  --primary: #0ea5e9;
+  --primary-hover: #0284c7;
+  --accent: #0ea5e9;
+  --hx-sky: #38bdf8;
+  --hx-violet: #7c3aed;
+  --hx-purple: #a78bfa;
+  --hx-pink: #f472b6;
+  --hx-green: #34d399;
+  --hx-amber: #fbbf24;
+  --hx-red: #f87171;
+
+  /* Signature scrollbar tokens */
+  --hx-scroll-size: 10px;
+  --hx-scroll-radius: 999px;
+  --hx-scroll-track: rgba(148, 163, 184, 0.07);
+  --hx-scroll-track-edge: rgba(148, 163, 184, 0.12);
+  --hx-scroll-thumb-a: #38bdf8;
+  --hx-scroll-thumb-b: #7c3aed;
+  --hx-scroll-thumb-c: #f472b6;
+  --hx-scroll-glow: rgba(56, 189, 248, 0.4);
+  --hx-scroll-glow-strong: rgba(167, 139, 250, 0.55);
+
+  /* Landing-page typography (scoped usage only — does NOT change app base) */
+  --font-landing-sans: "Plus Jakarta Sans", "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-sans-landing: var(--font-landing-sans); /* alias */
+  --font-mono-landing: var(--font-mono);
 }
 
 .dark {
-  --surface-0: #070B14; /* Deep Blue-Black */
-  --surface-1: #0F172A; /* Slate 900 */
-  --surface-2: #1E293B; /* Slate 800 */
-  --text-0: #F8FAFC;
-  --text-muted: #94A3B8;
-  --border-0: rgba(14, 165, 233, 0.15); /* Blue border */
-  --border-1: rgba(14, 165, 233, 0.30);
-  --primary: #0EA5E9;
-  --primary-hover: #38BDF8;
+  --surface-0: #070b14;
+  --surface-1: #0f172a;
+  --surface-2: #1e293b;
+  --text-0: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-0: rgba(14, 165, 233, 0.15);
+  --border-1: rgba(14, 165, 233, 0.3);
+  --primary: #0ea5e9;
+  --primary-hover: #38bdf8;
+
+  --hx-scroll-track: rgba(148, 163, 184, 0.06);
+  --hx-scroll-track-edge: rgba(148, 163, 184, 0.1);
 }
 
-html, body {
+/* ═══════════════════════════════════════════════════════════════════════════
+   Base
+   NOTE: no `#04070D` here — the landing page scopes its own background with
+   `bg-[#04070D]` on its wrapper so dashboards keep their own surfaces.
+   ═══════════════════════════════════════════════════════════════════════════ */
+html,
+body {
   min-height: 100%;
   background-color: var(--surface-0);
   color: var(--text-0);
-  font-family: 'Sora', sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Update button styles to use blue */
+html {
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.32);
+  color: #f8fafc;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.65);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HireX Signature Scrollbar System
+   One unified scrollbar language for every page, panel, drawer, modal and
+   overflow container. The !important layer intentionally wins over legacy
+   per-component scrollbar rules so the whole product stays consistent.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Firefox */
+html,
+body,
+* {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--hx-scroll-thumb-b) var(--hx-scroll-track) !important;
+}
+
+/* WebKit / Blink — track */
+*::-webkit-scrollbar {
+  width: var(--hx-scroll-size) !important;
+  height: var(--hx-scroll-size) !important;
+  background: transparent !important;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--hx-scroll-track) !important;
+  border-radius: var(--hx-scroll-radius) !important;
+  box-shadow: inset 0 0 0 1px var(--hx-scroll-track-edge) !important;
+}
+
+*::-webkit-scrollbar-track:vertical {
+  background: linear-gradient(
+    180deg,
+    rgba(56, 189, 248, 0.05),
+    rgba(124, 58, 237, 0.05) 50%,
+    rgba(244, 114, 182, 0.05)
+  ) !important;
+}
+
+*::-webkit-scrollbar-track:horizontal {
+  background: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.05),
+    rgba(124, 58, 237, 0.05) 50%,
+    rgba(244, 114, 182, 0.05)
+  ) !important;
+}
+
+/* WebKit / Blink — thumb */
+*::-webkit-scrollbar-thumb {
+  border-radius: var(--hx-scroll-radius) !important;
+  border: 2px solid transparent !important;
+  background-clip: padding-box !important;
+  background-image: linear-gradient(
+    180deg,
+    var(--hx-scroll-thumb-a),
+    var(--hx-scroll-thumb-b) 55%,
+    var(--hx-scroll-thumb-c)
+  ) !important;
+  background-color: transparent !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 0 10px rgba(56, 189, 248, 0.22) !important;
+  transition: box-shadow 0.2s ease, filter 0.2s ease !important;
+}
+
+*::-webkit-scrollbar-thumb:horizontal {
+  background-image: linear-gradient(
+    90deg,
+    var(--hx-scroll-thumb-a),
+    var(--hx-scroll-thumb-b) 55%,
+    var(--hx-scroll-thumb-c)
+  ) !important;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  filter: brightness(1.18) saturate(1.25) !important;
+  background-size: 100% 240% !important;
+  animation: hx-scroll-sheen 1.4s linear infinite !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    0 0 16px var(--hx-scroll-glow),
+    0 0 30px rgba(124, 58, 237, 0.25) !important;
+}
+
+*::-webkit-scrollbar-thumb:active {
+  filter: brightness(1.32) saturate(1.4) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 0 20px var(--hx-scroll-glow-strong),
+    0 0 42px rgba(244, 114, 182, 0.3) !important;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+*::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+@keyframes hx-scroll-sheen {
+  0% {
+    background-position: 50% 0%;
+  }
+  100% {
+    background-position: 50% 240%;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Branded range inputs (ATS score sliders, video scrubbers, filters)
+   ═══════════════════════════════════════════════════════════════════════════ */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.35),
+    rgba(124, 58, 237, 0.35),
+    rgba(244, 114, 182, 0.35)
+  );
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: linear-gradient(135deg, var(--hx-sky), var(--hx-violet));
+  box-shadow:
+    0 0 0 4px rgba(56, 189, 248, 0.15),
+    0 4px 14px rgba(124, 58, 237, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+  box-shadow:
+    0 0 0 6px rgba(56, 189, 248, 0.2),
+    0 6px 20px rgba(124, 58, 237, 0.6);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: linear-gradient(135deg, var(--hx-sky), var(--hx-violet));
+  box-shadow:
+    0 0 0 4px rgba(56, 189, 248, 0.15),
+    0 4px 14px rgba(124, 58, 237, 0.45);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.35),
+    rgba(124, 58, 237, 0.35),
+    rgba(244, 114, 182, 0.35)
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Buttons · Cards · Nav · Inputs
+   ═══════════════════════════════════════════════════════════════════════════ */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -44,20 +306,23 @@ html, body {
   color: #ffffff;
   background: linear-gradient(90deg, var(--primary), var(--primary-hover));
   box-shadow: 0 10px 20px rgba(14, 165, 233, 0.2);
-  border: 1px solid rgba(255,255,255,0.06);
-  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    filter 160ms ease;
 }
 
-.btn:hover { 
-  transform: translateY(-2px); 
-  filter: brightness(1.1); 
+.btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
 }
 
 .btn-secondary {
   background: transparent;
   color: var(--text-0);
   border: 1px solid var(--border-0);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .btn-secondary:hover {
@@ -65,25 +330,167 @@ html, body {
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
 }
 
-/* Update card hover to use blue glow */
 .card:hover {
   transform: translateY(-1px);
   border-color: var(--border-1);
   box-shadow:
-    0 18px 60px rgba(0,0,0,0.35),
+    0 18px 60px rgba(0, 0, 0, 0.35),
     0 0 20px rgba(14, 165, 233, 0.1),
     0 0 30px rgba(14, 165, 233, 0.05);
 }
 
-/* Update nav link hover */
-.nav-link:hover { color: var(--primary); }
+.nav-link:hover {
+  color: var(--primary);
+}
+
 .nav-link::after {
   background: linear-gradient(90deg, var(--primary), var(--primary-hover));
 }
 
-/* Update input focus */
-input:focus, textarea:focus, select:focus {
+input:focus,
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.22);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Landing page (Motion Lab) — typography utilities + scroll spine
+   Used by: HeroSection, ScrollStoryChapters, CampusHiringShowcase,
+            ModuleMotionVideo, SolutionsAndWorkflow, FaqAndFinalCta
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Display headings on the landing page */
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
+
+/* Monospaced numerals for KPI / score / timeline readouts */
+.font-mono-tabular {
+  font-family: var(--font-mono-landing);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fallbacks (Tailwind also ships these utilities) */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+/* Flowing luminance stream inside the lit portion of ModuleScrollSpine */
+@keyframes hirex-spine-flow {
+  0% {
+    transform: translateY(-240px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.hirex-spine-stream {
+  height: calc(100% + 240px);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.95) 0px,
+    rgba(34, 211, 238, 0.95) 20px,
+    rgba(167, 139, 250, 0.45) 56px,
+    rgba(34, 211, 238, 0.08) 96px,
+    rgba(34, 211, 238, 0.08) 120px
+  );
+  background-size: 100% 240px;
+  animation: hirex-spine-flow 2s linear infinite;
+  will-change: transform;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Mobile layer
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Floating sidebar opener rendered by Sidebar on <900px */
+.hx-fab {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 12px;
+  z-index: 95;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(11, 16, 32, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #e2e8f0;
+  font-size: 18px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* Prevent iOS Safari auto-zoom on input focus */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Interview-room side panels become overlay sheets on phones */
+@media (max-width: 760px) {
+  [data-panel="side"] {
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    right: 0 !important;
+    left: auto !important;
+    width: min(360px, 94vw) !important;
+    height: 100% !important;
+    z-index: 70 !important;
+    box-shadow: -24px 0 60px rgba(0, 0, 0, 0.5);
+  }
+
+  .hx-table-wrap,
+  [data-table-wrap] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Reduced motion — accessibility
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    animation: none !important;
+  }
+
+  .hirex-spine-stream {
+    animation: none !important;
+  }
+
+  .btn,
+  .card,
+  input[type="range"]::-webkit-slider-thumb {
+    transition: none;
+  }
 }

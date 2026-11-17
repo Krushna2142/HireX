@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -42,10 +43,25 @@ const RESULT_TO_STAGE: Partial<Record<string, StageKey>> = {
 
 @Injectable()
 export class RecruiterInterviewsService {
+  private readonly logger = new Logger(RecruiterInterviewsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly alerts: AlertsService,
   ) {}
+
+  /** Audit logging must never abort scheduling / stage changes. */
+  private async safeEventLog(
+    args: Prisma.InterviewEventLogCreateArgs,
+  ): Promise<void> {
+    try {
+      await this.prisma.interviewEventLog.create(args);
+    } catch (err) {
+      this.logger.warn(
+        `interviewEventLog write skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   async initInterview(applicationId: string, recruiterId: string) {
     const app = await this.prisma.jobApplication.findFirst({
@@ -128,46 +144,58 @@ export class RecruiterInterviewsService {
     const roomSlug = `jc-${interviewId}-r${roundNumber}`;
     const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/interviews/room/${roomSlug}`;
 
-    const room = await this.prisma.interviewRoom.create({
-      data: {
-        interviewId,
-        roomName: `Round ${roundNumber}`,
-        provider: 'internal',
-        providerRoomId: roomSlug,
-        maxParticipants: 4,
-        mode: payload.mode ?? 'video',
-        hostUserId: recruiterId,
-        joinUrl,
-      },
+    // Room + round are created atomically so a failure can never leave an orphan
+    // room/round behind (which previously made retries create round 2, 3, ...).
+    const { room, round } = await this.prisma.$transaction(async (tx) => {
+      const room = await tx.interviewRoom.create({
+        data: {
+          interviewId,
+          roomName: `Round ${roundNumber}`,
+          provider: 'internal',
+          providerRoomId: roomSlug,
+          maxParticipants: 4,
+          mode: payload.mode ?? 'video',
+          hostUserId: recruiterId,
+          joinUrl,
+        },
+      });
+
+      const round = await tx.recruiterInterviewRound.create({
+        data: {
+          interviewId,
+          roundNumber,
+          roundType: payload.roundType,
+          scheduledAt,
+          durationMins: payload.durationMins ?? 45,
+          mode: payload.mode ?? 'video',
+          interviewerId: payload.interviewerId ?? recruiterId,
+          meetingProvider: 'internal',
+          meetingRoomId: room.id,
+          meetingJoinUrl: joinUrl,
+          result: InterviewRoundResult.PENDING,
+        },
+      });
+      return { room, round };
     });
 
-    const round = await this.prisma.recruiterInterviewRound.create({
-      data: {
-        interviewId,
-        roundNumber,
-        roundType: payload.roundType,
-        scheduledAt,
-        durationMins: payload.durationMins ?? 45,
-        mode: payload.mode ?? 'video',
-        interviewerId: payload.interviewerId ?? recruiterId,
-        meetingProvider: 'internal',
-        meetingRoomId: room.id,
-        meetingJoinUrl: joinUrl,
-        result: InterviewRoundResult.PENDING,
-      },
-    });
-
-    await this.updateStage(interviewId, recruiterId, 'INTERVIEW_SCHEDULED', true);
+    await this.updateStage(
+      interviewId,
+      recruiterId,
+      'INTERVIEW_SCHEDULED',
+      true,
+    );
 
     await this.prisma.interview.update({
       where: { id: interviewId },
       data: {
         scheduledStartAt: scheduledAt,
-        scheduledEndAt: new Date(scheduledAt.getTime() + (round.durationMins ?? 45) * 60 * 1000),
+        scheduledEndAt: new Date(
+          scheduledAt.getTime() + (round.durationMins ?? 45) * 60 * 1000,
+        ),
       },
     });
 
-    await this.prisma.interviewEventLog.create({
+    await this.safeEventLog({
       data: {
         interviewId,
         actorUserId: recruiterId,
@@ -186,7 +214,8 @@ export class RecruiterInterviewsService {
 
     const when = scheduledAt.toLocaleString();
     const candidateName = interview.candidate.fullName ?? 'candidate';
-    const jobTitle = interview.job?.title ?? interview.jobTitle ?? 'your application';
+    const jobTitle =
+      interview.job?.title ?? interview.jobTitle ?? 'your application';
 
     await this.alerts.createBulkAlerts([
       {
@@ -194,14 +223,26 @@ export class RecruiterInterviewsService {
         type: 'interview_scheduled',
         title: 'Interview round scheduled',
         message: `${payload.roundType} round scheduled for ${jobTitle} on ${when}.`,
-        metadata: { interviewId, roundId: round.id, roundNumber, joinUrl, scheduledAt: payload.scheduledAt },
+        metadata: {
+          interviewId,
+          roundId: round.id,
+          roundNumber,
+          joinUrl,
+          scheduledAt: payload.scheduledAt,
+        },
       },
       {
         userId: recruiterId,
         type: 'interview_scheduled',
         title: 'Interview round scheduled',
         message: `${candidateName} is scheduled for round ${roundNumber} (${payload.roundType}) on ${when}.`,
-        metadata: { interviewId, roundId: round.id, roundNumber, joinUrl, scheduledAt: payload.scheduledAt },
+        metadata: {
+          interviewId,
+          roundId: round.id,
+          roundNumber,
+          joinUrl,
+          scheduledAt: payload.scheduledAt,
+        },
       },
     ]);
 
@@ -232,7 +273,9 @@ export class RecruiterInterviewsService {
       where: { id: interviewId },
       data: {
         status: this.stageToInterviewStatus(stage),
-        completedAt: this.isTerminalStage(stage) ? new Date() : interview.completedAt,
+        completedAt: this.isTerminalStage(stage)
+          ? new Date()
+          : interview.completedAt,
         metadata: this.withStage(interview.metadata, stage),
       },
     });
@@ -263,7 +306,7 @@ export class RecruiterInterviewsService {
       });
     }
 
-    await this.prisma.interviewEventLog.create({
+    await this.safeEventLog({
       data: {
         interviewId,
         actorUserId,
@@ -272,7 +315,8 @@ export class RecruiterInterviewsService {
       },
     });
 
-    const jobTitle = interview.job?.title ?? interview.jobTitle ?? 'your application';
+    const jobTitle =
+      interview.job?.title ?? interview.jobTitle ?? 'your application';
     const stageMessage = this.stageMessage(stage, jobTitle);
 
     const payloads = [
@@ -298,7 +342,10 @@ export class RecruiterInterviewsService {
     await this.alerts.createBulkAlerts(payloads);
 
     if (stage === 'REJECTED' && interview.applicationId) {
-      await this.garbageRejectedResume(interview.candidateUserId, interview.applicationId);
+      await this.garbageRejectedResume(
+        interview.candidateUserId,
+        interview.applicationId,
+      );
     }
 
     return updated;
@@ -332,7 +379,7 @@ export class RecruiterInterviewsService {
       },
     });
 
-    await this.prisma.interviewEventLog.create({
+    await this.safeEventLog({
       data: {
         interviewId: round.interviewId,
         actorUserId: recruiterId,
@@ -346,7 +393,10 @@ export class RecruiterInterviewsService {
       await this.updateStage(round.interviewId, recruiterId, nextStage, true);
     }
 
-    const title = round.interview.job?.title ?? round.interview.jobTitle ?? 'your interview';
+    const title =
+      round.interview.job?.title ??
+      round.interview.jobTitle ??
+      'your interview';
     const resultLabel = payload.result.replaceAll('_', ' ');
     const payloads = [
       {
@@ -354,7 +404,12 @@ export class RecruiterInterviewsService {
         type: 'interview_round_result',
         title: 'Interview round updated',
         message: `Round ${round.roundNumber} for ${title} is now marked ${resultLabel}.`,
-        metadata: { roundId, roundNumber: round.roundNumber, interviewId: round.interviewId, result: payload.result },
+        metadata: {
+          roundId,
+          roundNumber: round.roundNumber,
+          interviewId: round.interviewId,
+          result: payload.result,
+        },
       },
     ];
 
@@ -364,7 +419,12 @@ export class RecruiterInterviewsService {
         type: 'interview_round_result',
         title: 'Interview round updated',
         message: `Round ${round.roundNumber} for ${title} is now marked ${resultLabel}.`,
-        metadata: { roundId, roundNumber: round.roundNumber, interviewId: round.interviewId, result: payload.result },
+        metadata: {
+          roundId,
+          roundNumber: round.roundNumber,
+          interviewId: round.interviewId,
+          result: payload.result,
+        },
       });
     }
 
@@ -424,7 +484,10 @@ export class RecruiterInterviewsService {
 
     return rows
       .map((row) => this.toInterviewSummary(row))
-      .filter((row) => opts.statusCode === undefined || row.status_code === opts.statusCode);
+      .filter(
+        (row) =>
+          opts.statusCode === undefined || row.status_code === opts.statusCode,
+      );
   }
 
   async getInterview(interviewId: string, userId: string, role: string) {
@@ -454,7 +517,10 @@ export class RecruiterInterviewsService {
     };
   }
 
-  private async garbageRejectedResume(candidateId: string, applicationId: string) {
+  private async garbageRejectedResume(
+    candidateId: string,
+    applicationId: string,
+  ) {
     const app = await this.prisma.jobApplication.findUnique({
       where: { id: applicationId },
       select: { resumeId: true },
@@ -504,23 +570,31 @@ export class RecruiterInterviewsService {
     };
   }
 
-  private withStage(metadata: Prisma.JsonValue | Record<string, unknown>, stage: string): Prisma.InputJsonObject {
+  private withStage(
+    metadata: Prisma.JsonValue | Record<string, unknown>,
+    stage: string,
+  ): Prisma.InputJsonObject {
     return {
       ...this.metadataRecord(metadata),
       currentStage: stage,
       statusCode: STAGE_TO_CODE[stage],
-      finalStatus: this.isTerminalStage(stage) ? stage : this.metadataRecord(metadata).finalStatus ?? null,
+      finalStatus: this.isTerminalStage(stage)
+        ? stage
+        : (this.metadataRecord(metadata).finalStatus ?? null),
     };
   }
 
   private currentStage(metadata: Prisma.JsonValue): StageKey {
     const record = this.metadataRecord(metadata);
-    return typeof record.currentStage === 'string' && record.currentStage in STAGE_TO_CODE
-      ? (record.currentStage as StageKey)
+    return typeof record.currentStage === 'string' &&
+      record.currentStage in STAGE_TO_CODE
+      ? record.currentStage
       : 'APPLIED';
   }
 
-  private metadataRecord(value: Prisma.JsonValue | Record<string, unknown> | null | undefined): Record<string, any> {
+  private metadataRecord(
+    value: Prisma.JsonValue | Record<string, unknown> | null | undefined,
+  ): Record<string, any> {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, any>)
       : {};
@@ -529,7 +603,8 @@ export class RecruiterInterviewsService {
   private stageToInterviewStatus(stage: StageKey): InterviewStatus {
     if (stage === 'INTERVIEW_IN_PROGRESS') return InterviewStatus.IN_PROGRESS;
     if (this.isTerminalStage(stage)) return InterviewStatus.COMPLETED;
-    if (stage === 'ON_HOLD' || stage === 'WITHDRAWN') return InterviewStatus.CANCELLED;
+    if (stage === 'ON_HOLD' || stage === 'WITHDRAWN')
+      return InterviewStatus.CANCELLED;
     return InterviewStatus.SCHEDULED;
   }
 
@@ -567,7 +642,12 @@ export class RecruiterInterviewsService {
   }
 
   private isTerminalStage(stage: string): boolean {
-    return ['INTERVIEW_PASSED', 'INTERVIEW_FAILED', 'HIRED', 'REJECTED'].includes(stage);
+    return [
+      'INTERVIEW_PASSED',
+      'INTERVIEW_FAILED',
+      'HIRED',
+      'REJECTED',
+    ].includes(stage);
   }
 
   private toRoundResult(result: string): InterviewRoundResult {

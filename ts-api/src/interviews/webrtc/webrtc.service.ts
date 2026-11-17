@@ -210,7 +210,9 @@ export class WebRTCService {
         this.logger.debug(`[WebRTC:${peerId}] Created and set local offer`);
         // Offer will be sent via Socket.IO by the gateway
       } catch (err) {
-        this.logger.error(`[WebRTC:${peerId}] Negotiation error: ${String(err)}`);
+        this.logger.error(
+          `[WebRTC:${peerId}] Negotiation error: ${String(err)}`,
+        );
       } finally {
         state.makingOffer = false;
       }

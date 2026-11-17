@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -49,7 +50,12 @@ type RoundResultInput = {
 
 type RoomAccessResult = {
   allowed: boolean;
-  reason?: 'invalid_room' | 'room_not_found' | 'forbidden' | 'room_link_expired';
+  reason?:
+    | 'invalid_room'
+    | 'room_not_found'
+    | 'forbidden'
+    | 'room_not_open'
+    | 'room_link_expired';
   roomId?: string;
   interviewId?: string;
   roundId?: string;
@@ -59,6 +65,8 @@ type RoomAccessResult = {
   interviewStage?: string;
   scheduledAt?: string | null;
   expiresAt?: string | null;
+  /** Set when reason === 'room_not_open': when the room becomes joinable. */
+  opensAt?: string;
 };
 
 const STAGE_TO_CODE: Record<string, number> = {
@@ -79,6 +87,8 @@ const STAGE_TO_CODE: Record<string, number> = {
 
 @Injectable()
 export class InterviewsService {
+  private readonly logger = new Logger(InterviewsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async startSession(
@@ -88,7 +98,8 @@ export class InterviewsService {
     sessionType = 'technical',
     jobId?: string,
   ) {
-    if (!jobTitle?.trim()) throw new BadRequestException('jobTitle is required');
+    if (!jobTitle?.trim())
+      throw new BadRequestException('jobTitle is required');
 
     const session = await this.prisma.interview.create({
       data: {
@@ -115,28 +126,33 @@ export class InterviewsService {
         question: `Tell me about yourself and your fit for ${jobTitle}.`,
         category: 'behavioral',
         difficulty: 'easy',
-        idealAnswer: 'Structured summary of experience, strengths, and relevance to role.',
+        idealAnswer:
+          'Structured summary of experience, strengths, and relevance to role.',
       },
       {
         questionNumber: 2,
         question: `Explain a challenging problem you solved in your recent project.`,
         category: 'problem_solving',
         difficulty: 'medium',
-        idealAnswer: 'Context, challenge, action, result with measurable impact.',
+        idealAnswer:
+          'Context, challenge, action, result with measurable impact.',
       },
       {
         questionNumber: 3,
         question: 'How do you ensure quality while delivering under deadlines?',
         category: 'execution',
         difficulty: 'medium',
-        idealAnswer: 'Testing, prioritization, tradeoff communication, risk mitigation.',
+        idealAnswer:
+          'Testing, prioritization, tradeoff communication, risk mitigation.',
       },
       {
         questionNumber: 4,
-        question: 'Describe your approach to collaboration with cross-functional teams.',
+        question:
+          'Describe your approach to collaboration with cross-functional teams.',
         category: 'communication',
         difficulty: 'easy',
-        idealAnswer: 'Clear communication, ownership, conflict handling, alignment.',
+        idealAnswer:
+          'Clear communication, ownership, conflict handling, alignment.',
       },
       {
         questionNumber: 5,
@@ -162,7 +178,9 @@ export class InterviewsService {
     userId: string,
     answer: string,
     timeTakenSecs: number,
-  ): Promise<InterviewQuestionRow & { evaluation: AnswerEvaluation; idealAnswer: string }> {
+  ): Promise<
+    InterviewQuestionRow & { evaluation: AnswerEvaluation; idealAnswer: string }
+  > {
     const q = await this.prisma.interviewQuestion.findUnique({
       where: { id: questionId },
       include: { interview: true },
@@ -206,7 +224,8 @@ export class InterviewsService {
       where: { id: sessionId },
     });
     if (!session) throw new NotFoundException('Session not found');
-    if (session.candidateUserId !== userId) throw new ForbiddenException('Not allowed');
+    if (session.candidateUserId !== userId)
+      throw new ForbiddenException('Not allowed');
 
     const qs = await this.prisma.interviewQuestion.findMany({
       where: { interviewId: sessionId },
@@ -217,7 +236,8 @@ export class InterviewsService {
       scored.length > 0
         ? Number(
             (
-              scored.reduce((sum, x) => sum + Number(x.score ?? 0), 0) / scored.length
+              scored.reduce((sum, x) => sum + Number(x.score ?? 0), 0) /
+              scored.length
             ).toFixed(2),
           )
         : null;
@@ -254,7 +274,8 @@ export class InterviewsService {
       where: { id: sessionId },
     });
     if (!session) throw new NotFoundException('Session not found');
-    if (session.candidateUserId !== userId) throw new ForbiddenException('Not allowed');
+    if (session.candidateUserId !== userId)
+      throw new ForbiddenException('Not allowed');
 
     const questions = await this.prisma.interviewQuestion.findMany({
       where: { interviewId: sessionId },
@@ -286,7 +307,11 @@ export class InterviewsService {
 
     return rows
       .map((row) => this.toInterviewSummary(row))
-      .filter((row) => params?.statusCode === undefined || row.status_code === params.statusCode);
+      .filter(
+        (row) =>
+          params?.statusCode === undefined ||
+          row.status_code === params.statusCode,
+      );
   }
 
   async getRecruiterInterview(recruiterId: string, interviewId: string) {
@@ -309,14 +334,19 @@ export class InterviewsService {
     };
   }
 
-  async scheduleRound(recruiterId: string, interviewId: string, payload: ScheduleRoundInput) {
+  async scheduleRound(
+    recruiterId: string,
+    interviewId: string,
+    payload: ScheduleRoundInput,
+  ) {
     const interview = await this.prisma.interview.findFirst({
       where: { id: interviewId, recruiterUserId: recruiterId },
     });
     if (!interview) throw new NotFoundException('Interview not found');
 
     const scheduledAt = new Date(payload.scheduledAt);
-    if (Number.isNaN(scheduledAt.getTime())) throw new BadRequestException('Invalid scheduledAt');
+    if (Number.isNaN(scheduledAt.getTime()))
+      throw new BadRequestException('Invalid scheduledAt');
 
     const lastRound = await this.prisma.recruiterInterviewRound.findFirst({
       where: { interviewId },
@@ -361,7 +391,9 @@ export class InterviewsService {
       data: {
         status: InterviewStatus.SCHEDULED,
         scheduledStartAt: scheduledAt,
-        scheduledEndAt: new Date(scheduledAt.getTime() + (round.durationMins ?? 45) * 60 * 1000),
+        scheduledEndAt: new Date(
+          scheduledAt.getTime() + (round.durationMins ?? 45) * 60 * 1000,
+        ),
         metadata: this.withStage(interview.metadata, 'INTERVIEW_SCHEDULED'),
       },
     });
@@ -371,7 +403,12 @@ export class InterviewsService {
         interviewId,
         actorUserId: recruiterId,
         eventType: 'round_scheduled',
-        payload: { roundId: round.id, roundNumber: round.roundNumber, roomId: room.id, joinUrl },
+        payload: {
+          roundId: round.id,
+          roundNumber: round.roundNumber,
+          roomId: room.id,
+          joinUrl,
+        },
       },
     });
 
@@ -383,13 +420,16 @@ export class InterviewsService {
       where: { id: interviewId, recruiterUserId: recruiterId },
     });
     if (!interview) throw new NotFoundException('Interview not found');
-    if (!(stage in STAGE_TO_CODE)) throw new BadRequestException('Invalid stage');
+    if (!(stage in STAGE_TO_CODE))
+      throw new BadRequestException('Invalid stage');
 
     const updated = await this.prisma.interview.update({
       where: { id: interviewId },
       data: {
         status: this.stageToInterviewStatus(stage),
-        completedAt: this.isTerminalStage(stage) ? new Date() : interview.completedAt,
+        completedAt: this.isTerminalStage(stage)
+          ? new Date()
+          : interview.completedAt,
         metadata: this.withStage(interview.metadata, stage),
       },
     });
@@ -409,7 +449,11 @@ export class InterviewsService {
     return updated;
   }
 
-  async submitRoundResult(recruiterId: string, roundId: string, payload: RoundResultInput) {
+  async submitRoundResult(
+    recruiterId: string,
+    roundId: string,
+    payload: RoundResultInput,
+  ) {
     const round = await this.prisma.recruiterInterviewRound.findUnique({
       where: { id: roundId },
       include: { interview: true },
@@ -451,14 +495,21 @@ export class InterviewsService {
         interviewId: round.interviewId,
         actorUserId: recruiterId,
         eventType: 'round_result_submitted',
-        payload: { roundId, result: payload.result, score: payload.score ?? null },
+        payload: {
+          roundId,
+          result: payload.result,
+          score: payload.score ?? null,
+        },
       },
     });
 
     return updatedRound;
   }
 
-  async listCandidateInterviews(candidateId: string, params?: { statusCode?: number; limit?: number }) {
+  async listCandidateInterviews(
+    candidateId: string,
+    params?: { statusCode?: number; limit?: number },
+  ) {
     const rows = await this.prisma.interview.findMany({
       where: {
         candidateUserId: candidateId,
@@ -471,7 +522,11 @@ export class InterviewsService {
 
     return rows
       .map((row) => this.toInterviewSummary(row))
-      .filter((row) => params?.statusCode === undefined || row.status_code === params.statusCode);
+      .filter(
+        (row) =>
+          params?.statusCode === undefined ||
+          row.status_code === params.statusCode,
+      );
   }
 
   async getCandidateInterview(candidateId: string, interviewId: string) {
@@ -496,7 +551,11 @@ export class InterviewsService {
     return this.validateRoomAccessWithContext(roomId, userId, role);
   }
 
-  async validateRoomAccessWithContext(roomId: string, userId: string, role: string): Promise<RoomAccessResult> {
+  async validateRoomAccessWithContext(
+    roomId: string,
+    userId: string,
+    role: string,
+  ): Promise<RoomAccessResult> {
     const m = /^jc-([a-f0-9-]+)-r(\d+)$/i.exec(roomId);
     if (!m) return { allowed: false, reason: 'invalid_room' };
 
@@ -510,14 +569,17 @@ export class InterviewsService {
       }),
     ]);
 
-    if (!interview || !round) return { allowed: false, reason: 'room_not_found' };
+    if (!interview || !round)
+      return { allowed: false, reason: 'room_not_found' };
 
     const normalizedRole = role.toLowerCase();
     const isCandidate =
       ['candidate', 'jobseeker', 'job_seeker'].includes(normalizedRole) &&
       interview.candidateUserId === userId;
-    const isRecruiter = normalizedRole === 'recruiter' && interview.recruiterUserId === userId;
-    if (!isCandidate && !isRecruiter) return { allowed: false, reason: 'forbidden' };
+    const isRecruiter =
+      normalizedRole === 'recruiter' && interview.recruiterUserId === userId;
+    if (!isCandidate && !isRecruiter)
+      return { allowed: false, reason: 'forbidden' };
 
     if (round.scheduledAt) {
       const scheduledAt = round.scheduledAt.getTime();
@@ -529,7 +591,8 @@ export class InterviewsService {
       if (now < startsAtMs || now > expiresAtMs) {
         return {
           allowed: false,
-          reason: 'room_link_expired',
+          // Too early and too late are different problems for the user.
+          reason: now < startsAtMs ? 'room_not_open' : 'room_link_expired',
           roomId,
           interviewId,
           roundId: round.id,
@@ -538,6 +601,7 @@ export class InterviewsService {
           hostUserId: interview.recruiterUserId,
           interviewStage: this.currentStage(interview),
           scheduledAt: round.scheduledAt.toISOString(),
+          opensAt: new Date(startsAtMs).toISOString(),
           expiresAt: new Date(expiresAtMs).toISOString(),
         };
       }
@@ -554,13 +618,67 @@ export class InterviewsService {
       interviewStage: this.currentStage(interview),
       scheduledAt: round.scheduledAt ? round.scheduledAt.toISOString() : null,
       expiresAt: round.scheduledAt
-        ? new Date(round.scheduledAt.getTime() + ((round.durationMins ?? 45) + 120) * 60 * 1000).toISOString()
+        ? new Date(
+            round.scheduledAt.getTime() +
+              ((round.durationMins ?? 45) + 120) * 60 * 1000,
+          ).toISOString()
         : null,
     };
   }
 
-  async markRoomStarted(interviewId: string, roundId: string, actorUserId: string) {
-    const interview = await this.prisma.interview.findUnique({ where: { id: interviewId } });
+  /**
+   * Flat room metadata for the interview room UI (title bar, timer, AI panel).
+   * Names/ids are only returned to the interview's own candidate / recruiter.
+   */
+  async getRoomInfo(roomId: string, userId: string, role: string) {
+    const access = await this.validateRoomAccessWithContext(roomId, userId, role);
+    const m = /^jc-([a-f0-9-]+)-r(\d+)$/i.exec(roomId);
+    const hidden = ['invalid_room', 'room_not_found', 'forbidden'];
+    if (!m || (access.reason && hidden.includes(access.reason))) {
+      return { ...access, info: null };
+    }
+
+    const [interview, round] = await Promise.all([
+      this.prisma.interview.findUnique({
+        where: { id: m[1] },
+        include: { job: true, candidate: true, recruiter: true },
+      }),
+      this.prisma.recruiterInterviewRound.findFirst({
+        where: { interviewId: m[1], roundNumber: Number(m[2]) },
+      }),
+    ]);
+    if (!interview || !round) return { ...access, info: null };
+
+    return {
+      ...access,
+      info: {
+        roomId,
+        interviewId: interview.id,
+        roundId: round.id,
+        roundNumber: round.roundNumber,
+        roundType: round.roundType,
+        durationMins: round.durationMins ?? 45,
+        mode: round.mode,
+        jobTitle: interview.job?.title ?? interview.jobTitle ?? 'Interview',
+        companyName: interview.companyName ?? null,
+        candidateUserId: interview.candidateUserId,
+        candidateName: interview.candidate?.fullName ?? 'Candidate',
+        recruiterUserId: interview.recruiterUserId,
+        recruiterName: interview.recruiter?.fullName ?? 'Recruiter',
+        scheduledAt: round.scheduledAt ? round.scheduledAt.toISOString() : null,
+        hostUserId: interview.recruiterUserId,
+      },
+    };
+  }
+
+  async markRoomStarted(
+    interviewId: string,
+    roundId: string,
+    actorUserId: string,
+  ) {
+    const interview = await this.prisma.interview.findUnique({
+      where: { id: interviewId },
+    });
     if (!interview) return;
 
     if (interview.status !== InterviewStatus.IN_PROGRESS) {
@@ -573,7 +691,7 @@ export class InterviewsService {
       });
     }
 
-    await this.prisma.interviewEventLog.create({
+    await this.safeEventLog({
       data: {
         interviewId,
         actorUserId,
@@ -583,8 +701,12 @@ export class InterviewsService {
     });
   }
 
-  async markRoomEnded(interviewId: string, roundId: string, actorUserId: string) {
-    await this.prisma.interviewEventLog.create({
+  async markRoomEnded(
+    interviewId: string,
+    roundId: string,
+    actorUserId: string,
+  ) {
+    await this.safeEventLog({
       data: {
         interviewId,
         actorUserId,
@@ -592,6 +714,19 @@ export class InterviewsService {
         payload: { roundId },
       },
     });
+  }
+
+  /** Audit logging must never break a user-facing flow. */
+  private async safeEventLog(
+    args: Prisma.InterviewEventLogCreateArgs,
+  ): Promise<void> {
+    try {
+      await this.prisma.interviewEventLog.create(args);
+    } catch (err) {
+      this.logger.warn(
+        `interviewEventLog write skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private toQuestionRow(q: {
@@ -664,7 +799,10 @@ export class InterviewsService {
     return {
       id: row.id,
       current_stage: metadata.currentStage ?? this.currentStage(row),
-      status_code: metadata.statusCode ?? STAGE_TO_CODE[metadata.currentStage as string] ?? null,
+      status_code:
+        metadata.statusCode ??
+        STAGE_TO_CODE[metadata.currentStage as string] ??
+        null,
       final_status: metadata.finalStatus ?? null,
       created_at: row.createdAt,
       updated_at: row.updatedAt,
@@ -675,13 +813,18 @@ export class InterviewsService {
     };
   }
 
-  private metadataRecord(value: Prisma.JsonValue | null | undefined): Record<string, any> {
+  private metadataRecord(
+    value: Prisma.JsonValue | null | undefined,
+  ): Record<string, any> {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, any>)
       : {};
   }
 
-  private currentStage(interview: { metadata: Prisma.JsonValue; status: InterviewStatus }): string {
+  private currentStage(interview: {
+    metadata: Prisma.JsonValue;
+    status: InterviewStatus;
+  }): string {
     const metadata = this.metadataRecord(interview.metadata);
     if (typeof metadata.currentStage === 'string') return metadata.currentStage;
     return interview.status === InterviewStatus.IN_PROGRESS
@@ -691,27 +834,40 @@ export class InterviewsService {
         : 'INTERVIEW_SCHEDULED';
   }
 
-  private withStage(metadata: Prisma.JsonValue, stage: string): Prisma.InputJsonObject {
+  private withStage(
+    metadata: Prisma.JsonValue,
+    stage: string,
+  ): Prisma.InputJsonObject {
     return {
       ...this.metadataRecord(metadata),
       currentStage: stage,
       statusCode: STAGE_TO_CODE[stage],
-      finalStatus: this.isTerminalStage(stage) ? stage : this.metadataRecord(metadata).finalStatus ?? null,
+      finalStatus: this.isTerminalStage(stage)
+        ? stage
+        : (this.metadataRecord(metadata).finalStatus ?? null),
     };
   }
 
   private stageToInterviewStatus(stage: string): InterviewStatus {
     if (stage === 'INTERVIEW_IN_PROGRESS') return InterviewStatus.IN_PROGRESS;
     if (this.isTerminalStage(stage)) return InterviewStatus.COMPLETED;
-    if (stage === 'ON_HOLD' || stage === 'WITHDRAWN') return InterviewStatus.CANCELLED;
+    if (stage === 'ON_HOLD' || stage === 'WITHDRAWN')
+      return InterviewStatus.CANCELLED;
     return InterviewStatus.SCHEDULED;
   }
 
   private isTerminalStage(stage: string): boolean {
-    return ['INTERVIEW_PASSED', 'INTERVIEW_FAILED', 'HIRED', 'REJECTED'].includes(stage);
+    return [
+      'INTERVIEW_PASSED',
+      'INTERVIEW_FAILED',
+      'HIRED',
+      'REJECTED',
+    ].includes(stage);
   }
 
-  private toRoundResult(result: RoundResultInput['result']): InterviewRoundResult {
+  private toRoundResult(
+    result: RoundResultInput['result'],
+  ): InterviewRoundResult {
     switch (result) {
       case 'pass':
         return InterviewRoundResult.PASSED;

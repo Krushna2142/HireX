@@ -17,12 +17,14 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService, // ← ADD THIS
   ) {
-    const connectionString = this.config.get<string>('database.connectionString');
+    const connectionString = this.config.get<string>(
+      'database.connectionString',
+    );
 
     if (!connectionString) {
       throw new Error(
         '[DatabaseService] DATABASE_URL is not set. ' +
-        'Ensure the environment variable is configured in your deployment.',
+          'Ensure the environment variable is configured in your deployment.',
       );
     }
 

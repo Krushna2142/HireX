@@ -20,7 +20,10 @@ export interface SFURoomOptions {
 export interface SFUAdapter {
   provider: SFUProvider;
   ensureRoom(opts: SFURoomOptions): Promise<void>;
-  createTransport(roomId: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  createTransport(
+    roomId: string,
+    options?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
   closeRoom(roomId: string): Promise<void>;
 }
 

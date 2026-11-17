@@ -4,11 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  InterviewRoundResult,
-  InterviewStatus,
-  Prisma,
-} from '@prisma/client';
+import { InterviewRoundResult, InterviewStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AIService } from '../ai/ai.service';
 
@@ -16,11 +12,7 @@ type AppRole = 'candidate' | 'recruiter' | 'admin' | 'super_admin' | string;
 
 export type RoomAccessResult = {
   allowed: boolean;
-  reason?:
-    | 'room_not_found'
-    | 'forbidden'
-    | 'room_locked'
-    | 'interview_missing';
+  reason?: 'room_not_found' | 'forbidden' | 'room_locked' | 'interview_missing';
   roomId?: string;
   providerRoomId?: string | null;
   interviewId?: string | null;
@@ -88,12 +80,7 @@ export type ScorecardCriterion = {
 export type ScorecardInput = {
   criteria: ScorecardCriterion[];
   comments?: string;
-  recommendation?:
-    | 'strong_hire'
-    | 'hire'
-    | 'hold'
-    | 'reject'
-    | 'strong_reject';
+  recommendation?: 'strong_hire' | 'hire' | 'hold' | 'reject' | 'strong_reject';
 };
 
 export type AIAssistInput = {
@@ -144,10 +131,7 @@ export class InterviewRoomsService {
   private async findRoomByIdOrProviderRoomId(roomId: string) {
     return this.prisma.interviewRoom.findFirst({
       where: {
-        OR: [
-          { id: roomId },
-          { providerRoomId: roomId },
-        ],
+        OR: [{ id: roomId }, { providerRoomId: roomId }],
       },
     });
   }
@@ -600,7 +584,9 @@ export class InterviewRoomsService {
     });
 
     if (!participant) {
-      throw new BadRequestException('Join the room before updating media state');
+      throw new BadRequestException(
+        'Join the room before updating media state',
+      );
     }
 
     const audioEnabled = input.audioEnabled ?? !participant.isMuted;
@@ -770,7 +756,9 @@ export class InterviewRoomsService {
     }
 
     if (!access.isRecruiter && !access.isAdmin && !access.isHost) {
-      throw new ForbiddenException('Only recruiters can save interview scoring');
+      throw new ForbiddenException(
+        'Only recruiters can save interview scoring',
+      );
     }
 
     if (!Array.isArray(input.criteria) || input.criteria.length === 0) {
@@ -953,7 +941,10 @@ Return ONLY valid JSON:
 
     try {
       parsed = JSON.parse(
-        raw.replace(/```json/g, '').replace(/```/g, '').trim(),
+        raw
+          .replace(/```json/g, '')
+          .replace(/```/g, '')
+          .trim(),
       );
     } catch {
       parsed = {
@@ -1025,10 +1016,7 @@ Return ONLY valid JSON:
             typeof payload?.feedback === 'string'
               ? payload.feedback
               : undefined,
-          score:
-            typeof payload?.score === 'number'
-              ? payload.score
-              : undefined,
+          score: typeof payload?.score === 'number' ? payload.score : undefined,
         },
       });
     }

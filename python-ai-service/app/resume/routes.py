@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.core.config import get_settings
 from app.core.security import verify_api_key
+from app.resume.hidden_text import scan_file
 from app.resume.ats_scorer import score_resume_against_job
 from app.resume.parser import extract_text_from_file, parse_resume_text
 from app.shared.schemas import (
@@ -60,7 +61,36 @@ async def analyze_resume_file(
         required_skills=skills,
     )
 
+@router.post("/extract-text")
+async def extract_text(
+    file: UploadFile = File(...),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """
+    Lightweight text extraction (no NLP). Used by NestJS to repair resumes whose
+    stored ``extracted_text`` was produced by an older, lossy extractor
+    (e.g. DOCX tables / text boxes were dropped).
+    """
+    settings = get_settings()
+    content = await file.read()
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large.")
 
+    text = extract_text_from_file(
+        content=content,
+        filename=file.filename or "resume",
+        content_type=file.content_type,
+    )
+    return {"text": text, "chars": len(text), "fileName": file.filename}
+
+
+@router.post("/hidden-scan")
+async def hidden_scan(
+    file: UploadFile = File(...),
+    _: None = Depends(verify_api_key),
+) -> dict:
+    content = await file.read()
+    return scan_file(content, file.filename or "resume", file.content_type)
 @router.post("/analyze-json", response_model=ResumeAnalysisResponse)
 async def analyze_resume_json(
     payload: AnalyzeResumeJsonRequest,

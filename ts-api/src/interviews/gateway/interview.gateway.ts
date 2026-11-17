@@ -127,7 +127,7 @@ export class InterviewGateway
       const roomSet = this.roomUsers.get(data.roomId);
       if (roomSet) {
         roomSet.delete(socket.data.userId);
-        
+
         // Clean up empty room entries
         if (roomSet.size === 0) {
           this.roomUsers.delete(data.roomId);
@@ -139,9 +139,7 @@ export class InterviewGateway
         timestamp: new Date(),
       });
 
-      this.logger.log(
-        `👋 User ${socket.data.userId} left room ${data.roomId}`,
-      );
+      this.logger.log(`👋 User ${socket.data.userId} left room ${data.roomId}`);
     } catch (error) {
       this.logger.error('❌ Leave room error:', this.getErrorMessage(error));
     }
@@ -156,7 +154,9 @@ export class InterviewGateway
     @MessageBody() data: { roomId: string; context: any },
   ) {
     if (socket.data.userRole !== 'recruiter') {
-      socket.emit('error', { message: 'Only recruiters can request AI suggestions' });
+      socket.emit('error', {
+        message: 'Only recruiters can request AI suggestions',
+      });
       return;
     }
 
@@ -314,11 +314,12 @@ export class InterviewGateway
         timestamp: new Date(),
       });
 
-      this.logger.log(
-        `🎥 Recording ${data.status} in room ${data.roomId}`,
-      );
+      this.logger.log(`🎥 Recording ${data.status} in room ${data.roomId}`);
     } catch (error) {
-      this.logger.error('❌ Recording status error:', this.getErrorMessage(error));
+      this.logger.error(
+        '❌ Recording status error:',
+        this.getErrorMessage(error),
+      );
     }
   }
 

@@ -1,10 +1,9 @@
-/* eslint-disable prettier/prettier */
 // ts-api/src/ats/ats.types.ts
-
 export const ATS_QUEUE = 'ats-queue';
 
 export const ATS_JOB = {
   CHECK_APPLICATION: 'check-application',
+  BATCH_CHECK: 'batch-check',
 } as const;
 
 export type AtsJobName = (typeof ATS_JOB)[keyof typeof ATS_JOB];
@@ -24,6 +23,38 @@ export type AtsQueuePayload = {
   source: 'single' | 'bulk';
 };
 
+export type AtsBatchQueuePayload = {
+  jobId: string;
+  batchId: string;
+  applicationIds: string[];
+  recruiterUserId: string;
+};
+
+// ── Resume integrity (anti-cheat) ────────────────────────────────────────
+export type IntegritySeverity = 'none' | 'low' | 'medium' | 'high';
+
+export type IntegrityFinding = {
+  type: string;
+  severity: IntegritySeverity;
+  detail: string;
+  sample?: string;
+};
+
+/**
+ * Contract used by AtsService + Python POST /ats/integrity-scan (snake_case).
+ * NOTE: AtsIntegrityService keeps its own camelCase variant (with scoreCap)
+ * for AtsEvaluatorService. Both coexist safely — no file imports both.
+ */
+export type IntegrityReport = {
+  flagged: boolean;
+  severity: IntegritySeverity;
+  findings: IntegrityFinding[];
+  warnings: string[];
+  clean_text: string;
+  hidden_lines: string[];
+  hidden_ratio: number;
+};
+
 export type AtsBreakdown = {
   requiredSkillMatch: number;
   semanticMatch: number;
@@ -33,16 +64,22 @@ export type AtsBreakdown = {
   sectionCompleteness: number;
   keywordPlacement: number;
   formattingReadability: number;
-
-  // Extra debugging / explainability fields from Python ATS
   jdRoleFamily?: string;
+  jdSeniority?: string;
+  jdMinYears?: number;
   requiredSkillsUsed?: string[];
   resumeSkillsDetected?: string[];
   resumeTextLength?: number;
   evidence?: string[];
   warnings?: string[];
-
-  // Optional flexible debug object
+  integrity?: {
+    flagged: boolean;
+    severity: string;
+    scoreCap?: number | null;
+    hiddenRatio?: number;
+    findings?: IntegrityFinding[];
+  };
+  // ✅ evaluator writes debug info (profileSource, weights, uncappedScore…)
   debug?: Record<string, unknown>;
 };
 

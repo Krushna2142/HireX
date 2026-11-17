@@ -67,6 +67,7 @@ export class AuthService {
   private transporter: nodemailer.Transporter | undefined;
   private readonly logger = new Logger(AuthService.name);
   private readonly accessSecret: string;
+  private readonly refreshSecret: string;
   private readonly accessExpiresIn: string;
   private readonly refreshExpiresIn: string;
   private readonly frontendUrl: string;
@@ -76,15 +77,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
-    this.accessSecret =
-      this.config.get<string>('jwt.accessSecret') ??
-      this.config.get<string>('jwt.secret') ??
-      this.config.get<string>('JWT_SECRET') ??
-      '';
-
-    if (!this.accessSecret) {
-      throw new Error('JWT_SECRET is not configured');
-    }
+    this.accessSecret = this.getRequiredSecret('jwt.accessSecret', 'jwt.secret', 'JWT_SECRET');
+    this.refreshSecret = this.getRequiredSecret('jwt.refreshSecret', 'jwt.secret', 'JWT_SECRET');
 
     this.accessExpiresIn =
       this.config.get<string>('jwt.accessExpiresIn') ??
@@ -117,6 +111,18 @@ export class AuthService {
         },
       });
     }
+  }
+
+  private getRequiredSecret(...keys: string[]): string {
+    for (const key of keys) {
+      const value = this.config.get<string>(key);
+      if (value && value.trim() !== '') {
+        return value;
+      }
+    }
+    throw new Error(
+      `JWT secret not configured. Set one of: ${keys.join(', ')} (env vars: ${keys.map(k => k.replace(/\./g, '_').toUpperCase()).join(', ')})`
+    );
   }
 
   get accessCookieName() {
@@ -869,6 +875,16 @@ export class AuthService {
 
   async getMe(userId: string): Promise<SafeUser> {
     const user = await this.findUserById(userId);
+
+    if (!user || !user.isActive || user.isBlocked || user.deletedAt) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    return this.toSafeUser(user);
+  }
+
+  async getMeByEmail(email: string): Promise<SafeUser> {
+    const user = await this.findUserByEmail(email);
 
     if (!user || !user.isActive || user.isBlocked || user.deletedAt) {
       throw new UnauthorizedException('User not found');

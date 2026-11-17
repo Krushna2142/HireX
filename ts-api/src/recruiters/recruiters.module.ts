@@ -4,7 +4,7 @@
 import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../../prisma/prisma.module';
-import { DatabaseModule } from '../database/datbase.module';
+import { DatabaseModule } from '../database/database.module';
 
 import { RecruitersController } from './recruiters.controller';
 import { RecruitersService } from './recruiters.service';

@@ -1,9 +1,9 @@
 /**
  * ICE Candidate Buffer & Ordering Service
  * File: ts-api/src/interviews/webrtc/ice-candidate-buffer.ts
- * 
+ *
  * Purpose: Manage ICE candidate collection and delivery in correct order
- * 
+ *
  * Problem it solves:
  * - ICE candidates arrive out of order on network
  * - Must queue candidates until remote description is set
@@ -19,7 +19,11 @@ export interface BufferedCandidate {
   addedAt?: number;
 }
 
-export type ICEState = 'idle' | 'local-description-set' | 'remote-description-set' | 'complete';
+export type ICEState =
+  | 'idle'
+  | 'local-description-set'
+  | 'remote-description-set'
+  | 'complete';
 
 export class ICECandidateBuffer {
   private readonly logger = new Logger(ICECandidateBuffer.name);
@@ -108,7 +112,8 @@ export class ICECandidateBuffer {
     return {
       buffered: this.buffer.length,
       state: this.state,
-      oldestCandidateAge: this.buffer.length > 0 ? Date.now() - this.buffer[0].receivedAt : null,
+      oldestCandidateAge:
+        this.buffer.length > 0 ? Date.now() - this.buffer[0].receivedAt : null,
     };
   }
 

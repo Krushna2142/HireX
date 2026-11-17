@@ -26,12 +26,19 @@ type DashboardCounts = {
 @Injectable()
 export class AdminService {
   private readonly jwtSecret: string;
+  logger: any;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly config: ConfigService,
   ) {
-    this.jwtSecret = this.config.get<string>('jwt.secret') ?? 'supersecretkey';
+    const secret = this.config.get<string>('jwt.secret');
+    if (!secret || secret.trim() === '') {
+      throw new Error(
+        'JWT secret not configured for AdminService. Set jwt.secret or JWT_SECRET environment variable.',
+      );
+    }
+    this.jwtSecret = secret;
   }
 
   login(username: string, password: string) {
@@ -63,7 +70,37 @@ export class AdminService {
       },
     };
   }
+   // Add to ts-api/src/admin/admin.service.ts
+async getQueueMetrics() {
+  const redis = this.config.get('redis');
+  if (!redis?.enabled) {
+    return { error: 'Redis not enabled' };
+  }
 
+  try {
+    // Query BullMQ queue lengths
+    const [waiting, active, delayed, failed, completed] = await Promise.all([
+      this.db.query(`SELECT COUNT(*) FROM bull_jobs WHERE queue = 'ats-queue' AND status = 'waiting'`),
+      this.db.query(`SELECT COUNT(*) FROM bull_jobs WHERE queue = 'ats-queue' AND status = 'active'`),
+      this.db.query(`SELECT COUNT(*) FROM bull_jobs WHERE queue = 'ats-queue' AND status = 'delayed'`),
+      this.db.query(`SELECT COUNT(*) FROM bull_jobs WHERE queue = 'ats-queue' AND status = 'failed'`),
+      this.db.query(`SELECT COUNT(*) FROM bull_jobs WHERE queue = 'ats-queue' AND status = 'completed'`),
+    ]);
+
+    return {
+      queue: 'ats-queue',
+      waiting: Number(waiting.rows[0]?.count ?? 0),
+      active: Number(active.rows[0]?.count ?? 0),
+      delayed: Number(delayed.rows[0]?.count ?? 0),
+      failed: Number(failed.rows[0]?.count ?? 0),
+      completed: Number(completed.rows[0]?.count ?? 0),
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    this.logger.error('Failed to fetch queue metrics:', error);
+    return { error: 'Failed to fetch queue metrics' };
+  }
+}
   async getDashboard(adminId: string) {
     void adminId;
 

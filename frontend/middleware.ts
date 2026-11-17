@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// All protected route prefixes
 const PROTECTED = [
   '/dashboard',
   '/jobs',
@@ -17,16 +16,19 @@ const PROTECTED = [
   '/admin',
   '/recruiter',
   '/candidate',
+  '/placement',
+  '/saved-jobs',
 ];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
   const isProtected = PROTECTED.some((path) => pathname.startsWith(path));
   if (!isProtected) return NextResponse.next();
 
-  const token = request.cookies.get('jc_token')?.value;
-  if (!token) {
+  const hasLegacy = Boolean(request.cookies.get('jc_token')?.value);
+  const hasSupabase = Boolean(request.cookies.get('hx_session')?.value);
+
+  if (!hasLegacy && !hasSupabase) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     url.searchParams.set('auth', 'login');
@@ -52,5 +54,7 @@ export const config = {
     '/admin/:path*',
     '/recruiter/:path*',
     '/candidate/:path*',
+    '/placement/:path*',
+    '/saved-jobs/:path*',
   ],
 };

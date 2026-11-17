@@ -10,7 +10,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RecruiterInterviewsService, StageKey } from './recruiter-interviews.service';
+import {
+  RecruiterInterviewsService,
+  StageKey,
+} from './recruiter-interviews.service';
 
 @Controller('recruiter/interviews')
 @UseGuards(JwtAuthGuard)
@@ -26,7 +29,8 @@ export class RecruiterInterviewsController {
   scheduleRound(
     @Param('interviewId') interviewId: string,
     @Req() req: any,
-    @Body() body: {
+    @Body()
+    body: {
       roundType: string;
       scheduledAt: string;
       durationMins?: number;

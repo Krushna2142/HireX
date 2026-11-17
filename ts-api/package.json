@@ -34,10 +34,12 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-socket.io": "^11.1.19",
     "@nestjs/schedule": "^6.1.1",
+    "@nestjs/throttler": "^6.7.1",
     "@nestjs/websockets": "^11.1.19",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@supabase/supabase-js": "^2.99.1",
+    "@types/uuid": "^10.0.0",
     "argon2": "^0.44.0",
     "axios": "^1.16.1",
     "bcryptjs": "^3.0.3",
@@ -51,7 +53,8 @@
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
     "livekit-server-sdk": "^2.15.1",
-    "mammoth": "^1.12.0",
+    "lru-cache": "^11.5.3",
+    "mammoth": "^1.13.0",
     "nodemailer": "^8.0.2",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
@@ -62,7 +65,8 @@
     "prisma": "^7.5.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
 import {
@@ -35,6 +32,38 @@ const ALLOWED_MIME_TYPES = [
 ];
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+
+// File signature (magic bytes) validation
+const FILE_SIGNATURES: Record<string, number[][]> = {
+  'application/pdf': [[0x25, 0x50, 0x44, 0x46]], // %PDF
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [
+    [0x50, 0x4B, 0x03, 0x04], // PK (ZIP-based)
+    [0x50, 0x4B, 0x05, 0x06], // Empty ZIP
+    [0x50, 0x4B, 0x07, 0x08], // Spanned ZIP
+  ],
+  'application/msword': [
+    [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], // OLE compound document
+  ],
+};
+
+function validateFileSignature(buffer: Buffer, mimetype: string): boolean {
+  const signatures = FILE_SIGNATURES[mimetype];
+  if (!signatures) return false;
+  
+  for (const sig of signatures) {
+    if (buffer.length >= sig.length) {
+      let match = true;
+      for (let i = 0; i < sig.length; i++) {
+        if (buffer[i] !== sig[i]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return true;
+    }
+  }
+  return false;
+}
 
 @Catch(MulterError)
 class MulterExceptionFilter implements ExceptionFilter {
@@ -97,6 +126,18 @@ export class ResumesController {
 
     if (!file.buffer?.length) {
       throw new BadRequestException('File is empty');
+    }
+
+    // Validate file signature (magic bytes)
+    if (!validateFileSignature(file.buffer, file.mimetype)) {
+      this.logger.warn(
+        `File signature mismatch: mimetype=${file.mimetype}, firstBytes=${file.buffer
+          .slice(0, 8)
+          .toString('hex')}`,
+      );
+      throw new BadRequestException(
+        'File signature does not match declared MIME type. Possible corrupted or renamed file.',
+      );
     }
 
     return this.service.saveRawResume(file, req.user.id);

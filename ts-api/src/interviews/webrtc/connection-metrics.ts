@@ -56,8 +56,7 @@ function getSafeProperty<T>(obj: any, key: string, defaultValue: T): T {
  */
 function isInboundRtpReport(report: any): report is RTCInboundRtpStreamStats {
   return (
-    report.type === 'inbound-rtp' &&
-    typeof report.bytesReceived === 'number'
+    report.type === 'inbound-rtp' && typeof report.bytesReceived === 'number'
   );
 }
 
@@ -65,10 +64,7 @@ function isInboundRtpReport(report: any): report is RTCInboundRtpStreamStats {
  * Type guard for outbound-rtp stats
  */
 function isOutboundRtpReport(report: any): report is RTCOutboundRtpStreamStats {
-  return (
-    report.type === 'outbound-rtp' &&
-    typeof report.bytesSent === 'number'
-  );
+  return report.type === 'outbound-rtp' && typeof report.bytesSent === 'number';
 }
 
 @Injectable()
@@ -114,7 +110,11 @@ export class ConnectionMetricsService {
       stats.forEach((report) => {
         // Handle inbound-rtp
         if (isInboundRtpReport(report)) {
-          const mediaType = getSafeProperty<string>(report, 'mediaType', 'unknown');
+          const mediaType = getSafeProperty<string>(
+            report,
+            'mediaType',
+            'unknown',
+          );
           if (mediaType === 'video') {
             inboundVideoStats = report;
           } else if (mediaType === 'audio') {
@@ -124,7 +124,11 @@ export class ConnectionMetricsService {
 
         // Handle outbound-rtp
         if (isOutboundRtpReport(report)) {
-          const mediaType = getSafeProperty<string>(report, 'mediaType', 'unknown');
+          const mediaType = getSafeProperty<string>(
+            report,
+            'mediaType',
+            'unknown',
+          );
           if (mediaType === 'video') {
             outboundVideoStats = report;
           } else if (mediaType === 'audio') {
@@ -167,8 +171,16 @@ export class ConnectionMetricsService {
         );
         metrics.videoResolution = `${frameWidth}x${frameHeight}`;
 
-        const codecId = getSafeProperty<string>(inboundVideoStats, 'codecId', '');
-        const mimeType = getSafeProperty<string>(inboundVideoStats, 'mimeType', '');
+        const codecId = getSafeProperty<string>(
+          inboundVideoStats,
+          'codecId',
+          '',
+        );
+        const mimeType = getSafeProperty<string>(
+          inboundVideoStats,
+          'mimeType',
+          '',
+        );
         metrics.videoCodec = codecId
           ? 'H.264'
           : mimeType.includes('vp8')
@@ -232,7 +244,7 @@ export class ConnectionMetricsService {
       // Get candidate pair info for RTT
       stats.forEach((report) => {
         if (report.type === 'candidate-pair') {
-          const pair = report as any;
+          const pair = report;
           if (pair.state === 'succeeded') {
             const currentRoundTripTime = getSafeProperty<number>(
               pair,
@@ -270,13 +282,17 @@ export class ConnectionMetricsService {
     // Packet loss penalty (very significant)
     const avgPacketLoss =
       (metrics.audioPacketLossPercent + metrics.videoPacketLossPercent) / 2;
-    if (avgPacketLoss > 5) score -= 40; // >5% loss = major issue
-    else if (avgPacketLoss > 2) score -= 20; // >2% loss = degraded
+    if (avgPacketLoss > 5)
+      score -= 40; // >5% loss = major issue
+    else if (avgPacketLoss > 2)
+      score -= 20; // >2% loss = degraded
     else if (avgPacketLoss > 0) score -= 5;
 
     // Latency penalty
-    if (metrics.roundTripLatency > 300) score -= 30; // >300ms = poor
-    else if (metrics.roundTripLatency > 150) score -= 15; // >150ms = degraded
+    if (metrics.roundTripLatency > 300)
+      score -= 30; // >300ms = poor
+    else if (metrics.roundTripLatency > 150)
+      score -= 15; // >150ms = degraded
     else if (metrics.roundTripLatency > 80) score -= 5; // >80ms = acceptable
 
     // Bitrate penalty

@@ -13,7 +13,12 @@ export class AdminController {
   login(@Body() body: { username: string; password: string }) {
     return this.admin.login(body.username, body.password);
   }
-
+  // Add to ts-api/src/admin/admin.controller.ts
+@Get('queue-metrics')
+@Roles('admin')
+async getQueueMetrics() {
+  return this.admin.getQueueMetrics();
+}
   @Get('dashboard')
   @Roles('admin')
   dashboard(@Req() req: any) {

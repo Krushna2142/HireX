@@ -44,11 +44,16 @@ export class AIService {
     jobDescription?: string,
   ) {
     this.logger.debug('Evaluating interview transcript');
-    
+
     if (!transcript?.trim()) {
       return {
         overall_score: 0,
-        breakdown: { communication: 0, technical: 0, problem_solving: 0, cultural_fit: 0 },
+        breakdown: {
+          communication: 0,
+          technical: 0,
+          problem_solving: 0,
+          cultural_fit: 0,
+        },
         feedback: 'No transcript provided',
         strengths: [],
         weaknesses: [],
@@ -62,7 +67,10 @@ export class AIService {
    * Transcribe audio to text
    * Uses Gemini's audio capabilities or external service
    */
-  async transcribeAudio(audioBuffer: Buffer, language: string = 'en'): Promise<string> {
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    language: string = 'en',
+  ): Promise<string> {
     this.logger.debug('Transcribing audio');
     return this.provider.transcribeAudio(audioBuffer, language);
   }
@@ -93,7 +101,11 @@ export class AIService {
     previousAnswers?: string[],
   ) {
     this.logger.debug(`Generating mock question: ${topic}`);
-    return this.provider.generateMockQuestion(topic, difficulty, previousAnswers);
+    return this.provider.generateMockQuestion(
+      topic,
+      difficulty,
+      previousAnswers,
+    );
   }
 
   /**
@@ -110,7 +122,7 @@ export class AIService {
     },
   ) {
     this.logger.debug('Scoring candidate');
-    
+
     const evaluation = await this.evaluateInterview(
       transcript,
       rubric,

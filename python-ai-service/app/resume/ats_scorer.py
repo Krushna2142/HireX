@@ -1,37 +1,49 @@
 from app.shared.schemas import JobScoreResponse
 from app.shared.text_cleaner import clamp
 
-
 def score_resume_against_job(
     resume_analysis: dict,
     job_title: str | None = None,
     job_description: str | None = None,
     required_skills: list[str] | None = None,
 ) -> JobScoreResponse:
+    # 1. Extract skills from the resume analysis JSON
     skills = resume_analysis.get("skills") or resume_analysis.get("topSkills") or []
     skills = [str(skill).lower().strip() for skill in skills if str(skill).strip()]
-
+    
     required = [skill.lower().strip() for skill in (required_skills or []) if skill.strip()]
 
+    # Fallback: extract skills from job description if no required skills provided
     if not required and job_description:
         lowered = job_description.lower()
         required = [skill for skill in skills if skill in lowered]
 
+    # 2. Calculate Skill Overlap
     matched = sorted(set(skills).intersection(required)) if required else skills[:8]
     missing = sorted(set(required) - set(skills)) if required else []
-
+    
     skill_score = 70 if not required else clamp((len(matched) / max(1, len(required))) * 100)
+
+    # 3. Get Base Scores from the Resume Parser
     base_ats = int(resume_analysis.get("atsScore") or resume_analysis.get("ats_score") or 50)
     section_score = int(resume_analysis.get("sectionScore") or resume_analysis.get("section_score") or 50)
 
+    # 4. Calculate Title Match Score
     title_score = 50
     if job_title:
         lowered_title = job_title.lower()
         if any(skill in lowered_title for skill in skills):
             title_score = 80
 
-    final = clamp(base_ats * 0.35 + skill_score * 0.40 + section_score * 0.15 + title_score * 0.10)
+    # 5. Final Weighted Mathematical Formula
+    final = clamp(
+        base_ats * 0.35 + 
+        skill_score * 0.40 + 
+        section_score * 0.15 + 
+        title_score * 0.10
+    )
 
+    # 6. Determine Recommendation
     if final >= 75:
         recommendation = "SHORTLIST"
         reason = "Strong resume-to-job match based on skills, ATS structure, and section completeness."

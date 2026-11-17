@@ -14,7 +14,7 @@
 import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../../prisma/prisma.module';
-import { DatabaseModule } from '../database/datbase.module';
+import { DatabaseModule } from '../database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { AIModule } from '../ai/ai.module';
 import { AlertsModule } from '../alerts/alerts.module';
@@ -31,6 +31,8 @@ import { InterviewRoomsController } from './interview-rooms.controller';
 import { InterviewRoomsService } from './interview-rooms.service';
 
 import { InterviewRemindersService } from './interview-reminders.service';
+import { RealtimeAuthService } from './realtime-auth.service';
+import { LiveInterviewController } from './live-interview.controller';
 
 import { InterviewGateway } from './gateway/interview.gateway';
 import { WebRTCGateway } from './webrtc/webrtc.gateway';
@@ -38,24 +40,20 @@ import { WebRTCService } from './webrtc/webrtc.service';
 import { ConnectionMetricsService } from './webrtc/connection-metrics';
 
 @Module({
-  imports: [
-    PrismaModule,
-    DatabaseModule,
-    AuthModule,
-    AIModule,
-    AlertsModule,
-  ],
+  imports: [PrismaModule, DatabaseModule, AuthModule, AIModule, AlertsModule],
   controllers: [
     InterviewsController,
     RecruiterInterviewsController,
     CandidateInterviewsController,
     InterviewRoomsController,
+    LiveInterviewController,
   ],
   providers: [
     InterviewsService,
     RecruiterInterviewsService,
     InterviewRoomsService,
     InterviewRemindersService,
+    RealtimeAuthService,
 
     InterviewGateway,
     WebRTCService,

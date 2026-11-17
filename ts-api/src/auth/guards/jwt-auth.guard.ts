@@ -10,9 +10,10 @@ import {
 import { Reflector } from '@nestjs/core';
 import * as jwt from 'jsonwebtoken';
 import { ConfigService } from '@nestjs/config';
-import { UserRole } from '@prisma/client';
+import { AuthProvider, User, UserRole } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorators';
+import { getSupabaseServiceClient } from '../../lib/supabase';
 
 interface JwtPayload {
   sub: string;
@@ -56,6 +57,12 @@ export class JwtAuthGuard implements CanActivate {
 
     if (!token) {
       throw new UnauthorizedException('Missing authentication token');
+    }
+
+    // Supabase (Google) access tokens are not signed with our secret.
+    // Resolve them to the canonical HireX user (same id as credentials login).
+    if (this.looksLikeSupabaseToken(token)) {
+      return this.authenticateSupabase(token, request);
     }
 
     try {
@@ -121,7 +128,82 @@ export class JwtAuthGuard implements CanActivate {
     }
   }
 
-  private toAppRole(role: UserRole): string {
+  /** Supabase JWTs carry an `aud` claim ('authenticated'); our own tokens do not. */
+  private looksLikeSupabaseToken(token: string): boolean {
+    const decoded = jwt.decode(token);
+    return (
+      !!decoded &&
+      typeof decoded === 'object' &&
+      (decoded as any).aud === 'authenticated' &&
+      !(decoded as any).sid
+    );
+  }
+
+  /**
+   * Resolution order (never creates a user, never overwrites one):
+   *  1. auth_accounts GOOGLE + provider_account_id = supabase user id
+   *  2. verified, normalized email match -> link provider to that existing user
+   */
+  private async authenticateSupabase(token: string, request: any): Promise<boolean> {
+    const { data, error } = await getSupabaseServiceClient().auth.getUser(token);
+    const sbUser = data?.user;
+    if (error || !sbUser) {
+      this.logger.warn(`Invalid Supabase token from IP: ${this.getIp(request)}`);
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+
+    let user: User | null = null;
+
+    const link = await this.prisma.authAccount.findUnique({
+      where: {
+        provider_providerAccountId: {
+          provider: AuthProvider.GOOGLE,
+          providerAccountId: sbUser.id,
+        },
+      },
+      include: { user: true },
+    });
+    if (link) user = link.user;
+
+    if (!user) {
+      const email = sbUser.email?.trim().toLowerCase();
+      if (!email || !sbUser.email_confirmed_at) {
+        throw new UnauthorizedException('Verified email required');
+      }
+      user = await this.prisma.user.findUnique({ where: { email } });
+      if (!user) {
+        throw new UnauthorizedException('User not found');
+      }
+      try {
+        await this.prisma.authAccount.create({
+          data: {
+            userId: user.id,
+            provider: AuthProvider.GOOGLE,
+            providerAccountId: sbUser.id,
+            providerEmail: email,
+            providerEmailVerified: true,
+            lastUsedAt: new Date(),
+          },
+        });
+      } catch {
+        // already linked (unique constraint) - fine, identity is still resolved by email
+      }
+    }
+
+    if (!user.isActive || user.isBlocked || user.deletedAt) {
+      throw new UnauthorizedException('Account is not active');
+    }
+
+    request.user = {
+      id: user.id, // canonical users.id
+      sessionId: undefined,
+      email: user.email,
+      role: this.toAppRole(user.role),
+    };
+    return true;
+  }
+
+   private toAppRole(role: UserRole): string {
     switch (role) {
       case UserRole.RECRUITER:
         return 'recruiter';
@@ -129,6 +211,14 @@ export class JwtAuthGuard implements CanActivate {
         return 'admin';
       case UserRole.SUPER_ADMIN:
         return 'super_admin';
+      case UserRole.COLLEGE_ADMIN:
+        return 'college_admin';
+      case UserRole.TPO:
+        return 'tpo';
+      case UserRole.PLACEMENT_COORDINATOR:
+        return 'placement_coordinator';
+      case UserRole.INTERVIEWER:
+        return 'interviewer';
       case UserRole.JOBSEEKER:
       default:
         return 'candidate';

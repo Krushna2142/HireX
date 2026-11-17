@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable prettier/prettier */
+
 // src/alerts/alerts.controller.ts
 import { Controller, Get, Param, Patch, Query, Req } from '@nestjs/common';
 import { AlertsService } from './alerts.service';

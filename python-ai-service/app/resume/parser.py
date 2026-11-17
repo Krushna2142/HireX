@@ -1,53 +1,152 @@
 # python-ai-service/app/resume/parser.py
 import re
+import spacy
 from io import BytesIO
-from typing import Iterable
 import fitz
 from docx import Document
-from app.resume.skills import CORE_SECTIONS, INDUSTRY_TAGS, SKILL_ALIASES
 from app.shared.schemas import PersonalInfo, ResumeAnalysisResponse, ResumeProject
-from app.shared.text_cleaner import clamp, lower_words, normalize_text
+from app.shared.text_cleaner import clamp, normalize_text
+
+# Load local statistical NLP model (Run: python -m spacy download en_core_web_sm)
+nlp = spacy.load("en_core_web_sm")
+
+# Generic nouns to ignore when extracting skills
+STOP_NOUNS = {"experience", "skill", "work", "team", "company", "university", 
+              "college", "degree", "project", "role", "responsibility", "year", "month"}
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _docx_part_text(root) -> str:
+    """
+    Extract text from a WordprocessingML element tree in *document order*.
+
+    python-docx's ``Document.paragraphs`` only returns top-level body paragraphs, so
+    anything inside a table (very common in two-column / template resumes), a nested
+    table, a text box, a header or a footer is silently dropped. Walking every
+    ``w:t`` run from the XML root catches all of those.
+
+    Text is grouped by its *nearest* ``w:p`` ancestor (so text-box paragraphs are not
+    duplicated into the paragraph that anchors the box), and ``mc:Fallback`` branches
+    are skipped (Word stores text boxes twice: DrawingML + VML fallback).
+    """
+    w = f"{{{_W_NS}}}"
+    fallback_tag = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+    order: list = []
+    buckets: dict = {}
+
+    for node in root.iter(w + "t", w + "tab", w + "br", w + "cr"):
+        # nearest paragraph + fallback check
+        para = None
+        in_fallback = False
+        anc = node.getparent()
+        while anc is not None:
+            if anc.tag == fallback_tag:
+                in_fallback = True
+                break
+            if para is None and anc.tag == w + "p":
+                para = anc
+            anc = anc.getparent()
+        if in_fallback or para is None:
+            continue
+        if para not in buckets:
+            buckets[para] = []
+            order.append(para)
+        if node.tag == w + "t":
+            if node.text:
+                buckets[para].append(node.text)
+        elif node.tag == w + "tab":
+            buckets[para].append(" ")
+        else:
+            buckets[para].append("\n")
+
+    lines = ["".join(buckets[p]).strip() for p in order]
+    return "\n".join(line for line in lines if line)
+
+
+def extract_docx_text(content: bytes) -> str:
+    """Body + tables + text boxes + headers/footers of a .docx, in document order."""
+    document = Document(BytesIO(content))
+    chunks = [_docx_part_text(document.element.body)]
+    for section in document.sections:
+        for part in (section.header, section.footer, section.first_page_header, section.first_page_footer):
+            try:
+                if part is not None and not part.is_linked_to_previous:
+                    txt = _docx_part_text(part._element)
+                    if txt:
+                        chunks.append(txt)
+            except Exception:
+                continue
+    return "\n".join(c for c in chunks if c)
+
 
 def extract_text_from_file(content: bytes, filename: str, content_type: str | None = None) -> str:
     name = filename.lower()
     if name.endswith(".pdf") or content_type == "application/pdf":
-        return extract_pdf_text(content)
-    if name.endswith(".docx") or content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        return extract_docx_text(content)
-    if name.endswith(".doc"):
-        return content.decode("utf-8", errors="ignore")
+        with fitz.open(stream=content, filetype="pdf") as doc:
+            return normalize_text("\n".join(page.get_text("text") for page in doc))
+    if name.endswith(".docx") or (content_type or "").endswith("wordprocessingml.document"):
+        return normalize_text(extract_docx_text(content))
     return content.decode("utf-8", errors="ignore")
 
-def extract_pdf_text(content: bytes) -> str:
-    text_parts: list[str] = []
-    try:
-        with fitz.open(stream=content, filetype="pdf") as doc:
-            for page in doc:
-                text_parts.append(page.get_text("text"))
-    except Exception as e:
-        print(f"[Parser] PyMuPDF failed, trying pdfplumber fallback: {e}")
-        try:
-            import pdfplumber
-            with pdfplumber.open(BytesIO(content)) as pdf:
-                for page in pdf.pages:
-                    extracted = page.extract_text()
-                    if extracted:
-                        text_parts.append(extracted)
-        except Exception as e2:
-            print(f"[Parser] pdfplumber fallback also failed: {e2}")
+def extract_personal_info_spacy(text: str) -> PersonalInfo:
+    """Uses spaCy NER and standard regex for exact formats."""
+    doc = nlp(text[:5000]) # Limit for performance
+    
+    email = re.search(r"[\w.\-+]+@[\w\-]+\.[\w.\-]+", text)
+    phone = re.search(r"(?:(?:\+91|91)[-\s]?)?[6-9]\d{9}", text)
+    linkedin = re.search(r"https?://(?:www\.)?linkedin\.com/[^\s)]+", text, re.I)
+    github = re.search(r"https?://(?:www\.)?github\.com/[^\s)]+", text, re.I)
+    
+    name = None
+    for ent in doc.ents:
+        if ent.label_ == "PERSON" and not name:
+            name = ent.text
+            break
             
-    return normalize_text("\n".join(text_parts))
+    return PersonalInfo(
+        name=name,
+        email=email.group(0) if email else None,
+        phone=phone.group(0) if phone else None,
+        linkedin=linkedin.group(0) if linkedin else None,
+        github=github.group(0) if github else None,
+        portfolio=None
+    )
 
-def extract_docx_text(content: bytes) -> str:
-    document = Document(BytesIO(content))
-    paragraphs = [p.text for p in document.paragraphs if p.text.strip()]
-    table_text: list[str] = []
-    for table in document.tables:
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-            if cells:
-                table_text.append(" | ".join(cells))
-    return normalize_text("\n".join(paragraphs + table_text))
+def extract_skills_nlp(text: str) -> list[str]:
+    """Extracts skills using spaCy Noun Chunks and POS tagging, no hardcoded dictionaries."""
+    doc = nlp(text.lower())
+    skills = set()
+    
+    # 1. Extract Noun Chunks (e.g., "machine learning", "react js")
+    for chunk in doc.noun_chunks:
+        chunk_text = chunk.text.strip()
+        # Filter out generic resume words and short meaningless chunks
+        if len(chunk_text.split()) <= 4 and chunk_text not in STOP_NOUNS:
+            if not any(stop in chunk_text for stop in ["job", "resume", "objective", "summary"]):
+                skills.add(chunk_text)
+                
+    # 2. Extract Proper Nouns (PROPN) which often represent specific tech/frameworks
+    for token in doc:
+        if token.pos_ == "PROPN" and len(token.text) > 2 and not token.is_stop:
+            skills.add(token.text)
+            
+    return list(skills)
+
+def estimate_experience_spacy(text: str) -> float:
+    """Uses spaCy DATE entities to calculate experience mathematically."""
+    doc = nlp(text)
+    years = set()
+    for ent in doc.ents:
+        if ent.label_ == "DATE":
+            # Extract 4-digit years from date entities
+            matches = re.findall(r"20\d{2}", ent.text)
+            for m in matches:
+                years.add(int(m))
+                
+    if len(years) >= 2:
+        return float(max(years) - min(years))
+    return 0.0
 
 def parse_resume_text(
     text: str,
@@ -57,292 +156,41 @@ def parse_resume_text(
     required_skills: list[str] | None = None,
 ) -> ResumeAnalysisResponse:
     text = normalize_text(text)
-    lowered = lower_words(text)
-
-    personal = extract_personal_info(text)
-    skills = extract_skills(lowered)
-    sections = detect_sections(lowered)
-    missing_sections = [s for s in CORE_SECTIONS if s not in sections]
-
-    education = extract_lines_under_headings(text, ["education", "academic", "qualification"])
-    experience = extract_lines_under_headings(text, ["experience", "work experience", "employment", "internship"])
-    projects = extract_projects(text, skills)
-    certifications = extract_lines_under_headings(text, ["certifications", "certificates", "achievements"])
-
-    years = estimate_experience_years(text, lowered)
-    level = infer_experience_level(years, lowered)
-    industry_tags = infer_industry_tags(skills)
-
-    section_score = score_sections(sections, skills, projects, education)
-    skill_score = score_skills(skills)
-    readability_score = score_readability(text)
-    keyword_score = score_keywords(skills, required_skills or [], job_description or "")
-
-    ats_score = clamp(
-        section_score * 0.30
-        + skill_score * 0.25
-        + readability_score * 0.20
-        + keyword_score * 0.25
-    )
-
-    strengths, weaknesses, recommendations = build_feedback(
-        skills=skills,
-        sections=sections,
-        missing_sections=missing_sections,
-        ats_score=ats_score,
-        projects=projects,
-        required_skills=required_skills or [],
-    )
+    
+    # 1. Pure NLP Extraction
+    personal = extract_personal_info_spacy(text)
+    skills = extract_skills_nlp(text)
+    experience_years = estimate_experience_spacy(text)
+    
+    # 2. Statistical Scoring (No hardcoded rules)
+    skill_score = clamp(len(skills) * 4) 
+    text_length_score = clamp(len(text) / 50)
+    ats_score = clamp((skill_score * 0.6) + (text_length_score * 0.4))
+    
+    level = "senior" if experience_years >= 5 else "mid-level" if experience_years >= 2 else "fresher"
 
     return ResumeAnalysisResponse(
         resumeId=resume_id,
         fileName=file_name,
         personalInfo=personal,
         rawTextPreview=text[:900],
-        skills=skills,
+        skills=skills[:30],
         topSkills=skills[:10],
-        missingCoreSections=missing_sections,
-        education=education[:8],
-        workExperience=experience[:10],
-        projects=projects[:8],
-        certifications=certifications[:8],
-        experienceYears=years,
+        missingCoreSections=[],
+        education=[],
+        workExperience=[],
+        projects=[],
+        certifications=[],
+        experienceYears=experience_years,
         experienceLevel=level,
-        industryTags=industry_tags,
-        strengths=strengths,
-        weaknesses=weaknesses,
-        recommendations=recommendations,
+        industryTags=[],
+        strengths=["Extracted via spaCy NLP"],
+        weaknesses=[],
+        recommendations=[],
         atsScore=ats_score,
-        sectionScore=section_score,
+        sectionScore=skill_score,
         skillScore=skill_score,
-        readabilityScore=readability_score,
-        keywordScore=keyword_score,
-        notes=[
-            "Generated by HireX custom rule-based analyzer.",
-            "No external LLM was used for this analysis.",
-        ],
+        readabilityScore=text_length_score,
+        keywordScore=0,
+        notes=["Generated by HireX Pure Statistical NLP Analyzer"],
     )
-
-def extract_personal_info(text: str) -> PersonalInfo:
-    email_match = re.search(r"[\w.\-+]+@[\w\-]+\.[\w.\-]+", text)
-    phone_match = re.search(r"(?:(?:\+91|91)[-\s]?)?[6-9]\d{9}", text)
-    linkedin_match = re.search(r"https?://(?:www\.)?linkedin\.com/[^\s)]+", text, re.I)
-    github_match = re.search(r"https?://(?:www\.)?github\.com/[^\s)]+", text, re.I)
-    portfolio_match = re.search(r"https?://(?!.*linkedin|.*github)[^\s)]+", text, re.I)
-
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    possible_name = None
-    for line in lines[:8]:
-        if "@" in line or "http" in line.lower() or len(line) > 60:
-            continue
-        if re.search(r"\d", line):
-            continue
-        if 2 <= len(line.split()) <= 5:
-            possible_name = line
-            break
-
-    return PersonalInfo(
-        name=possible_name,
-        email=email_match.group(0) if email_match else None,
-        phone=phone_match.group(0) if phone_match else None,
-        linkedin=linkedin_match.group(0) if linkedin_match else None,
-        github=github_match.group(0) if github_match else None,
-        portfolio=portfolio_match.group(0) if portfolio_match else None,
-    )
-
-def extract_skills(lowered_text: str) -> list[str]:
-    padded = f" {lowered_text} "
-    found: list[str] = []
-    for canonical, aliases in SKILL_ALIASES.items():
-        for alias in aliases:
-            pattern = re.escape(alias.lower().strip())
-            if re.search(rf"(?<![a-z0-9+#.]){pattern}(?![a-z0-9+#.])", padded):
-                found.append(canonical)
-                break
-    return sorted(set(found), key=lambda item: found.index(item))
-
-def detect_sections(lowered_text: str) -> set[str]:
-    found: set[str] = set()
-    aliases = {
-        "summary": ["summary", "objective", "profile"],
-        "skills": ["skills", "technical skills", "technologies"],
-        "experience": ["experience", "work experience", "employment", "internship"],
-        "projects": ["projects", "project experience"],
-        "education": ["education", "academic", "qualification"],
-        "certifications": ["certifications", "certificates"],
-    }
-    for section, words in aliases.items():
-        if any(word in lowered_text for word in words):
-            found.add(section)
-    return found
-
-def extract_lines_under_headings(text: str, headings: Iterable[str]) -> list[str]:
-    lines = [line.strip(" •-*|\t") for line in text.splitlines() if line.strip()]
-    lowered_headings = [h.lower() for h in headings]
-    collecting = False
-    collected: list[str] = []
-    stop_words = ["skills", "experience", "projects", "education", "certifications", "summary", "objective", "achievements", "languages"]
-    
-    for line in lines:
-        low = line.lower().strip(": ")
-        if any(h == low or h in low for h in lowered_headings):
-            collecting = True
-            continue
-        if collecting and any(sw == low or (len(low) < 28 and sw in low) for sw in stop_words):
-            break
-        if collecting and 4 <= len(line) <= 180:
-            collected.append(line)
-            if len(collected) >= 12:
-                break
-    return collected
-
-def extract_projects(text: str, skills: list[str]) -> list[ResumeProject]:
-    lines = [line.strip(" •-*|\t") for line in text.splitlines() if line.strip()]
-    projects: list[ResumeProject] = []
-    in_projects = False
-    
-    for line in lines:
-        low = line.lower().strip(": ")
-        if low in ["projects", "project", "project experience"] or "projects" == low:
-            in_projects = True
-            continue
-        if in_projects and low in ["education", "skills", "experience", "certifications"]:
-            break
-        if in_projects and 8 <= len(line) <= 180:
-            line_skills = [skill for skill in skills if skill.lower() in line.lower()]
-            projects.append(ResumeProject(title=line[:80], description=line, skills=line_skills))
-            if len(projects) >= 10:
-                break
-
-    if not projects:
-        for line in lines:
-            low = line.lower()
-            if any(word in low for word in ["built", "developed", "created", "implemented", "designed"]):
-                line_skills = [skill for skill in skills if skill.lower() in low]
-                projects.append(ResumeProject(title=line[:80], description=line, skills=line_skills))
-                if len(projects) >= 5:
-                    break
-    return projects
-
-def estimate_experience_years(text: str, lowered_text: str) -> float:
-    explicit = re.findall(r"(\d+(?:\.\d+)?)\+?\s*(?:years|yrs|year)\s+(?:of\s+)?experience", lowered_text)
-    if explicit:
-        return round(max(float(x) for x in explicit), 1)
-    
-    ranges = re.findall(r"(20\d{2})\s*[-–]\s*(20\d{2}|present|current)", lowered_text)
-    total = 0
-    current_year = 2026
-    for start, end in ranges:
-        start_year = int(start)
-        end_year = current_year if end in {"present", "current"} else int(end)
-        if end_year >= start_year:
-            total += min(6, end_year - start_year)
-    if total:
-        return float(min(15, total))
-    
-    if "intern" in lowered_text or "internship" in lowered_text:
-        return 0.5
-    return 0.0
-
-def infer_experience_level(years: float, lowered_text: str) -> str:
-    if "senior" in lowered_text or years >= 5:
-        return "senior"
-    if "junior" in lowered_text or 1 <= years < 3:
-        return "junior"
-    if 3 <= years < 5:
-        return "mid-level"
-    return "fresher"
-
-def infer_industry_tags(skills: list[str]) -> list[str]:
-    skill_set = set(skills)
-    tags: list[str] = []
-    for tag, required in INDUSTRY_TAGS.items():
-        if skill_set.intersection(required):
-            tags.append(tag)
-    return tags
-
-def score_sections(sections: set[str], skills: list[str], projects: list[ResumeProject], education: list[str]) -> int:
-    score = 0
-    score += 18 if "summary" in sections else 0
-    score += 22 if skills else 0
-    score += 20 if "experience" in sections else 0
-    score += 18 if projects else 0
-    score += 14 if education or "education" in sections else 0
-    score += 8 if "certifications" in sections else 0
-    return clamp(score)
-
-def score_skills(skills: list[str]) -> int:
-    if len(skills) >= 12: return 95
-    if len(skills) >= 8: return 82
-    if len(skills) >= 5: return 68
-    if len(skills) >= 3: return 50
-    return 25 if skills else 5
-
-def score_readability(text: str) -> int:
-    length = len(text)
-    lines = [line for line in text.splitlines() if line.strip()]
-    bullet_count = sum(1 for line in lines if line.strip().startswith(("-", "•", "*")))
-    score = 50
-    if 1200 <= length <= 7000: score += 25
-    elif length > 7000: score += 10
-    else: score += 5
-    if bullet_count >= 4: score += 15
-    if len(lines) >= 12: score += 10
-    return clamp(score)
-
-def score_keywords(skills: list[str], required_skills: list[str], job_description: str) -> int:
-    if not required_skills and not job_description:
-        return score_skills(skills)
-    
-    required = {s.lower().strip() for s in required_skills if s.strip()}
-    skill_set = {s.lower().strip() for s in skills}
-    
-    if not required and job_description:
-        required = {skill for skill, aliases in SKILL_ALIASES.items() if any(alias in job_description.lower() for alias in aliases)}
-    
-    if not required:
-        return 50
-    
-    matched = skill_set.intersection(required)
-    return clamp((len(matched) / len(required)) * 100)
-
-def build_feedback(
-    skills: list[str],
-    sections: set[str],
-    missing_sections: list[str],
-    ats_score: int,
-    projects: list[ResumeProject],
-    required_skills: list[str],
-) -> tuple[list[str], list[str], list[str]]:
-    strengths: list[str] = []
-    weaknesses: list[str] = []
-    recommendations: list[str] = []
-
-    if len(skills) >= 8:
-        strengths.append("Strong technical skill coverage.")
-    if projects:
-        strengths.append("Project section is present, which improves recruiter confidence.")
-    if "experience" in sections:
-        strengths.append("Experience section is available for timeline review.")
-
-    if missing_sections:
-        weaknesses.append(f"Missing or weak sections: {', '.join(missing_sections)}.")
-    if len(skills) < 5:
-        weaknesses.append("Skill section is too thin for ATS matching.")
-    
-    if required_skills:
-        missing_required = sorted(set(s.lower() for s in required_skills) - set(s.lower() for s in skills))
-        if missing_required:
-            weaknesses.append(f"Missing job-required skills: {', '.join(missing_required[:8])}.")
-
-    if "projects" in missing_sections:
-        recommendations.append("Add 2-3 strong projects with tech stack, impact, and links.")
-    if "summary" in missing_sections:
-        recommendations.append("Add a 2-3 line professional summary targeted to your role.")
-    if ats_score < 70:
-        recommendations.append("Add more role-specific keywords from the job description.")
-    
-    if not recommendations:
-        recommendations.append("Resume is ATS-ready. Tailor keywords per job before applying.")
-
-    return strengths, weaknesses, recommendations

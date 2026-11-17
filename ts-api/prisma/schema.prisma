@@ -1,19 +1,21 @@
 // ============================================================
-// JobCrawler Fresh DB Prisma Schema
-// Use this for NEW Supabase PostgreSQL DB only.
-// Old exposed DB must not be reused for auth/session/token data.
+// HireX — Full Prisma Schema (existing + Campus Mass Hiring)
+// Additive only. No existing model/column removed.
+// NEVER run `prisma db push`. Apply SQL manually in Supabase.
 // ============================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+ 
 }
 
 // -----------------------------
-// Enums
+// Enums (existing)
 // -----------------------------
 
 enum UserRole {
@@ -21,6 +23,10 @@ enum UserRole {
   RECRUITER
   ADMIN
   SUPER_ADMIN
+  COLLEGE_ADMIN
+  TPO
+  PLACEMENT_COORDINATOR
+  INTERVIEWER
 
   @@map("user_role")
 }
@@ -180,11 +186,19 @@ model User {
   recruiterNotes        RecruiterInterviewNote[] @relation("RecruiterNoteAuthor")
 
   notifications      Notification[]
-  
-  // NEW RELATIONS
+
   atsBatches            AtsBulkBatch[] @relation("AtsBulkBatchRecruiter")
   mockSessions          MockInterviewSession[] @relation("MockInterviewCandidate")
   feedbackCreated       RecruiterInterviewFeedback[] @relation("FeedbackRecruiter")
+
+  // ── Campus Mass Hiring relations ──
+  campusCompanyMembers   CompanyMember[]     @relation("CampusCompanyMembers")
+  campusCollegeMembers   CollegeMember[]     @relation("CampusCollegeMembers")
+  campusStudents         CollegeStudent[]    @relation("CampusStudents")
+  campusCompaniesCreated Company[]           @relation("CampusCompanyCreatedBy")
+  campusCollegesCreated  College[]           @relation("CampusCollegeCreatedBy")
+  campusDrivesCreated    PlacementDrive[]    @relation("CampusDriveCreatedBy")
+  campusBatchesCreated   CampusBulkBatch[]   @relation("CampusBatchCreatedBy")
 
   @@index([role], map: "idx_users_role")
   @@index([emailVerified], map: "idx_users_email_verified")
@@ -553,16 +567,21 @@ model Job {
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  // ── Campus channel isolation ──
+  channel         JobChannel @default(GENERAL) @map("channel")
+
   recruiter       User       @relation("RecruiterJobs", fields: [recruiterUserId], references: [id], onDelete: Cascade)
   applications    JobApplication[]
   interviews      Interview[]
-  atsBatches      AtsBulkBatch[] // NEW RELATION
+  atsBatches      AtsBulkBatch[]
+  campusDrive     PlacementDrive?
 
   @@index([recruiterUserId], map: "idx_jobs_recruiter_user_id")
   @@index([status, createdAt], map: "idx_jobs_status_created_at")
   @@index([source], map: "idx_jobs_source")
   @@index([expiresAt], map: "idx_jobs_expires_at")
   @@index([requiredSkills], map: "idx_jobs_required_skills", type: Gin)
+  @@index([channel, status, createdAt], map: "idx_jobs_channel_status_created")
   @@map("jobs")
 }
 
@@ -598,7 +617,11 @@ model JobApplication {
   resume              Resume?           @relation(fields: [resumeId], references: [id], onDelete: SetNull)
   statusEvents        CandidateStatusEvent[]
   interviews          Interview[]
-  
+
+  // ── Campus Mass Hiring ──
+  campusDetail        CampusApplicationDetail?
+  campusOffer         PlacementOffer?
+
   @@unique([jobId, candidateUserId], map: "uq_job_applications_job_candidate")
   @@index([candidateUserId], map: "idx_job_applications_candidate_user_id")
   @@index([jobId], map: "idx_job_applications_job_id")
@@ -667,7 +690,7 @@ model Interview {
   eventLogs         InterviewEventLog[]
   recordings        InterviewRecording[]
   aiAssessments     InterviewAiAssessment[]
-  feedbacks         RecruiterInterviewFeedback[] // NEW RELATION
+  feedbacks         RecruiterInterviewFeedback[]
 
   @@index([candidateUserId], map: "idx_interviews_candidate_user_id")
   @@index([recruiterUserId], map: "idx_interviews_recruiter_user_id")
@@ -721,7 +744,7 @@ model RecruiterInterviewRound {
   interview       Interview            @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   meetingRoom     InterviewRoom?       @relation(fields: [meetingRoomId], references: [id], onDelete: SetNull)
   notes           RecruiterInterviewNote[]
-  interviewFeedback RecruiterInterviewFeedback? // FIXED: Renamed to avoid collision with `feedback String?`
+  interviewFeedback RecruiterInterviewFeedback?
 
   @@unique([interviewId, roundNumber], map: "uq_recruiter_round_interview_number")
   @@index([scheduledAt], map: "idx_recruiter_rounds_scheduled")
@@ -931,10 +954,9 @@ model RecruiterInterviewNote {
   @@map("recruiter_interview_notes")
 }
 
-// UPDATED: MockInterviewAnswer now correctly uses session_id
 model MockInterviewAnswer {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sessionId       String   @map("session_id") @db.Uuid // FIXED: was interview_id
+  sessionId       String   @map("session_id") @db.Uuid
   questionNumber  Int      @map("question_number")
   question        String
   userAnswer      String   @map("user_answer")
@@ -942,7 +964,7 @@ model MockInterviewAnswer {
   answerScore     Float?   @map("answer_score")
   submittedAt     DateTime @default(now()) @map("submitted_at") @db.Timestamptz(6)
 
-  session         MockInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade) // FIXED relation
+  session         MockInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, questionNumber], map: "uq_mock_answer_session_question")
   @@index([sessionId], map: "idx_mock_answers_session_id")
@@ -973,8 +995,9 @@ model Notification {
 }
 
 // -----------------------------
-// NEW: ATS Bulk Batches (Required by ats.service.ts)
+// ATS Bulk Batches
 // -----------------------------
+
 model AtsBulkBatch {
   id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   jobId            String    @map("job_id") @db.Uuid
@@ -1000,8 +1023,9 @@ model AtsBulkBatch {
 }
 
 // -----------------------------
-// NEW: Mock Interview Sessions (Required by mock-interview.service.ts)
+// Mock Interview Sessions
 // -----------------------------
+
 model MockInterviewSession {
   id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   candidateId        String    @map("candidate_id") @db.Uuid
@@ -1023,8 +1047,9 @@ model MockInterviewSession {
 }
 
 // -----------------------------
-// NEW: Recruiter Interview Feedback (Required by feedback.service.ts)
+// Recruiter Interview Feedback
 // -----------------------------
+
 model RecruiterInterviewFeedback {
   id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   interviewId          String   @map("interview_id") @db.Uuid
@@ -1049,4 +1074,489 @@ model RecruiterInterviewFeedback {
   @@index([interviewId, createdAt], map: "idx_rif_interview_created")
   @@index([recruiterId], map: "idx_rif_recruiter")
   @@map("recruiter_interview_feedback")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HireX · Campus Mass Hiring (integrated module — additive only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum JobChannel {
+  GENERAL
+  CAMPUS
+
+  @@map("job_channel")
+}
+
+enum DriveStatus {
+  DRAFT
+  PENDING_APPROVAL
+  PUBLISHED
+  CLOSED
+  CANCELLED
+  COMPLETED
+
+  @@map("drive_status")
+}
+
+enum ProgramLevel {
+  UG
+  PG
+  DIPLOMA
+  OTHER
+
+  @@map("program_level")
+}
+
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  SUSPENDED
+  ALUMNI
+
+  @@map("student_status")
+}
+
+enum CollegeRole {
+  COLLEGE_ADMIN
+  TPO
+  PLACEMENT_COORDINATOR
+
+  @@map("college_role")
+}
+
+enum CompanyRole {
+  OWNER
+  ADMIN
+  RECRUITER
+
+  @@map("company_role")
+}
+
+enum EligibilityStatus {
+  ELIGIBLE
+  NOT_ELIGIBLE
+  NEEDS_INFO
+
+  @@map("eligibility_status")
+}
+
+enum OfferStatus {
+  DRAFT
+  RELEASED
+  ACCEPTED
+  DECLINED
+  REVOKED
+  EXPIRED
+  JOINED
+
+  @@map("offer_status")
+}
+
+enum RuleCombinator {
+  AND
+  OR
+
+  @@map("rule_combinator")
+}
+
+enum CampusBatchType {
+  IMPORT_STUDENTS
+  BULK_STATUS
+  BULK_NOTIFY
+  EXPORT
+
+  @@map("campus_batch_type")
+}
+
+enum CampusBatchStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@map("campus_batch_status")
+}
+
+enum CampusBatchItemStatus {
+  PENDING
+  OK
+  SKIPPED
+  FAILED
+
+  @@map("campus_batch_item_status")
+}
+
+// ── Company tenancy ─────────────────────────────────────────────────────────
+model Company {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  slug        String   @unique
+  website     String?
+  logoUrl     String?  @map("logo_url")
+  description String?
+  location    String?
+  size        String?
+  industry    String[] @default([])
+  isVerified  Boolean  @default(false) @map("is_verified")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdBy User?             @relation("CampusCompanyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  members   CompanyMember[]
+  drives    PlacementDrive[]
+  offers    PlacementOffer[]
+  batches   CampusBulkBatch[]
+
+  @@index([name], map: "idx_companies_name")
+  @@map("companies")
+}
+
+model CompanyMember {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String      @map("company_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  role      CompanyRole @default(RECRUITER)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation("CampusCompanyMembers", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId], map: "uq_company_members_company_user")
+  @@index([userId], map: "idx_company_members_user_id")
+  @@map("company_members")
+}
+
+// ── College / academic graph (dynamic — no hardcoded branches) ──────────────
+model College {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  slug        String   @unique
+  code        String?  @unique
+  city        String?
+  state       String?
+  country     String?  @default("India")
+  website     String?
+  logoUrl     String?  @map("logo_url")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdBy   User?                   @relation("CampusCollegeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  campuses    Campus[]
+  departments Department[]
+  branches    Branch[]
+  members     CollegeMember[]
+  students    CollegeStudent[]
+  policy      CollegePlacementPolicy?
+  driveScopes DriveCollege[]
+  batches     CampusBulkBatch[]
+
+  @@index([name], map: "idx_colleges_name")
+  @@map("colleges")
+}
+
+model Campus {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collegeId String   @map("college_id") @db.Uuid
+  name      String
+  city      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  college     College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  departments Department[]
+  students    CollegeStudent[]
+
+  @@unique([collegeId, name], map: "uq_campuses_college_name")
+  @@map("campuses")
+}
+
+model Department {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collegeId String   @map("college_id") @db.Uuid
+  campusId  String?  @map("campus_id") @db.Uuid
+  name      String
+  code      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  college  College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  campus   Campus?  @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  branches Branch[]
+
+  @@unique([collegeId, code], map: "uq_departments_college_code")
+  @@map("departments")
+}
+
+model Branch {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collegeId    String       @map("college_id") @db.Uuid
+  departmentId String       @map("department_id") @db.Uuid
+  name         String
+  code         String
+  programLevel ProgramLevel @default(UG) @map("program_level")
+  canonicalKey String?      @map("canonical_key")
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  college    College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  department Department       @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  aliases    BranchAlias[]
+  students   CollegeStudent[]
+
+  @@unique([departmentId, code], map: "uq_branches_department_code")
+  @@index([collegeId], map: "idx_branches_college_id")
+  @@index([canonicalKey], map: "idx_branches_canonical_key")
+  @@map("branches")
+}
+
+model BranchAlias {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  alias    String
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, alias], map: "uq_branch_aliases_branch_alias")
+  @@map("branch_aliases")
+}
+
+model CollegeMember {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collegeId String      @map("college_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  role      CollegeRole
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  college College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user    User    @relation("CampusCollegeMembers", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([collegeId, userId], map: "uq_college_members_college_user")
+  @@index([userId], map: "idx_college_members_user_id")
+  @@map("college_members")
+}
+
+model CollegeStudent {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String        @map("user_id") @db.Uuid
+  collegeId          String        @map("college_id") @db.Uuid
+  branchId           String        @map("branch_id") @db.Uuid
+  campusId           String?       @map("campus_id") @db.Uuid
+  enrollmentNo       String        @map("enrollment_no")
+  graduationYear     Int           @map("graduation_year")
+  cgpa               Decimal?      @db.Decimal(4, 2)
+  tenthPct           Decimal?      @map("tenth_pct") @db.Decimal(5, 2)
+  twelfthPct         Decimal?      @map("twelfth_pct") @db.Decimal(5, 2)
+  activeBacklogs     Int?          @map("active_backlogs")
+  historicalBacklogs Int?          @map("historical_backlogs")
+  customAcademics    Json          @default("{}") @map("custom_academics")
+  status             StudentStatus @default(ACTIVE)
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user    User    @relation("CampusStudents", fields: [userId], references: [id], onDelete: Cascade)
+  college College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  campus  Campus? @relation(fields: [campusId], references: [id], onDelete: SetNull)
+
+  @@unique([collegeId, enrollmentNo], map: "uq_college_students_enrollment")
+  @@unique([userId, collegeId], map: "uq_college_students_user_college")
+  @@index([collegeId, graduationYear], map: "idx_college_students_college_year")
+  @@index([branchId], map: "idx_college_students_branch_id")
+  @@index([userId], map: "idx_college_students_user_id")
+  @@map("college_students")
+}
+
+model CollegePlacementPolicy {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collegeId           String   @unique @map("college_id") @db.Uuid
+  allowMultipleOffers Boolean  @default(false) @map("allow_multiple_offers")
+  offerAcceptDays     Int      @default(7) @map("offer_accept_days")
+  minCgpaFloor        Decimal? @map("min_cgpa_floor") @db.Decimal(4, 2)
+  rules               Json     @default("{}")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  college College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+
+  @@map("college_placement_policies")
+}
+
+// ── Drive (1:1 with Job; applications stay JobApplication) ──────────────────
+model PlacementDrive {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId              String      @unique @map("job_id") @db.Uuid
+  companyId          String      @map("company_id") @db.Uuid
+  createdByUserId    String      @map("created_by_user_id") @db.Uuid
+  title              String
+  status             DriveStatus @default(DRAFT)
+  applicationOpenAt  DateTime?   @map("application_open_at") @db.Timestamptz(6)
+  applicationCloseAt DateTime?   @map("application_close_at") @db.Timestamptz(6)
+  driveDate          DateTime?   @map("drive_date") @db.Timestamptz(6)
+  vacancies          Int         @default(1)
+  ctcMin             Decimal?    @map("ctc_min") @db.Decimal(12, 2)
+  ctcMax             Decimal?    @map("ctc_max") @db.Decimal(12, 2)
+  currency           String      @default("INR")
+  location           String?
+  workMode           String?     @map("work_mode")
+  employmentType     String?     @map("employment_type")
+  requiredDocuments  String[]    @default([]) @map("required_documents")
+  roundsTemplate     Json        @default("[]") @map("rounds_template")
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job         Job                       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  company     Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy   User                      @relation("CampusDriveCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  colleges    DriveCollege[]
+  eligibility DriveEligibility?
+  criteria    DriveBranchCriterion[]
+  details     CampusApplicationDetail[]
+  offers      PlacementOffer[]
+  batches     CampusBulkBatch[]
+
+  @@index([companyId, status], map: "idx_placement_drives_company_status")
+  @@index([status, applicationCloseAt], map: "idx_placement_drives_status_close")
+  @@map("placement_drives")
+}
+
+model DriveCollege {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driveId   String   @map("drive_id") @db.Uuid
+  collegeId String   @map("college_id") @db.Uuid
+  scope     Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  drive   PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  college College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+
+  @@unique([driveId, collegeId], map: "uq_drive_colleges_drive_college")
+  @@index([collegeId], map: "idx_drive_colleges_college_id")
+  @@map("drive_colleges")
+}
+
+model DriveEligibility {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driveId    String         @unique @map("drive_id") @db.Uuid
+  combinator RuleCombinator @default(AND)
+  rule       Json           @default("{}")
+  updatedAt  DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  drive PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+
+  @@map("drive_eligibilities")
+}
+
+model DriveBranchCriterion {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driveId               String   @map("drive_id") @db.Uuid
+  branchSelector        String   @map("branch_selector")
+  minCgpa               Decimal? @map("min_cgpa") @db.Decimal(4, 2)
+  minTenthPct           Decimal? @map("min_tenth_pct") @db.Decimal(5, 2)
+  minTwelfthPct         Decimal? @map("min_twelfth_pct") @db.Decimal(5, 2)
+  maxActiveBacklogs     Int?     @map("max_active_backlogs")
+  maxHistoricalBacklogs Int?     @map("max_historical_backlogs")
+  allowHistorical       Boolean  @default(true) @map("allow_historical")
+  custom                Json     @default("{}")
+
+  drive PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+
+  @@unique([driveId, branchSelector], map: "uq_drive_branch_criteria")
+  @@map("drive_branch_criteria")
+}
+
+// ── Campus application metadata ─────────────────────────────────────────────
+model CampusApplicationDetail {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId       String            @unique @map("application_id") @db.Uuid
+  driveId             String            @map("drive_id") @db.Uuid
+  eligibilityStatus   EligibilityStatus @map("eligibility_status")
+  eligibilitySnapshot Json              @default("{}") @map("eligibility_snapshot")
+  missingFields       String[]          @default([]) @map("missing_fields")
+  currentRoundKey     String?           @map("current_round_key")
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  application JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  drive       PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+
+  @@index([driveId, eligibilityStatus], map: "idx_campus_details_drive_eligibility")
+  @@map("campus_application_details")
+}
+
+model PlacementOffer {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId String      @unique @map("application_id") @db.Uuid
+  driveId       String      @map("drive_id") @db.Uuid
+  companyId     String      @map("company_id") @db.Uuid
+  status        OfferStatus @default(DRAFT)
+  ctc           Decimal?    @db.Decimal(12, 2)
+  currency      String      @default("INR")
+  roleTitle     String?     @map("role_title")
+  location      String?
+  joiningDate   DateTime?   @map("joining_date") @db.Timestamptz(6)
+  letterPath    String?     @map("letter_path")
+  releasedAt    DateTime?   @map("released_at") @db.Timestamptz(6)
+  respondedAt   DateTime?   @map("responded_at") @db.Timestamptz(6)
+  expiresAt     DateTime?   @map("expires_at") @db.Timestamptz(6)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  application JobApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  drive       PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Restrict)
+  company     Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([driveId, status], map: "idx_placement_offers_drive_status")
+  @@index([companyId, status], map: "idx_placement_offers_company_status")
+  @@map("placement_offers")
+}
+
+// ── Async bulk operations ───────────────────────────────────────────────────
+model CampusBulkBatch {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type            CampusBatchType
+  status          CampusBatchStatus @default(QUEUED)
+  driveId         String?           @map("drive_id") @db.Uuid
+  collegeId       String?           @map("college_id") @db.Uuid
+  companyId       String?           @map("company_id") @db.Uuid
+  createdByUserId String            @map("created_by_user_id") @db.Uuid
+  idempotencyKey  String?           @unique @map("idempotency_key")
+  total           Int               @default(0)
+  processed       Int               @default(0)
+  failed          Int               @default(0)
+  payload         Json              @default("{}")
+  result          Json              @default("{}")
+  error           String?
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt       DateTime?         @map("started_at") @db.Timestamptz(6)
+  completedAt     DateTime?         @map("completed_at") @db.Timestamptz(6)
+
+  drive     PlacementDrive?       @relation(fields: [driveId], references: [id], onDelete: SetNull)
+  college   College?              @relation(fields: [collegeId], references: [id], onDelete: SetNull)
+  company   Company?              @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdBy User                  @relation("CampusBatchCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items     CampusBulkBatchItem[]
+
+  @@index([status], map: "idx_campus_batches_status")
+  @@index([driveId], map: "idx_campus_batches_drive_id")
+  @@index([collegeId], map: "idx_campus_batches_college_id")
+  @@map("campus_bulk_batches")
+}
+
+model CampusBulkBatchItem {
+  id        String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId   String                @map("batch_id") @db.Uuid
+  rowNumber Int                   @map("row_number")
+  refId     String?               @map("ref_id")
+  status    CampusBatchItemStatus @default(PENDING)
+  error     String?
+
+  batch CampusBulkBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, rowNumber], map: "uq_campus_batch_items_batch_row")
+  @@index([batchId, status], map: "idx_campus_batch_items_batch_status")
+  @@map("campus_bulk_batch_items")
 }

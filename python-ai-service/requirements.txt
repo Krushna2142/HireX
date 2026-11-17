@@ -1,12 +1,15 @@
+# python-ai-service/requirements.txt
 fastapi
 uvicorn[standard]
 pydantic
 pydantic-settings
 python-multipart
-requests
 pdfplumber
 python-docx
 PyMuPDF
+scikit-learn
 spacy
 numpy
-scikit-learn
+scipy
+nltk
+openai>=1.0.0  # <-- ADD THIS FOR NVIDIA NIM

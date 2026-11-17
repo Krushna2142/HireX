@@ -54,7 +54,10 @@ Make questions progressively harder. Focus on: problem-solving, communication, r
     jobDescription?: string,
   ) {
     const rubricStr = Object.entries(rubric)
-      .map(([key, weight]) => `- ${key}: ${(weight as number * 100).toFixed(0)}%`)
+      .map(
+        ([key, weight]) =>
+          `- ${key}: ${((weight as number) * 100).toFixed(0)}%`,
+      )
       .join('\n');
 
     const prompt = `Evaluate this interview transcript based on the rubric:
@@ -92,22 +95,23 @@ Return ONLY valid JSON (no markdown):
     try {
       const result = await this.model.generateContent(prompt);
       let text = result.response.text().trim();
-      
+
       // Remove markdown code blocks if present
       text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-      
+
       const evaluation = JSON.parse(text);
       return {
-        overall_score: Math.min(100, Math.max(0, evaluation.overall_score || 50)),
+        overall_score: Math.min(
+          100,
+          Math.max(0, evaluation.overall_score || 50),
+        ),
         breakdown: evaluation.breakdown || {
           communication: 0,
           technical: 0,
           problem_solving: 0,
           cultural_fit: 0,
         },
-        feedback:
-          evaluation.feedback ||
-          'Interview evaluation completed',
+        feedback: evaluation.feedback || 'Interview evaluation completed',
         strengths: evaluation.strengths || [],
         weaknesses: evaluation.weaknesses || [],
       };
@@ -128,7 +132,10 @@ Return ONLY valid JSON (no markdown):
     }
   }
 
-  async transcribeAudio(audioBuffer: Buffer, language: string = 'en'): Promise<string> {
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    language: string = 'en',
+  ): Promise<string> {
     // NOTE: Gemini's vision can handle audio via base64 with specific mime types
     // For production, consider using a dedicated speech-to-text service
     // This is a placeholder implementation
@@ -169,7 +176,8 @@ Return JSON with:
       return JSON.parse(text);
     } catch (err) {
       return {
-        feedback: 'Strong performance overall. Continue building on these strengths.',
+        feedback:
+          'Strong performance overall. Continue building on these strengths.',
         recommendations: [
           'Practice explaining technical decisions',
           'Focus on edge cases',
@@ -217,10 +225,7 @@ Return JSON:
           'Real-world application',
           'Challenges/limitations',
         ],
-        followUpQuestions: [
-          'How would you test this?',
-          'What are edge cases?',
-        ],
+        followUpQuestions: ['How would you test this?', 'What are edge cases?'],
         scoringRubric: {
           clarity: 0.3,
           completeness: 0.4,
@@ -253,7 +258,10 @@ Return JSON:
     type: string;
     category: string;
   }> {
-    const questions: Record<string, Array<{ question: string; type: string; category: string }>> = {
+    const questions: Record<
+      string,
+      Array<{ question: string; type: string; category: string }>
+    > = {
       junior: [
         {
           question: 'Describe a project you built and what you learned',
@@ -310,17 +318,20 @@ Return JSON:
       ],
       senior: [
         {
-          question: 'Design a fault-tolerant distributed system for payment processing',
+          question:
+            'Design a fault-tolerant distributed system for payment processing',
           type: 'technical',
           category: 'system-design',
         },
         {
-          question: 'How would you scale an existing monolith to microservices?',
+          question:
+            'How would you scale an existing monolith to microservices?',
           type: 'situational',
           category: 'architecture',
         },
         {
-          question: 'Describe your approach to technical mentorship and organization growth',
+          question:
+            'Describe your approach to technical mentorship and organization growth',
           type: 'behavioral',
           category: 'leadership',
         },

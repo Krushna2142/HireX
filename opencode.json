@@ -1,0 +1,48 @@
+{
+  "$schema": "https://opencode.dev/schema.json",
+  "project": {
+    "name": "HireX",
+    "description": "AI-Powered Hiring Platform - Next.js + NestJS + Prisma + Python AI",
+    "root": "."
+  },
+  "compaction": {
+    "enabled": true,
+    "threshold": 0.75,
+    "maxTokens": 80000,
+    "preservePatterns": [
+      "AGENTS.md",
+      "CURRENT_STATUS.md",
+      "ACTIVE_TASK.md",
+      "docs/**/*.md",
+      "tasks/**/*.md"
+    ]
+  },
+  "providers": {
+    "default": "anthropic",
+    "anthropic": {
+      "model": "claude-3-5-sonnet-20241022"
+    }
+  },
+  "permissions": {
+    "read": ["**"],
+    "write": ["docs/**", "tasks/**", ".opencode/**"],
+    "exec": ["npm run build", "npm run lint", "npm run test", "npx prisma validate"]
+  },
+  "commands": {
+    "start-task": {
+      "description": "Load project instructions, current status, active task, and produce implementation plan",
+      "script": "opencode-command start-task"
+    },
+    "finish-task": {
+      "description": "Verify changes, run tests, update documentation, generate handoff",
+      "script": "opencode-command finish-task"
+    },
+    "context-check": {
+      "description": "Evaluate documentation completeness, identify outdated info, missing task state",
+      "script": "opencode-command context-check"
+    }
+  },
+  "projectInstructions": "AGENTS.md",
+  "statusFile": "tasks/CURRENT_STATUS.md",
+  "activeTaskFile": "tasks/ACTIVE_TASK.md"
+}

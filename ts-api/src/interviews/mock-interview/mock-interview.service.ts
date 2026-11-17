@@ -1,5 +1,4 @@
-// ts-api/src/interviews/mock-interview/mock-interview.service.ts (COMPLETE)
-
+// ts-api/src/interviews/mock-interview/mock-interview.service.ts
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AIService } from '../../ai/ai.service';
@@ -13,33 +12,27 @@ export class MockInterviewService {
     private aiService: AIService,
   ) {}
 
-  /**
-   * Start a new mock interview session
-   */
+  /** Start a new mock interview session */
   async startSession(
     candidateId: string,
     jobTitle: string,
     topic: string,
     difficulty: 'junior' | 'mid' | 'senior' = 'mid',
   ) {
-    const session = await this.prisma.mock_interview_sessions.create({
+    const session = await this.prisma.mockInterviewSession.create({
       data: {
-        candidate_id: candidateId,
-        job_title: jobTitle,
+        candidateId,
+        jobTitle,
         topic,
         difficulty,
         status: 'active',
-        total_questions: 5,
+        totalQuestions: 5,
       },
     });
 
     this.logger.log(`Mock interview started: ${session.id}`);
 
-    // Generate first question
-    const question = await this.aiService.generateMockQuestion(
-      topic,
-      difficulty,
-    );
+    const question = await this.aiService.generateMockQuestion(topic, difficulty);
 
     return {
       sessionId: session.id,
@@ -50,33 +43,24 @@ export class MockInterviewService {
     };
   }
 
-  /**
-   * Get next question in session
-   */
+  /** Get next question in session */
   async getNextQuestion(sessionId: string) {
-    const session = await this.prisma.mock_interview_sessions.findUnique({
+    const session = await this.prisma.mockInterviewSession.findUnique({
       where: { id: sessionId },
     });
+    if (!session) throw new NotFoundException('Session not found');
 
-    if (!session) {
-      throw new NotFoundException('Session not found');
-    }
-
-    // Get previous answers for context
-    const previousAnswers = await this.prisma.mock_interview_answers.findMany({
-      where: { session_id: sessionId },
-      select: { user_answer: true },
+    const previousAnswers = await this.prisma.mockInterviewAnswer.findMany({
+      where: { sessionId },
+      select: { userAnswer: true },
       take: 3,
-      orderBy: { submitted_at: 'desc' },
+      orderBy: { submittedAt: 'desc' },
     });
 
-    const contextAnswers = previousAnswers.map((a) => a.user_answer);
-
-    // Generate next question
     const question = await this.aiService.generateMockQuestion(
       session.topic,
       session.difficulty,
-      contextAnswers,
+      previousAnswers.map((a) => a.userAnswer),
     );
 
     return {
@@ -87,56 +71,38 @@ export class MockInterviewService {
     };
   }
 
-  /**
-   * Submit answer and get AI evaluation
-   */
+  /** Submit answer and get AI evaluation */
   async submitAnswer(sessionId: string, answerText: string) {
-    const session = await this.prisma.mock_interview_sessions.findUnique({
+    const session = await this.prisma.mockInterviewSession.findUnique({
       where: { id: sessionId },
     });
+    if (!session) throw new NotFoundException('Session not found');
 
-    if (!session) {
-      throw new NotFoundException('Session not found');
-    }
-
-    // Store answer
-    const answer = await this.prisma.mock_interview_answers.create({
+    const answer = await this.prisma.mockInterviewAnswer.create({
       data: {
-        session_id: sessionId,
-        question_number: session.completed_questions + 1,
+        sessionId,
+        questionNumber: session.completedQuestions + 1,
         question: 'User submitted answer',
-        user_answer: answerText,
-        submitted_at: new Date(),
+        userAnswer: answerText,
+        submittedAt: new Date(),
       },
     });
 
-    // Generate feedback using AI
-    const feedback = await this.aiService.generateFeedback(
-      answerText,
-      {
-        topic: session.topic,
-        difficulty: session.difficulty,
-      },
-    );
+    // AIService.generateFeedback accepts performance metrics only.
+    const feedback = await this.aiService.generateFeedback(answerText, {});
+    const answerScore = this.scoreAnswer(answerText);
 
-    // Score the answer (0-100)
-    const answerScore = await this.scoreAnswer(answerText, session.topic);
-
-    // Update answer with feedback and score
-    const updatedAnswer = await this.prisma.mock_interview_answers.update({
+    const updatedAnswer = await this.prisma.mockInterviewAnswer.update({
       where: { id: answer.id },
       data: {
-        ai_feedback: feedback.feedback,
-        answer_score: answerScore,
+        aiFeedback: feedback.feedback,
+        answerScore,
       },
     });
 
-    // Update session progress
-    await this.prisma.mock_interview_sessions.update({
+    await this.prisma.mockInterviewSession.update({
       where: { id: sessionId },
-      data: {
-        completed_questions: { increment: 1 },
-      },
+      data: { completedQuestions: { increment: 1 } },
     });
 
     return {
@@ -144,106 +110,77 @@ export class MockInterviewService {
       feedback: feedback.feedback,
       score: answerScore,
       recommendations: feedback.recommendations,
-      shouldContinue: session.completed_questions < session.total_questions - 1,
+      shouldContinue: session.completedQuestions < session.totalQuestions - 1,
     };
   }
 
-  /**
-   * Score a mock interview answer
-   */
-  private async scoreAnswer(answerText: string, topic: string): Promise<number> {
-    // Simple length-based scoring + keyword matching
+  /** Heuristic answer scoring (0-100) */
+  private scoreAnswer(answerText: string): number {
     const minWords = 20;
     const words = answerText.trim().split(/\s+/).length;
+    let score = Math.min(100, (words / minWords) * 50);
 
-    let score = Math.min(100, (words / minWords) * 50); // 50% for length
-
-    // Add bonus for key indicators
-    if (
-      answerText.toLowerCase().includes('because') ||
-      answerText.toLowerCase().includes('example') ||
-      answerText.toLowerCase().includes('approach')
-    ) {
+    const lower = answerText.toLowerCase();
+    if (lower.includes('because') || lower.includes('example') || lower.includes('approach')) {
       score += 20;
     }
-
-    if (
-      answerText.toLowerCase().includes('challenge') ||
-      answerText.toLowerCase().includes('solution') ||
-      answerText.toLowerCase().includes('learned')
-    ) {
+    if (lower.includes('challenge') || lower.includes('solution') || lower.includes('learned')) {
       score += 15;
     }
 
     return Math.min(100, Math.max(0, Math.round(score)));
   }
 
-  /**
-   * Complete session and calculate overall score
-   */
+  /** Complete session and calculate overall score */
   async completeSession(sessionId: string) {
-    const session = await this.prisma.mock_interview_sessions.findUnique({
+    const session = await this.prisma.mockInterviewSession.findUnique({
       where: { id: sessionId },
-      include: { mock_interview_answers: true },
+      include: { answers: true },
     });
+    if (!session) throw new NotFoundException('Session not found');
 
-    if (!session) {
-      throw new NotFoundException('Session not found');
-    }
+    const scored = session.answers.filter((a) => a.answerScore !== null);
+    const overallScore = scored.length
+      ? Math.round(
+          scored.reduce((sum, a) => sum + (a.answerScore ?? 0), 0) / scored.length,
+        )
+      : 0;
 
-    // Calculate overall score
-    const answers = session.mock_interview_answers;
-    const scoredAnswers = answers.filter((a) => a.answer_score !== null);
-
-    const overallScore =
-      scoredAnswers.length > 0
-        ? Math.round(
-            scoredAnswers.reduce((sum, a) => sum + (a.answer_score || 0), 0) /
-              scoredAnswers.length,
-          )
-        : 0;
-
-    // Update session
-    const completed = await this.prisma.mock_interview_sessions.update({
+    const completed = await this.prisma.mockInterviewSession.update({
       where: { id: sessionId },
       data: {
         status: 'completed',
-        overall_score: overallScore,
-        completed_at: new Date(),
+        overallScore,
+        completedAt: new Date(),
       },
     });
 
-    this.logger.log(`Mock interview completed: ${sessionId} (score: ${overallScore})`);
+    this.logger.log(
+      `Mock interview completed: ${sessionId} (score: ${overallScore})`,
+    );
 
     return {
       sessionId: completed.id,
       status: 'completed',
       overallScore,
-      questionsAnswered: completed.completed_questions,
+      questionsAnswered: completed.completedQuestions,
       summary: this.generateSummary(overallScore, session.difficulty),
     };
   }
 
-  /**
-   * Get session history for candidate
-   */
+  /** Session history for a candidate */
   async getSessionHistory(candidateId: string) {
-    return this.prisma.mock_interview_sessions.findMany({
-      where: { candidate_id: candidateId },
-      orderBy: { created_at: 'desc' },
+    return this.prisma.mockInterviewSession.findMany({
+      where: { candidateId },
+      orderBy: { createdAt: 'desc' },
       take: 20,
     });
   }
 
   private generateSummary(score: number, difficulty: string): string {
-    if (score >= 85) {
-      return `Excellent performance! Ready for ${difficulty} level role interviews.`;
-    } else if (score >= 70) {
-      return `Good job! With more practice, you'll be ready for ${difficulty} roles.`;
-    } else if (score >= 55) {
-      return `Solid start. Focus on examples and detailed explanations.`;
-    } else {
-      return `Keep practicing! Focus on structured answers with real examples.`;
-    }
+    if (score >= 85) return `Excellent performance! Ready for ${difficulty} level role interviews.`;
+    if (score >= 70) return `Good job! With more practice, you'll be ready for ${difficulty} roles.`;
+    if (score >= 55) return 'Solid start. Focus on examples and detailed explanations.';
+    return 'Keep practicing! Focus on structured answers with real examples.';
   }
 }

@@ -75,8 +75,14 @@ export default registerAs('webrtc', (): WebRTCConfig => {
     pingTimeout: parseInt(process.env.WEBRTC_PING_TIMEOUT || '5000', 10),
 
     // ── Room Management ──────────────────────────────────────────────────────
-    maxParticipants: parseInt(process.env.INTERVIEW_ROOM_MAX_PARTICIPANTS || '6', 10),
-    roomLinkExpiryMins: parseInt(process.env.INTERVIEW_ROOM_LINK_EXPIRY_MINS || '120', 10),
+    maxParticipants: parseInt(
+      process.env.INTERVIEW_ROOM_MAX_PARTICIPANTS || '6',
+      10,
+    ),
+    roomLinkExpiryMins: parseInt(
+      process.env.INTERVIEW_ROOM_LINK_EXPIRY_MINS || '120',
+      10,
+    ),
 
     // ── ICE Servers ──────────────────────────────────────────────────────────
     // Clients use these to establish NAT traversal
@@ -85,13 +91,19 @@ export default registerAs('webrtc', (): WebRTCConfig => {
 
     // ── Metrics ──────────────────────────────────────────────────────────────
     metricsEnabled: process.env.ENABLE_METRICS_COLLECTION !== 'false',
-    metricsIntervalMs: parseInt(process.env.METRICS_COLLECTION_INTERVAL_MS || '2000', 10),
+    metricsIntervalMs: parseInt(
+      process.env.METRICS_COLLECTION_INTERVAL_MS || '2000',
+      10,
+    ),
 
     // ── SFU Fallback (for large groups) ──────────────────────────────────────
     // Use full-mesh WebRTC for ≤6 participants (direct peer connections)
     // Switch to SFU (Selective Forwarding Unit) for larger groups
     sfuEnabled: process.env.SFU_ENABLED === 'true',
-    sfuProvider: (process.env.SFU_PROVIDER || 'none') as 'mediasoup' | 'livekit' | 'none',
+    sfuProvider: (process.env.SFU_PROVIDER || 'none') as
+      | 'mediasoup'
+      | 'livekit'
+      | 'none',
     livekitUrl: process.env.LIVEKIT_URL,
     livekitApiKey: process.env.LIVEKIT_API_KEY,
     livekitApiSecret: process.env.LIVEKIT_API_SECRET,

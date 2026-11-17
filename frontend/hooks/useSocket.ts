@@ -13,7 +13,7 @@ const getGlobalSocket = (): Socket => {
     return globalSocket;
   }
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+ const apiUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
   
   globalSocket = io(apiUrl, {
     reconnection: true,

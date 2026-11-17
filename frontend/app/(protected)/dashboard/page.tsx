@@ -1,8 +1,5 @@
 'use client';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// frontend/app/(protected)/dashboard/page.tsx
-
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -27,7 +24,7 @@ export default function DashboardPage() {
   const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !user) return;
 
     const role = normalizeRole(user?.role);
 
@@ -37,7 +34,7 @@ export default function DashboardPage() {
     }
 
     router.replace('/candidate/dashboard');
-  }, [loading, router, user?.role]);
+  }, [loading, router, user, user?.role]);
 
   return (
     <main

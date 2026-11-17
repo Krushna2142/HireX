@@ -10,9 +10,13 @@ import { useEffect, useRef } from 'react';
 import { mutate }            from 'swr';
 
 // Strip /api suffix — SSE endpoint is on the base backend URL
+// current produces: http://localhost:8080/api/v1 → strips nothing → /api/v1/api/jobs/stream
+// fix:
 const BACKEND_BASE =
   (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api')
-    .replace(/\/api$/, '');
+    .replace(/\/api\/?$/, '')
+    .replace(/\/$/, '');
+// then SSE url = `${BACKEND_BASE}/api/jobs/stream`
 
 export function useJobStream() {
   const esRef = useRef<EventSource | null>(null);

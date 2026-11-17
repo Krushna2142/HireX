@@ -11,7 +11,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 
@@ -23,6 +25,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { getSupabaseServiceClient } from '../lib/supabase';
 
 type CompleteOAuthSignupDto = {
   onboardingToken: string;
@@ -67,6 +70,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @Throttle({ medium: { limit: 3, ttl: 900000 } }) // 3 per 15 min
   async register(
     @Body() body: RegisterDto,
     @Req() req: Request,
@@ -82,6 +86,10 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({
+  short: { limit: 300, ttl: 60000 },     // ← was missing: this bucket was still 10/min
+  medium: { limit: 300, ttl: 900000 },
+})
   async login(
     @Body() body: LoginDto,
     @Req() req: Request,
@@ -97,6 +105,7 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ long: { limit: 20, ttl: 3600000 } }) // 20 per hour
   async refreshToken(
     @Body() body: RefreshTokenDto,
     @Req() req: Request,
@@ -136,9 +145,23 @@ export class AuthController {
 
   // ── Current User ─────────────────────────────────────────────────────────
 
+  @Public()
   @Get('me')
-  async me(@Req() req: AuthenticatedRequest) {
-    return this.auth.getMe(req.user!.id);
+  async me(@Req() req: Request) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw new UnauthorizedException('Missing Supabase access token');
+    }
+
+    const token = authHeader.slice(7).trim();
+    const supabase = getSupabaseServiceClient();
+
+    const { data: { user: supabaseUser }, error } = await supabase.auth.getUser(token);
+    if (error || !supabaseUser?.email) {
+      throw new UnauthorizedException('Invalid or expired Supabase token');
+    }
+
+    return this.auth.getMeByEmail(supabaseUser.email);
   }
 
   // ── Email Verification ──────────────────────────────────────────────────
@@ -146,12 +169,14 @@ export class AuthController {
   @Public()
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ medium: { limit: 5, ttl: 900000 } }) // 5 per 15 min
   async verifyEmail(@Body() body: VerifyEmailDto) {
     return this.auth.verifyEmail(body.token);
   }
 
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ long: { limit: 3, ttl: 3600000 } }) // 3 per hour
   async resendVerification(@Req() req: AuthenticatedRequest) {
     return this.auth.resendVerification(req.user!.id);
   }
@@ -161,6 +186,7 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ medium: { limit: 3, ttl: 900000 } }) // 3 per 15 min
   async forgotPassword(@Body() body: ForgotPasswordDto, @Req() req: Request) {
     return this.auth.forgotPassword(body, this.meta(req));
   }
@@ -170,6 +196,7 @@ export class AuthController {
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ medium: { limit: 3, ttl: 900000 } }) // 3 per 15 min
   async resetPassword(@Body() body: ResetPasswordDto, @Req() req: Request) {
     return this.auth.resetPassword(body, this.meta(req));
   }

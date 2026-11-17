@@ -1,5 +1,3 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // ts-api/src/ats/ats.controller.ts
 import {
   Body,
@@ -36,22 +34,20 @@ export class AtsController {
     @Param('applicationId', ParseUUIDPipe) applicationId: string,
     @Req() req: any,
   ) {
-    return this.atsService.enqueueSingleApplication(
-      applicationId,
-      getUserId(req),
-    );
+    return this.atsService.enqueueSingleApplication(applicationId, getUserId(req));
   }
 
   @Post('jobs/:jobId/run-bulk')
   runBulk(
     @Param('jobId', ParseUUIDPipe) jobId: string,
-    @Body() body: { vacancyCount?: number },
+    @Body() body: { vacancyCount?: number; shortlistTarget?: number },
     @Req() req: any,
   ) {
     return this.atsService.enqueueBulkForJob(
       jobId,
       getUserId(req),
       Number(body?.vacancyCount ?? 1),
+      body?.shortlistTarget != null ? Number(body.shortlistTarget) : undefined,
     );
   }
 
@@ -66,13 +62,14 @@ export class AtsController {
   @Post('jobs/:jobId/auto-shortlist')
   autoShortlist(
     @Param('jobId', ParseUUIDPipe) jobId: string,
-    @Body() body: { vacancyCount?: number },
+    @Body() body: { vacancyCount?: number; shortlistTarget?: number },
     @Req() req: any,
   ) {
     return this.atsService.autoShortlist(
       jobId,
       getUserId(req),
       Number(body?.vacancyCount ?? 1),
+      body?.shortlistTarget != null ? Number(body.shortlistTarget) : undefined,
     );
   }
 }

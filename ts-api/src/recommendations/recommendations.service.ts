@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable prettier/prettier */
 // src/recommendations/recommendations.service.ts
@@ -230,8 +227,8 @@ export class RecommendationsService {
            lower(skill) = ANY($1::text[]) AS candidate_has
          FROM jobs
          CROSS JOIN LATERAL unnest(COALESCE(required_skills, ARRAY[]::text[])) AS skill
-         WHERE status::text IN ('PUBLISHED', 'published', 'ACTIVE', 'active')
-         GROUP BY skill, candidate_has
+        WHERE status::text IN ('PUBLISHED', 'published', 'ACTIVE', 'active')
+          AND channel = 'GENERAL'         
          ORDER BY COUNT(*) DESC
          LIMIT 20`,
         [userSkills.map((skill) => skill.toLowerCase())],
@@ -372,7 +369,8 @@ export class RecommendationsService {
          apply_url,
          status::text AS status
        FROM jobs
-       WHERE status::text IN ('PUBLISHED', 'published', 'ACTIVE', 'active')
+        WHERE status::text IN ('PUBLISHED', 'published', 'ACTIVE', 'active')
+        AND channel = 'GENERAL'
        ORDER BY created_at DESC
        LIMIT $1`,
       [limit],

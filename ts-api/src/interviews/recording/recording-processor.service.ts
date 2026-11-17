@@ -1,12 +1,12 @@
-// ts-api/src/interviews/recording/recording-processor.service.ts (COMPLETE)
-
+// ts-api/src/interviews/recording/recording-processor.service.ts
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
-import { Processor, Process } from '@nestjs/bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { DatabaseService } from '../../database/database.service';
 import { AIService } from '../../ai/ai.service';
+import { getSupabaseServiceClient } from '../../lib/supabase';
+
+const RECORDING_BUCKET = 'interview-recordings';
 
 @Injectable()
 export class RecordingProcessorService {
@@ -14,213 +14,163 @@ export class RecordingProcessorService {
 
   constructor(
     private prisma: PrismaService,
-    private supabase: DatabaseService,
     private aiService: AIService,
     @InjectQueue('transcription') private transcriptionQueue: Queue,
   ) {}
 
-  /**
-   * Upload recording blob to Supabase Storage
-   * Called from frontend or gateway
-   */
+  /** Upload recording blob to Supabase Storage */
   async uploadRecording(
-    sessionId: string,
-    roundId: string,
+    interviewId: string,
+    roomId: string | null,
     fileBuffer: Buffer,
     fileName: string,
   ) {
-    try {
-      const storagePath = `interview-recordings/${sessionId}/${Date.now()}-${fileName}`;
+    const storagePath = `${interviewId}/${Date.now()}-${fileName}`;
+    const supabase = getSupabaseServiceClient();
 
-      // Upload to Supabase Storage
-      const { data, error } = await this.supabase.storage
-        .from('interview-recordings')
-        .upload(storagePath, fileBuffer, {
-          contentType: 'audio/webm;codecs=opus',
-          upsert: false,
-        });
-
-      if (error) {
-        throw new Error(`Supabase upload failed: ${error.message}`);
-      }
-
-      // Create database record
-      const recording = await this.prisma.interview_recordings.create({
-        data: {
-          session_id: sessionId,
-          recruiter_round_id: roundId,
-          storage_path: storagePath,
-          file_size_bytes: fileBuffer.length,
-          status: 'processing',
-          transcription_status: 'queued',
-        },
+    const { error } = await supabase.storage
+      .from(RECORDING_BUCKET)
+      .upload(storagePath, fileBuffer, {
+        contentType: 'audio/webm;codecs=opus',
+        upsert: false,
       });
 
-      // Queue transcription job
-      await this.transcriptionQueue.add(
-        'transcribe',
-        {
-          recordingId: recording.id,
-          sessionId,
-          storagePath,
-        },
-        {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 2000 },
-          removeOnComplete: true,
-        },
-      );
-
-      this.logger.log(
-        `Recording uploaded: ${recording.id} (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`,
-      );
-
-      return {
-        recordingId: recording.id,
-        status: 'queued',
-        storagePath,
-      };
-    } catch (err) {
-      this.logger.error(`Recording upload failed: ${String(err)}`);
-      throw err;
+    if (error) {
+      this.logger.error(`Recording upload failed: ${error.message}`);
+      throw new Error(`Supabase upload failed: ${error.message}`);
     }
+
+    const recording = await this.prisma.interviewRecording.create({
+      data: {
+        interviewId,
+        roomId,
+        storagePath,
+        fileSizeBytes: BigInt(fileBuffer.length),
+        status: 'processing',
+        transcriptionStatus: 'queued',
+      },
+    });
+
+    await this.transcriptionQueue.add(
+      'transcribe',
+      { recordingId: recording.id, interviewId, storagePath },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: true,
+      },
+    );
+
+    this.logger.log(
+      `Recording uploaded: ${recording.id} (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`,
+    );
+
+    return { recordingId: recording.id, status: 'queued', storagePath };
   }
 
-  /**
-   * Download recording from Supabase and transcribe
-   * Called by BullMQ worker
-   */
+  /** Download recording from Supabase and transcribe */
   async processTranscription(recordingId: string, storagePath: string) {
     try {
       this.logger.log(`Transcribing: ${recordingId}`);
 
-      // Update status
-      await this.prisma.interview_recordings.update({
+      await this.prisma.interviewRecording.update({
         where: { id: recordingId },
-        data: { transcription_status: 'processing' },
+        data: { transcriptionStatus: 'processing' },
       });
 
-      // Download from Supabase
-      const { data, error: downloadError } = await this.supabase.storage
-        .from('interview-recordings')
+      const supabase = getSupabaseServiceClient();
+      const { data, error: downloadError } = await supabase.storage
+        .from(RECORDING_BUCKET)
         .download(storagePath);
 
-      if (downloadError) {
-        throw new Error(`Download failed: ${downloadError.message}`);
+      if (downloadError || !data) {
+        throw new Error(`Download failed: ${downloadError?.message ?? 'no data'}`);
       }
 
-      // Convert to Buffer
       const buffer = Buffer.from(await data.arrayBuffer());
-
-      // Transcribe using Gemini (or external service)
       const transcript = await this.aiService.transcribeAudio(buffer, 'en');
 
-      // Store transcript in database
-      const recording = await this.prisma.interview_recordings.findUnique({
+      const recording = await this.prisma.interviewRecording.findUnique({
         where: { id: recordingId },
       });
 
       if (recording) {
-        await this.prisma.interview_transcripts.create({
+        await this.prisma.interviewTranscript.create({
           data: {
-            session_id: recording.session_id,
+            interviewId: recording.interviewId,
+            roomId: recording.roomId,
             content: transcript,
-            is_final: true,
+            isFinal: true,
             source: 'recording_transcription',
           },
         });
       }
 
-      // Update recording status
-      await this.prisma.interview_recordings.update({
+      await this.prisma.interviewRecording.update({
         where: { id: recordingId },
-        data: {
-          transcription_status: 'completed',
-          status: 'completed',
-        },
+        data: { transcriptionStatus: 'completed', status: 'completed' },
       });
 
       this.logger.log(`Transcription completed: ${recordingId}`);
       return { success: true, transcript };
     } catch (err) {
       this.logger.error(`Transcription failed: ${String(err)}`);
-
-      await this.prisma.interview_recordings.update({
+      await this.prisma.interviewRecording.update({
         where: { id: recordingId },
-        data: { transcription_status: 'failed' },
+        data: { transcriptionStatus: 'failed' },
       });
-
       throw err;
     }
   }
 
-  /**
-   * Get recording for download (generate signed URL)
-   */
+  /** Signed download URL */
   async getRecordingUrl(recordingId: string, expirySeconds = 3600) {
-    const recording = await this.prisma.interview_recordings.findUnique({
+    const recording = await this.prisma.interviewRecording.findUnique({
       where: { id: recordingId },
     });
+    if (!recording) throw new Error('Recording not found');
 
-    if (!recording) {
-      throw new Error('Recording not found');
-    }
+    const { data, error } = await getSupabaseServiceClient()
+      .storage.from(RECORDING_BUCKET)
+      .createSignedUrl(recording.storagePath, expirySeconds);
 
-    // Generate signed URL (valid for 1 hour)
-    const { data, error } = await this.supabase.storage
-      .from('interview-recordings')
-      .createSignedUrl(recording.storage_path, expirySeconds);
+    if (error) throw new Error(`Failed to generate URL: ${error.message}`);
 
-    if (error) {
-      throw new Error(`Failed to generate URL: ${error.message}`);
-    }
-
-    return {
-      recordingId,
-      url: data.signedUrl,
-      expiresIn: expirySeconds,
-    };
+    return { recordingId, url: data.signedUrl, expiresIn: expirySeconds };
   }
 
-  /**
-   * Delete recording (cleanup)
-   */
+  /** Delete recording + storage object */
   async deleteRecording(recordingId: string) {
-    const recording = await this.prisma.interview_recordings.findUnique({
+    const recording = await this.prisma.interviewRecording.findUnique({
       where: { id: recordingId },
     });
+    if (!recording) throw new Error('Recording not found');
 
-    if (!recording) {
-      throw new Error('Recording not found');
-    }
+    await getSupabaseServiceClient()
+      .storage.from(RECORDING_BUCKET)
+      .remove([recording.storagePath]);
 
-    // Delete from Supabase
-    await this.supabase.storage
-      .from('interview-recordings')
-      .remove([recording.storage_path]);
-
-    // Delete from database
-    await this.prisma.interview_recordings.delete({
-      where: { id: recordingId },
-    });
+    await this.prisma.interviewRecording.delete({ where: { id: recordingId } });
 
     this.logger.log(`Recording deleted: ${recordingId}`);
   }
 }
 
-/**
- * BullMQ processor for transcription jobs
- */
+/** BullMQ worker for transcription jobs */
 @Processor('transcription')
-export class TranscriptionProcessor {
+export class TranscriptionProcessor extends WorkerHost {
   private readonly logger = new Logger(TranscriptionProcessor.name);
 
-  constructor(private recordingService: RecordingProcessorService) {}
+  constructor(private recordingService: RecordingProcessorService) {
+    super();
+  }
 
-  @Process('transcribe')
-  async handleTranscription(job: any) {
+  async process(job: Job): Promise<unknown> {
     this.logger.log(`Processing transcription job: ${job.id}`);
-    const { recordingId, storagePath } = job.data;
+    const { recordingId, storagePath } = job.data as {
+      recordingId: string;
+      storagePath: string;
+    };
     return this.recordingService.processTranscription(recordingId, storagePath);
   }
 }
