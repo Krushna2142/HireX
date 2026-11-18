@@ -4,6 +4,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Post,
   Query,
   Req,
@@ -33,12 +34,7 @@ type CompleteOAuthSignupDto = {
 };
 
 type AuthenticatedRequest = Request & {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-    sessionId?: string;
-  };
+  user?: { id: string; email: string; role: string; sessionId?: string };
 };
 
 @Controller('auth')
@@ -48,7 +44,6 @@ export class AuthController {
   private cookie(req: Request, name: string): string | undefined {
     const header = req.headers.cookie;
     if (!header) return undefined;
-
     return header
       .split(';')
       .map((item) => item.trim())
@@ -66,11 +61,9 @@ export class AuthController {
     };
   }
 
-  // ── Register ─────────────────────────────────────────────────────────────
-
   @Public()
   @Post('register')
-  @Throttle({ medium: { limit: 3, ttl: 900000 } }) // 3 per 15 min
+  @Throttle({ medium: { limit: 3, ttl: 900000 } })
   async register(
     @Body() body: RegisterDto,
     @Req() req: Request,
@@ -81,15 +74,13 @@ export class AuthController {
     return this.auth.toAuthResponse(issued);
   }
 
-  // ── Login ────────────────────────────────────────────────────────────────
-
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({
-  short: { limit: 300, ttl: 60000 },     // ← was missing: this bucket was still 10/min
-  medium: { limit: 300, ttl: 900000 },
-})
+    short: { limit: 300, ttl: 60000 },
+    medium: { limit: 300, ttl: 900000 },
+  })
   async login(
     @Body() body: LoginDto,
     @Req() req: Request,
@@ -100,31 +91,26 @@ export class AuthController {
     return this.auth.toAuthResponse(issued);
   }
 
-  // ── Refresh Token ────────────────────────────────────────────────────────
-
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ long: { limit: 20, ttl: 3600000 } }) // 20 per hour
+  @Throttle({ long: { limit: 20, ttl: 3600000 } })
   async refreshToken(
     @Body() body: RefreshTokenDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const refreshToken =
-      this.cookie(req, this.auth.refreshCookieName) ??
-      body.refreshToken;
+      this.cookie(req, this.auth.refreshCookieName) ?? body.refreshToken;
+    if (!refreshToken) throw new BadRequestException('Refresh token is required');
 
-    if (!refreshToken) {
-      throw new BadRequestException('Refresh token is required');
-    }
-
-    const issued = await this.auth.refreshToken(decodeURIComponent(refreshToken), this.meta(req));
+    const issued = await this.auth.refreshToken(
+      decodeURIComponent(refreshToken),
+      this.meta(req),
+    );
     this.auth.setAuthCookies(res, issued);
     return this.auth.toAuthResponse(issued);
   }
-
-  // ── Logout ───────────────────────────────────────────────────────────────
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
@@ -143,65 +129,64 @@ export class AuthController {
     return result;
   }
 
-  // ── Current User ─────────────────────────────────────────────────────────
-
+  // Supabase (Google) user → resolve or create HireX user
   @Public()
   @Get('me')
-  async me(@Req() req: Request) {
+  async me(
+    @Req() req: Request,
+    @Headers('x-intended-role') intended?: string,
+  ) {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       throw new UnauthorizedException('Missing Supabase access token');
     }
 
     const token = authHeader.slice(7).trim();
-    const supabase = getSupabaseServiceClient();
+    const {
+      data: { user: sb },
+      error,
+    } = await getSupabaseServiceClient().auth.getUser(token);
 
-    const { data: { user: supabaseUser }, error } = await supabase.auth.getUser(token);
-    if (error || !supabaseUser?.email) {
+    if (error || !sb?.email) {
       throw new UnauthorizedException('Invalid or expired Supabase token');
     }
+    if (!sb.email_confirmed_at) {
+      throw new UnauthorizedException('Verified email required');
+    }
 
-    return this.auth.getMeByEmail(supabaseUser.email);
+    return this.auth.getOrCreateFromSupabase(sb, intended);
   }
-
-  // ── Email Verification ──────────────────────────────────────────────────
 
   @Public()
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ medium: { limit: 5, ttl: 900000 } }) // 5 per 15 min
+  @Throttle({ medium: { limit: 5, ttl: 900000 } })
   async verifyEmail(@Body() body: VerifyEmailDto) {
     return this.auth.verifyEmail(body.token);
   }
 
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ long: { limit: 3, ttl: 3600000 } }) // 3 per hour
+  @Throttle({ long: { limit: 3, ttl: 3600000 } })
   async resendVerification(@Req() req: AuthenticatedRequest) {
     return this.auth.resendVerification(req.user!.id);
   }
 
-  // ── Forgot Password ──────────────────────────────────────────────────────
-
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ medium: { limit: 3, ttl: 900000 } }) // 3 per 15 min
+  @Throttle({ medium: { limit: 3, ttl: 900000 } })
   async forgotPassword(@Body() body: ForgotPasswordDto, @Req() req: Request) {
     return this.auth.forgotPassword(body, this.meta(req));
   }
 
-  // ── Reset Password ───────────────────────────────────────────────────────
-
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ medium: { limit: 3, ttl: 900000 } }) // 3 per 15 min
+  @Throttle({ medium: { limit: 3, ttl: 900000 } })
   async resetPassword(@Body() body: ResetPasswordDto, @Req() req: Request) {
     return this.auth.resetPassword(body, this.meta(req));
   }
-
-  // ── OAuth: Google ────────────────────────────────────────────────────────
 
   @Public()
   @Get('oauth/google')
@@ -218,23 +203,20 @@ export class AuthController {
   @Get('oauth/google/callback')
   @UseGuards(AuthGuard('google'))
   async googleCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
-    const result = await this.auth.handleOAuthCallback({
-      email: req.user.email,
-      fullName: req.user.fullName,
-      provider: 'google',
-      providerId: req.user.providerId,
-      mode: req.user.mode === 'signup' ? 'signup' : 'signin',
-      requestedRole: req.user.requestedRole === 'recruiter' ? 'recruiter' : 'candidate',
-    }, this.meta(req));
-
-    if (result.kind === 'login') {
-      this.auth.setAuthCookies(res, result.issued);
-    }
-
+    const result = await this.auth.handleOAuthCallback(
+      {
+        email: req.user.email,
+        fullName: req.user.fullName,
+        provider: 'google',
+        providerId: req.user.providerId,
+        mode: req.user.mode === 'signup' ? 'signup' : 'signin',
+        requestedRole: req.user.requestedRole === 'recruiter' ? 'recruiter' : 'candidate',
+      },
+      this.meta(req),
+    );
+    if (result.kind === 'login') this.auth.setAuthCookies(res, result.issued);
     return res.redirect(result.redirectUrl);
   }
-
-  // ── OAuth: GitHub ────────────────────────────────────────────────────────
 
   @Public()
   @Get('oauth/github')
@@ -251,23 +233,20 @@ export class AuthController {
   @Get('oauth/github/callback')
   @UseGuards(AuthGuard('github'))
   async githubCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
-    const result = await this.auth.handleOAuthCallback({
-      email: req.user.email,
-      fullName: req.user.fullName,
-      provider: 'github',
-      providerId: req.user.providerId,
-      mode: req.user.mode === 'signup' ? 'signup' : 'signin',
-      requestedRole: req.user.requestedRole === 'recruiter' ? 'recruiter' : 'candidate',
-    }, this.meta(req));
-
-    if (result.kind === 'login') {
-      this.auth.setAuthCookies(res, result.issued);
-    }
-
+    const result = await this.auth.handleOAuthCallback(
+      {
+        email: req.user.email,
+        fullName: req.user.fullName,
+        provider: 'github',
+        providerId: req.user.providerId,
+        mode: req.user.mode === 'signup' ? 'signup' : 'signin',
+        requestedRole: req.user.requestedRole === 'recruiter' ? 'recruiter' : 'candidate',
+      },
+      this.meta(req),
+    );
+    if (result.kind === 'login') this.auth.setAuthCookies(res, result.issued);
     return res.redirect(result.redirectUrl);
   }
-
-  // ── OAuth: Complete Signup ───────────────────────────────────────────────
 
   @Public()
   @Post('oauth/complete-signup')
@@ -277,13 +256,10 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    if (!body?.onboardingToken) {
-      throw new BadRequestException('onboardingToken is required');
-    }
+    if (!body?.onboardingToken) throw new BadRequestException('onboardingToken is required');
     if (body.role !== 'candidate' && body.role !== 'recruiter') {
       throw new BadRequestException('role must be candidate or recruiter');
     }
-
     const issued = await this.auth.completeOAuthSignup(
       body.onboardingToken,
       body.role,

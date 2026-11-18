@@ -24,7 +24,16 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
-export type AppRole = 'candidate' | 'recruiter' | 'admin' | 'super_admin';
+export type AppRole =
+  | 'candidate'
+  | 'recruiter'
+  | 'admin'
+  | 'super_admin'
+  | 'college_admin'
+  | 'tpo'
+  | 'placement_coordinator'
+  | 'interviewer';
+
 export type PublicSignupRole = 'candidate' | 'recruiter';
 export type OAuthProvider = 'google' | 'github';
 
@@ -181,28 +190,30 @@ export class AuthService {
   }
 
   private toAppRole(role: UserRole): AppRole {
-    switch (role) {
-      case UserRole.RECRUITER:
-        return 'recruiter';
-      case UserRole.ADMIN:
-        return 'admin';
-      case UserRole.SUPER_ADMIN:
-        return 'super_admin';
-      case UserRole.JOBSEEKER:
-      default:
-        return 'candidate';
-    }
+  switch (role) {
+    case UserRole.RECRUITER: return 'recruiter';
+    case UserRole.ADMIN: return 'admin';
+    case UserRole.SUPER_ADMIN: return 'super_admin';
+    case UserRole.COLLEGE_ADMIN: return 'college_admin';
+    case UserRole.TPO: return 'tpo';
+    case UserRole.PLACEMENT_COORDINATOR: return 'placement_coordinator';
+    case UserRole.INTERVIEWER: return 'interviewer';
+    case UserRole.JOBSEEKER:
+    default: return 'candidate';
   }
-
+}
   private toOAuthProvider(provider: OAuthProvider): AuthProvider {
     return provider === 'github' ? AuthProvider.GITHUB : AuthProvider.GOOGLE;
   }
 
-  private roleRedirectPath(role: AppRole): string {
-    return role === 'admin' || role === 'super_admin'
-      ? '/admin/dashboard'
-      : '/dashboard';
+ private roleRedirectPath(role: AppRole): string {
+  if (role === 'admin' || role === 'super_admin') return '/admin/dashboard';
+  if (role === 'college_admin' || role === 'tpo' || role === 'placement_coordinator') {
+    return '/placement';
   }
+  if (role === 'interviewer') return '/interviewer';
+  return '/dashboard';
+}
 
   private toSafeUser(
     user: Pick<
@@ -892,7 +903,59 @@ export class AuthService {
 
     return this.toSafeUser(user);
   }
+async getOrCreateFromSupabase(
+  sb: { id: string; email?: string; user_metadata?: Record<string, any> },
+  intended?: string,
+): Promise<SafeUser> {
+  const email = this.normalizeEmail(sb.email!);
+  const existing = await this.findUserByEmail(email);
 
+  if (existing) {
+    if (!existing.isActive || existing.isBlocked || existing.deletedAt) {
+      throw new UnauthorizedException('Account is not active');
+    }
+    return this.toSafeUser(existing);
+  }
+
+  // placement / college / interviewer roles admin-provisioned → never self-assign
+  const role = intended === 'recruiter' ? UserRole.RECRUITER : UserRole.JOBSEEKER;
+  const fullName =
+    sb.user_metadata?.full_name ?? sb.user_metadata?.name ?? email.split('@')[0];
+
+  try {
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        fullName,
+        role,
+        emailVerified: true,
+        emailVerifiedAt: new Date(),
+        authAccounts: {
+          create: {
+            provider: AuthProvider.GOOGLE,
+            providerAccountId: sb.id,
+            providerEmail: email,
+            providerEmailVerified: true,
+            lastUsedAt: new Date(),
+          },
+        },
+        ...(role === UserRole.RECRUITER
+          ? { recruiterProfile: { create: {} } }
+          : { jobseekerProfile: { create: {} } }),
+      },
+    });
+    return this.toSafeUser(user);
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      const again = await this.findUserByEmail(email); // race: parallel /me calls
+      if (again) return this.toSafeUser(again);
+    }
+    throw error;
+  }
+}
   // ── Email Verification ──────────────────────────────────────────────────
 
   async verifyEmail(token: string) {
