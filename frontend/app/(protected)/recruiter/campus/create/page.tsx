@@ -8,6 +8,7 @@ import {
   C, CampusPage, Field, Err, panelStyle, primaryBtn, secondaryBtn, smallBtn,
   inputStyle, labelStyle, num,
 } from '@/app/_components/campus/kit';
+import SkillPicker from '@/app/_components/campus/SkillPicker';
 
 type College = { id: string; name: string; city?: string | null };
 type CustomRule = { field: string; operator: string; value: string; label: string };
@@ -25,10 +26,11 @@ export default function CreateDrivePage() {
   const [branches, setBranches] = useState<CampusBranch[]>([]);
 
   const [form, setForm] = useState({
-    title: '', jobRole: '', description: '', requiredSkills: '', employmentType: 'full_time',
+    title: '', jobRole: '', description: '', employmentType: 'full_time',
     workMode: 'onsite', ctcMin: '', ctcMax: '', location: '', vacancies: '1',
     applicationOpenAt: '', applicationCloseAt: '', driveDate: '', requiredDocuments: '',
   });
+  const [skills, setSkills] = useState<string[]>([]);
   const [rounds, setRounds] = useState<Array<{ roundType: string; durationMins: number }>>([{ roundType: 'technical', durationMins: 45 }]);
   const [colSel, setColSel] = useState({ all: false, ids: [] as string[] });
   const [elig, setElig] = useState({
@@ -57,6 +59,7 @@ export default function CreateDrivePage() {
       if (!form.title.trim()) return 'Drive title is required.';
       if (!form.jobRole.trim()) return 'Job role is required.';
       if (form.description.trim().length < 20) return 'Description must be at least 20 characters.';
+      if (skills.length === 0) return 'Select at least one required skill.';
     }
     if (step === 1 && !colSel.all && colSel.ids.length === 0) return 'Select at least one college or choose "All colleges".';
     if (step === 2 && !elig.allowAllBranches && elig.branchIds.length === 0) return 'Select branches or enable "All branches".';
@@ -73,7 +76,6 @@ export default function CreateDrivePage() {
   const submit = useCallback(async () => {
     setBusy(true); setError('');
     try {
-      const skills = form.requiredSkills.split(',').map((s) => s.trim()).filter(Boolean);
       const drive = (await campusApi.createDrive({
         title: form.title.trim(), jobRole: form.jobRole.trim(), description: form.description.trim(),
         requiredSkills: skills, employmentType: form.employmentType, workMode: form.workMode,
@@ -126,7 +128,7 @@ export default function CreateDrivePage() {
       setError(e?.response?.data?.message ?? e?.message ?? 'Failed to create drive.');
       setBusy(false);
     }
-  }, [form, rounds, colSel, elig, criteria, publishNow, router]);
+  }, [form, skills, rounds, colSel, elig, criteria, publishNow, router]);
 
   return (
     <CampusPage title="Create Campus Drive" subtitle="Configure the role, college visibility, eligibility rules and per-branch criteria. Drafts are never published automatically.">
@@ -150,7 +152,7 @@ export default function CreateDrivePage() {
             <Field label="Job role *"><input value={form.jobRole} onChange={(e) => set('jobRole', e.target.value)} placeholder="Software Engineer" style={inputStyle} /></Field>
           </div>
           <Field label="Job description *"><textarea rows={6} value={form.description} onChange={(e) => set('description', e.target.value)} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
-          <Field label="Required skills (comma separated)"><input value={form.requiredSkills} onChange={(e) => set('requiredSkills', e.target.value)} placeholder="java, sql, spring boot" style={inputStyle} /></Field>
+          <SkillPicker value={skills} onChange={setSkills} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 14 }}>
             <Field label="Employment type"><select value={form.employmentType} onChange={(e) => set('employmentType', e.target.value)} style={inputStyle}><option value="full_time">Full-time</option><option value="internship">Internship</option><option value="contract">Contract</option></select></Field>
             <Field label="Work mode"><select value={form.workMode} onChange={(e) => set('workMode', e.target.value)} style={inputStyle}><option value="onsite">Onsite</option><option value="hybrid">Hybrid</option><option value="remote">Remote</option></select></Field>

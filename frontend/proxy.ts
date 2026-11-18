@@ -20,7 +20,7 @@ const PROTECTED = [
   '/saved-jobs',
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isProtected = PROTECTED.some((path) => pathname.startsWith(path));
   if (!isProtected) return NextResponse.next();
