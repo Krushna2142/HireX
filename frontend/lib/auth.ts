@@ -30,7 +30,8 @@ export type UserRole =
   | 'PLACEMENT_COORDINATOR'
   | 'INTERVIEWER';
 
-export type PublicAuthRole = 'candidate' | 'recruiter';
+/** Roles a visitor may self-register as. `interviewer` is invite-only. */
+export type PublicAuthRole = 'candidate' | 'recruiter' | 'placement';
 
 export interface User {
   id: string;
